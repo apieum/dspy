@@ -197,9 +197,9 @@ class TestGEPABehavior:
         assert gepa.minibatch_size == 3
         assert gepa.pareto_ratio == 0.67
         assert gepa.max_candidates == 50
-        assert isinstance(gepa.candidate_selector, ParetoCandidateSelector)
-        assert isinstance(gepa.candidate_generator, CompositeGenerator)
-        assert isinstance(gepa.feedback_collector, EnhancedFeedbackCollector)
+        assert gepa.candidate_selector.__class__.__name__ == 'ParetoCandidateSelector'
+        assert gepa.candidate_generator.__class__.__name__ == 'CompositeGenerator'
+        assert gepa.feedback_collector.__class__.__name__ == 'EnhancedFeedbackCollector'
         
     def test_gepa_initialization_with_custom_components(self):
         """GEPA should accept custom components via dependency injection.""" 
