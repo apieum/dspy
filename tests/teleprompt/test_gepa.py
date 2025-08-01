@@ -15,6 +15,8 @@ from dspy.teleprompt.gepa import (
     BudgetTracker, 
     ScoreMatrix,
     FeedbackResult,
+    EvaluationTrace,
+    ModuleFeedback,
     ParetoCandidateSelector,
     ReflectivePromptMutator,
     EnhancedFeedbackCollector,
@@ -120,17 +122,25 @@ class TestDataStructures:
         assert scores.compute_average_score(2) == 0.0  # No scores
         
     def test_feedback_result_structure(self):
-        """FeedbackResult should contain traces, diagnostics, and scores."""
+        """FeedbackResult should contain enhanced feedback with μf function support."""
         feedback = FeedbackResult(
             traces=[[], []],
             diagnostics=["Good", "Needs improvement"],
-            scores=[0.8, 0.3]
+            scores=[0.8, 0.3],
+            evaluation_traces=[],  # Enhanced: Rich evaluation traces
+            module_feedback=[],    # Enhanced: Module-level feedback
+            feedback_text=[]       # Enhanced: Textual feedback
         )
         
         assert len(feedback.traces) == 2
         assert len(feedback.diagnostics) == 2
         assert len(feedback.scores) == 2
         assert feedback.scores[0] == 0.8
+        
+        # Test enhanced fields
+        assert hasattr(feedback, 'evaluation_traces')
+        assert hasattr(feedback, 'module_feedback')
+        assert hasattr(feedback, 'feedback_text')
 
 
 class TestGEPABehavior:
@@ -221,7 +231,7 @@ class TestComponentInterfaces:
         """PromptMutator should mutate signatures based on feedback."""
         mutator = ReflectivePromptMutator()
         signature = make_signature("question -> answer")
-        feedback = FeedbackResult(traces=[], diagnostics=[], scores=[])
+        feedback = FeedbackResult(traces=[], diagnostics=[], scores=[], evaluation_traces=[], module_feedback=[], feedback_text=[])
         
         # Should return a signature (might be same or different)
         result = mutator.mutate_signature(signature, feedback)
@@ -240,6 +250,113 @@ class TestComponentInterfaces:
         assert result.traces == []
         assert result.diagnostics == []
         assert result.scores == []
+        
+        # Test enhanced fields
+        assert result.evaluation_traces == []
+        assert result.module_feedback == []
+        assert result.feedback_text == []
+
+
+class TestEnhancedFeedbackFunction:
+    """Test enhanced feedback function μf implementation."""
+    
+    def test_evaluation_trace_structure(self):
+        """EvaluationTrace should contain rich evaluation information."""
+        trace = EvaluationTrace(
+            execution_steps=["Step 1: Initialize", "Step 2: Process"],
+            compilation_errors=[],
+            intermediate_outputs=[{"step1": "result"}],
+            module_outputs={0: "output1", 1: "output2"},
+            reasoning_chains=["First, analyze...", "Then, conclude..."],
+            tool_calls=[{"tool": "search", "query": "test"}],
+            error_messages=[],
+            performance_metrics={"execution_time": 0.5, "score": 0.8}
+        )
+        
+        assert len(trace.execution_steps) == 2
+        assert len(trace.intermediate_outputs) == 1
+        assert len(trace.module_outputs) == 2
+        assert len(trace.reasoning_chains) == 2
+        assert len(trace.tool_calls) == 1
+        assert trace.performance_metrics["score"] == 0.8
+    
+    def test_module_feedback_structure(self):
+        """ModuleFeedback should contain per-module performance information."""
+        feedback = ModuleFeedback(
+            module_id=0,
+            module_name="QueryModule",
+            input_data="What is the capital?",
+            output_data="Paris",
+            execution_time=0.2,
+            success=True,
+            error_message=None,
+            intermediate_reasoning=["Analyzing query...", "Retrieving answer..."],
+            confidence_score=0.9
+        )
+        
+        assert feedback.module_id == 0
+        assert feedback.module_name == "QueryModule"
+        assert feedback.success is True
+        assert feedback.confidence_score == 0.9
+        assert len(feedback.intermediate_reasoning) == 2
+    
+    def test_enhanced_feedback_collector_with_examples(self, simple_trainset, dummy_lm):
+        """Enhanced feedback collector should provide rich evaluation traces."""
+        with dspy.context(lm=dummy_lm):
+            collector = EnhancedFeedbackCollector(
+                collect_module_feedback=True,
+                collect_evaluation_traces=True
+            )
+            program = SimpleQA()
+            examples = simple_trainset[:2]  # Use first 2 examples
+            
+            result = collector.collect_feedback(program, examples, simple_metric)
+            
+            # Test basic fields
+            assert isinstance(result, FeedbackResult)
+            assert len(result.traces) == 2
+            assert len(result.diagnostics) == 2
+            assert len(result.scores) == 2
+            
+            # Test enhanced fields
+            assert len(result.evaluation_traces) == 2
+            assert len(result.module_feedback) == 2
+            assert len(result.feedback_text) == 2
+            
+            # Test evaluation trace content
+            for eval_trace in result.evaluation_traces:
+                assert isinstance(eval_trace, EvaluationTrace)
+                assert hasattr(eval_trace, 'execution_steps')
+                assert hasattr(eval_trace, 'performance_metrics')
+            
+            # Test feedback text content
+            for feedback_text in result.feedback_text:
+                assert isinstance(feedback_text, str)
+                assert len(feedback_text) > 0
+    
+    def test_domain_specific_feedback(self):
+        """Test domain-specific feedback handling."""
+        collector = EnhancedFeedbackCollector()
+        
+        # Register a custom domain handler
+        def code_feedback_handler(example, prediction, trace):
+            return {
+                'compilation_status': 'success',
+                'code_quality': 'high',
+                'performance': 'optimized'
+            }
+        
+        collector.register_domain_handler('code', code_feedback_handler)
+        assert 'code' in collector.domain_handlers
+        
+        # Test domain detection
+        code_example = Example(
+            question="Write a Python function to sort a list",
+            code="def sort_list(lst): return sorted(lst)"
+        ).with_inputs("question")
+        
+        domain = collector._detect_domain(code_example)
+        assert domain == 'code'
             
     def test_module_selector_interface(self):
         """ModuleSelector should select modules from programs."""
