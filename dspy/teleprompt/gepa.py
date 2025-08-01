@@ -24,6 +24,21 @@ class FeedbackResult:
     traces: List[List]  # DSPy traces: List of (predictor, inputs, outputs) tuples
     diagnostics: List[str]  # Textual diagnostic feedback
     scores: List[float]  # Scalar scores for each example
+
+
+@dataclass
+class CandidateLineage:
+    """Track ancestry and evolutionary history of candidates."""
+    candidate_id: int
+    parent_id: Optional[int] = None
+    generation: int = 0
+    mutation_type: str = "initial"
+    creation_iteration: int = 0
+    fitness_history: List[float] = None
+    
+    def __post_init__(self):
+        if self.fitness_history is None:
+            self.fitness_history = []
     
     
 @dataclass 
@@ -566,6 +581,10 @@ class GEPA(FinetuneTeleprompter):
         self.feedback_collector = feedback_collector or EnhancedFeedbackCollector()
         self.module_selector = module_selector or RoundRobinModuleSelector()
         
+        # Ancestry tracking
+        self.lineages: Dict[int, CandidateLineage] = {}  # candidate_id -> lineage info
+        self.next_candidate_id = 0
+        
     def compile(
         self, 
         student: Module, 
@@ -606,6 +625,9 @@ class GEPA(FinetuneTeleprompter):
         scores = ScoreMatrix()
         budget = BudgetTracker(limit=kwargs.get('budget', len(trainset) * 10))
         
+        # Initialize ancestry tracking for first candidate
+        self._register_candidate(program, parent_id=None, mutation_type="initial", iteration=0)
+        
         # 5. Initial Pareto evaluation (counts toward budget - these are expensive LLM calls)
         logger.info("Performing initial Pareto evaluation...")
         self._evaluate_candidates_on_pareto(candidates, pareto_data, scores, budget)
@@ -625,12 +647,27 @@ class GEPA(FinetuneTeleprompter):
                     candidates[candidate_idx], module_idx, feedback, budget
                 )
                 
-                # Evaluate and potentially promote new candidate
+                # Evaluate and potentially promote new candidate  
                 if self._should_promote_candidate(new_candidate, candidates[candidate_idx], feedback_data, budget):
                     candidates.append(new_candidate)
-                    logger.info(f"Promoted new candidate (total: {len(candidates)})")
+                    # Register new candidate with ancestry info
+                    parent_lineage = self.lineages[candidate_idx]
+                    self._register_candidate(
+                        new_candidate, 
+                        parent_id=candidate_idx, 
+                        mutation_type="reflective_mutation",
+                        iteration=iteration
+                    )
+                    logger.info(f"Promoted new candidate (total: {len(candidates)}, generation: {parent_lineage.generation + 1})")
                     # Evaluate only the NEW candidate on Pareto set (costs budget)
                     self._evaluate_candidates_on_pareto([new_candidate], pareto_data, scores, budget)
+                    
+                    # Optionally perform merge operation
+                    if self.merge_enabled and iteration % self.merge_frequency == 0 and len(candidates) >= 3:
+                        merge_candidate = self._attempt_merge(candidates, scores, iteration)
+                        if merge_candidate:
+                            candidates.append(merge_candidate)
+                            self._evaluate_candidates_on_pareto([merge_candidate], pareto_data, scores, budget)
                 
             except Exception as e:
                 logger.error(f"Error in iteration {iteration}: {e}")
@@ -888,5 +925,152 @@ class GEPA(FinetuneTeleprompter):
                 best_score = avg_score
                 best_candidate = candidate
                 
-        logger.info(f"Selected best candidate with average score: {best_score:.3f}")
+        # Log ancestry information for best candidate
+        best_idx = candidates.index(best_candidate)
+        best_lineage = self.lineages.get(best_idx)
+        if best_lineage:
+            logger.info(f"Selected best candidate: generation {best_lineage.generation}, mutation_type: {best_lineage.mutation_type}")
+            logger.info(f"Best candidate average score: {best_score:.3f}")
+        else:
+            logger.info(f"Selected best candidate with average score: {best_score:.3f}")
         return best_candidate
+    
+    def _register_candidate(self, candidate: Module, parent_id: Optional[int], mutation_type: str, iteration: int):
+        """Register a new candidate with ancestry tracking."""
+        candidate_id = self.next_candidate_id
+        self.next_candidate_id += 1
+        
+        # Determine generation
+        generation = 0
+        if parent_id is not None and parent_id in self.lineages:
+            generation = self.lineages[parent_id].generation + 1
+            
+        # Create lineage record
+        lineage = CandidateLineage(
+            candidate_id=candidate_id,
+            parent_id=parent_id,
+            generation=generation,
+            mutation_type=mutation_type,
+            creation_iteration=iteration
+        )
+        
+        self.lineages[candidate_id] = lineage
+        
+        # Store candidate_id in the module for tracking
+        candidate._gepa_id = candidate_id
+        
+        logger.debug(f"Registered candidate {candidate_id}: generation {generation}, parent {parent_id}, type {mutation_type}")
+    
+    def _attempt_merge(self, candidates: List[Module], scores: ScoreMatrix, iteration: int) -> Optional[Module]:
+        """Attempt to create a merge candidate from different lineages.
+        
+        This implements the "intelligent crossover" mentioned in the paper
+        by combining complementary lessons from different optimization lineages.
+        """
+        if len(candidates) < 2:
+            return None
+            
+        try:
+            # Find candidates from different lineages with complementary strengths
+            candidate_lineages = [(i, self.lineages.get(i)) for i in range(len(candidates))]
+            
+            # Group by root ancestor to find different lineages
+            lineage_groups = defaultdict(list)
+            for idx, lineage in candidate_lineages:
+                if lineage:
+                    root_ancestor = self._find_root_ancestor(lineage)
+                    lineage_groups[root_ancestor].append((idx, lineage))
+                else:
+                    lineage_groups[0].append((idx, None))  # Original candidate
+                    
+            # Select two candidates from different lineages with good performance
+            if len(lineage_groups) < 2:
+                return None
+                
+            best_from_lineages = []
+            for root, group in lineage_groups.items():
+                # Find best candidate from this lineage
+                best_idx = None
+                best_score = -float('inf')
+                
+                for idx, lineage in group:
+                    avg_score = scores.compute_average_score(idx)
+                    if avg_score > best_score:
+                        best_score = avg_score
+                        best_idx = idx
+                        
+                if best_idx is not None:
+                    best_from_lineages.append((best_idx, best_score))
+                    
+            if len(best_from_lineages) < 2:
+                return None
+                
+            # Sort by score and take top 2
+            best_from_lineages.sort(key=lambda x: x[1], reverse=True)
+            parent1_idx, parent2_idx = best_from_lineages[0][0], best_from_lineages[1][0]
+            
+            # Create merge candidate
+            merged_candidate = self._merge_candidates(candidates[parent1_idx], candidates[parent2_idx])
+            
+            if merged_candidate:
+                # Register merged candidate
+                self._register_candidate(
+                    merged_candidate,
+                    parent_id=parent1_idx,  # Primary parent
+                    mutation_type=f"merge_{parent1_idx}_{parent2_idx}",
+                    iteration=iteration
+                )
+                logger.info(f"Created merge candidate from lineages {parent1_idx} and {parent2_idx}")
+                return merged_candidate
+                
+        except Exception as e:
+            logger.warning(f"Merge attempt failed: {e}")
+            
+        return None
+    
+    def _find_root_ancestor(self, lineage: CandidateLineage) -> int:
+        """Find the root ancestor of a lineage."""
+        current = lineage
+        while current.parent_id is not None and current.parent_id in self.lineages:
+            current = self.lineages[current.parent_id]
+        return current.candidate_id
+    
+    def _merge_candidates(self, candidate1: Module, candidate2: Module) -> Optional[Module]:
+        """Merge two candidates by combining their best instructions.
+        
+        This is a simplified merge strategy - could be enhanced with more sophisticated
+        instruction combination logic.
+        """
+        try:
+            # Create base candidate from candidate1
+            merged_candidate = candidate1.deepcopy()
+            
+            # Extract instructions from both candidates  
+            predictors1 = candidate1.predictors()
+            predictors2 = candidate2.predictors()
+            
+            if len(predictors1) != len(predictors2):
+                return None  # Can't merge candidates with different structures
+                
+            # Simple merge strategy: alternate instructions or combine them
+            merged_predictors = merged_candidate.predictors()
+            
+            for i, (pred1, pred2, merged_pred) in enumerate(zip(predictors1, predictors2, merged_predictors)):
+                sig1 = get_signature(pred1)
+                sig2 = get_signature(pred2)
+                
+                # Combine instructions (simple concatenation for now)
+                inst1 = sig1.instructions or ""
+                inst2 = sig2.instructions or ""
+                
+                if inst1 and inst2 and inst1 != inst2:
+                    # Create combined instruction
+                    combined_instruction = f"{inst1} Additionally, {inst2.lower()}"
+                    merged_sig = get_signature(merged_pred)
+                    merged_sig.instructions = combined_instruction
+                    
+            return merged_candidate
+            
+        except Exception as e:
+            logger.warning(f"Candidate merge failed: {e}")
+            return None
