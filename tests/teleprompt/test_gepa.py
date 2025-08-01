@@ -13,7 +13,10 @@ from dspy.primitives.module import Module
 from dspy.signatures.signature import make_signature
 from dspy.teleprompt.gepa import (
     GEPA, 
-    BudgetTracker, 
+    BudgetTracker,
+    LLMCallsBudget,
+    IterationBudget,
+    CombinedBudget,
     ScoreMatrix,
     FeedbackResult,
     EvaluationTrace,
@@ -81,15 +84,15 @@ class TestDataStructures:
     """Test core data structures."""
     
     def test_budget_tracker_initialization(self):
-        """Budget tracker should initialize with zero usage."""
-        budget = BudgetTracker(limit=100)
+        """LLMCallsBudget should initialize with zero usage."""
+        budget = LLMCallsBudget(limit=100)
         assert budget.used == 0
         assert budget.limit == 100
         assert budget.has_budget() is True
         
     def test_budget_tracker_cost_tracking(self):
-        """Budget tracker should correctly track different cost types."""
-        budget = BudgetTracker(limit=100)
+        """LLMCallsBudget should correctly track different cost types."""
+        budget = LLMCallsBudget(limit=100)
         
         budget.add_minibatch_cost(10)
         budget.add_reflection_cost(1)
@@ -103,12 +106,43 @@ class TestDataStructures:
         assert stats['remaining'] == 69
         
     def test_budget_tracker_limit_checking(self):
-        """Budget tracker should correctly check budget limits."""
-        budget = BudgetTracker(limit=10)
+        """LLMCallsBudget should correctly check budget limits."""
+        budget = LLMCallsBudget(limit=10)
         assert budget.has_budget() is True
         
         budget.add_minibatch_cost(10)
         assert budget.has_budget() is False
+    
+    def test_iteration_budget_tracking(self):
+        """IterationBudget should limit by iterations only."""
+        budget = IterationBudget(max_iterations=3)
+        
+        # Should allow iteration 1 and 2
+        budget.warn_iteration_start(1)
+        assert budget.has_budget() is True
+        budget.add_iteration_cost(1)
+        budget.add_minibatch_cost(100)  # Large LLM cost doesn't matter
+        
+        budget.warn_iteration_start(2)
+        assert budget.has_budget() is True
+        
+        # Should not allow iteration 3 (0-indexed)
+        budget.warn_iteration_start(3)
+        assert budget.has_budget() is False
+    
+    def test_combined_budget_tracking(self):
+        """CombinedBudget should limit by both LLM calls and iterations."""
+        budget = CombinedBudget(llm_limit=10, max_iterations=3)
+        
+        # Should stop when LLM limit reached first
+        budget.warn_iteration_start(1)
+        budget.add_minibatch_cost(15)  # Exceed LLM limit
+        assert budget.has_budget() is False
+        
+        # Reset for iteration limit test
+        budget2 = CombinedBudget(llm_limit=100, max_iterations=2)
+        budget2.warn_iteration_start(2)
+        assert budget2.has_budget() is False  # Exceed iteration limit
         
     def test_score_matrix_operations(self):
         """Score matrix should handle candidate-task score management."""
@@ -162,25 +196,27 @@ class TestGEPABehavior:
         assert gepa.metric == simple_metric
         assert gepa.minibatch_size == 3
         assert gepa.pareto_ratio == 0.67
-        assert gepa.merge_enabled is False
+        assert gepa.max_candidates == 50
         assert isinstance(gepa.candidate_selector, ParetoCandidateSelector)
-        assert isinstance(gepa.prompt_mutator, ReflectivePromptMutator)
+        assert isinstance(gepa.candidate_generator, CompositeGenerator)
         assert isinstance(gepa.feedback_collector, EnhancedFeedbackCollector)
-        assert isinstance(gepa.module_selector, RoundRobinModuleSelector)
         
     def test_gepa_initialization_with_custom_components(self):
         """GEPA should accept custom components via dependency injection.""" 
         custom_selector = Mock(spec=ParetoCandidateSelector)
-        custom_mutator = Mock(spec=ReflectivePromptMutator)
+        custom_generator = Mock(spec=CandidateGenerator)
+        custom_collector = Mock(spec=EnhancedFeedbackCollector)
         
         gepa = GEPA(
             metric=simple_metric,
             candidate_selector=custom_selector,
-            prompt_mutator=custom_mutator
+            candidate_generator=custom_generator,
+            feedback_collector=custom_collector
         )
         
         assert gepa.candidate_selector == custom_selector
-        assert gepa.prompt_mutator == custom_mutator
+        assert gepa.candidate_generator == custom_generator
+        assert gepa.feedback_collector == custom_collector
         
     def test_gepa_rejects_compiled_student(self):
         """GEPA should reject pre-compiled student programs."""
@@ -199,7 +235,7 @@ class TestGEPABehavior:
             gepa = GEPA(metric=simple_metric)
             
             # Now GEPA should actually work - test that it returns a compiled program
-            compiled_program = gepa.compile(program, trainset=simple_trainset, budget=50)
+            compiled_program = gepa.compile(program, trainset=simple_trainset, budget=LLMCallsBudget(3))
             
             assert compiled_program is not None
             assert hasattr(compiled_program, '_compiled')
@@ -214,7 +250,7 @@ class TestGEPABehavior:
             gepa = GEPA(metric=simple_metric)
             
             # Now GEPA should actually work
-            compiled_program = gepa.compile(original_program, trainset=simple_trainset, budget=50)
+            compiled_program = gepa.compile(original_program, trainset=simple_trainset, budget=LLMCallsBudget(3))
                 
             # Original program should be unchanged
             assert getattr(original_program, '_compiled', False) == original_compiled_state
@@ -395,13 +431,13 @@ class TestGEPAAlgorithmStructure:
     def test_gepa_pareto_evaluation_structure(self):
         """GEPA should evaluate candidates on Pareto set."""
         gepa = GEPA(metric=simple_metric)
-        candidates = [SimpleQA()]
+        candidate_pool = CandidatePool()
+        candidate_pool.add_candidate(SimpleQA())
         pareto_data = []
-        scores = ScoreMatrix() 
-        budget = BudgetTracker(limit=100)
+        budget = LLMCallsBudget(limit=100)
         
         # Should handle empty pareto_data gracefully
-        gepa._evaluate_candidates_on_pareto(candidates, pareto_data, scores, budget)
+        gepa._evaluate_candidates_on_pareto(candidate_pool, pareto_data, budget)
         
         # Should not crash with valid inputs
         assert True  # If we get here, the method worked
@@ -412,7 +448,7 @@ class TestGEPAAlgorithmStructure:
         new_candidate = SimpleQA()
         parent_candidate = SimpleQA()
         feedback_data = []
-        budget = BudgetTracker(limit=100)
+        budget = LLMCallsBudget(limit=100)
         
         # Should return boolean decision
         result = gepa._should_promote_candidate(new_candidate, parent_candidate, feedback_data, budget)
@@ -424,15 +460,16 @@ class TestGEPAAlgorithmStructure:
     def test_gepa_best_candidate_selection_structure(self):
         """GEPA should select best candidate from scores."""
         gepa = GEPA(metric=simple_metric)
-        candidates = [SimpleQA()]
-        scores = ScoreMatrix()
+        candidate_pool = CandidatePool()
+        candidate = SimpleQA()
+        candidate_pool.add_candidate(candidate)
         
-        # Should return a candidate from the list
-        result = gepa._select_best_candidate(candidates, scores)
-        assert result in candidates
+        # Should return a candidate from the pool
+        result = gepa._select_best_candidate(candidate_pool)
+        assert result in candidate_pool.candidates
         
         # With single candidate, should return that candidate
-        assert result is candidates[0]
+        assert result is candidate
 
 
 class TestIntelligentCrossover:

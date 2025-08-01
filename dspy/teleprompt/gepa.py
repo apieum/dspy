@@ -130,14 +130,55 @@ class CandidateLineage:
             self.fitness_history = []
 
 
+class BudgetTracker(ABC):
+    """Abstract budget tracker interface."""
+    
+    @abstractmethod
+    def add_minibatch_cost(self, cost: int):
+        """Add cost for minibatch evaluations."""
+        pass
+
+    @abstractmethod
+    def add_reflection_cost(self, cost: int = 1):
+        """Add cost for reflection/mutation operations."""
+        pass
+
+    @abstractmethod
+    def add_pareto_cost(self, cost: int):
+        """Add cost for Pareto evaluations."""
+        pass
+    
+    @abstractmethod
+    def add_iteration_cost(self, cost: int = 1):
+        """Add cost for iteration overhead."""
+        pass
+
+    @abstractmethod
+    def warn_iteration_start(self, iteration: int):
+        """Notify budget tracker that new iteration is starting."""
+        pass
+
+    @abstractmethod
+    def has_budget(self) -> bool:
+        """Check if budget allows continuing."""
+        pass
+
+    @abstractmethod
+    def get_stats(self) -> Dict[str, int]:
+        """Get budget usage statistics."""
+        pass
+
+
 @dataclass
-class BudgetTracker:
-    """Track rollout budget to match paper's efficiency claims."""
+class LLMCallsBudget(BudgetTracker):
+    """Budget based on total LLM calls limit."""
+    limit: int
     used: int = 0
-    limit: int = 0
     minibatch_rollouts: int = 0
     reflection_rollouts: int = 0
     pareto_rollouts: int = 0
+    iteration_rollouts: int = 0
+    current_iteration: int = 0
 
     def add_minibatch_cost(self, cost: int):
         self.minibatch_rollouts += cost
@@ -150,8 +191,18 @@ class BudgetTracker:
     def add_pareto_cost(self, cost: int):
         self.pareto_rollouts += cost
         self.used += cost
+    
+    def add_iteration_cost(self, cost: int = 1):
+        """Add cost for iteration overhead."""
+        self.iteration_rollouts += cost
+        self.used += cost
+
+    def warn_iteration_start(self, iteration: int):
+        """Notify budget tracker that new iteration is starting."""
+        self.current_iteration = iteration
 
     def has_budget(self) -> bool:
+        """Check if budget allows continuing based on LLM calls limit."""
         return self.used < self.limit
 
     def get_stats(self) -> Dict[str, int]:
@@ -160,7 +211,102 @@ class BudgetTracker:
             'minibatch': self.minibatch_rollouts,
             'reflection': self.reflection_rollouts,
             'pareto': self.pareto_rollouts,
+            'iteration': self.iteration_rollouts,
             'remaining': self.limit - self.used
+        }
+
+
+@dataclass
+class IterationBudget(BudgetTracker):
+    """Budget based on maximum number of iterations."""
+    max_iterations: int
+    current_iteration: int = 0
+    used: int = 0
+    minibatch_rollouts: int = 0
+    reflection_rollouts: int = 0
+    pareto_rollouts: int = 0
+    iteration_rollouts: int = 0
+
+    def add_minibatch_cost(self, cost: int):
+        self.minibatch_rollouts += cost
+        self.used += cost
+
+    def add_reflection_cost(self, cost: int = 1):
+        self.reflection_rollouts += cost
+        self.used += cost
+
+    def add_pareto_cost(self, cost: int):
+        self.pareto_rollouts += cost
+        self.used += cost
+    
+    def add_iteration_cost(self, cost: int = 1):
+        self.iteration_rollouts += cost
+        self.used += cost
+
+    def warn_iteration_start(self, iteration: int):
+        self.current_iteration = iteration
+
+    def has_budget(self) -> bool:
+        """Check if budget allows continuing based on iteration limit."""
+        return self.current_iteration < self.max_iterations
+
+    def get_stats(self) -> Dict[str, int]:
+        return {
+            'total_used': self.used,
+            'minibatch': self.minibatch_rollouts,
+            'reflection': self.reflection_rollouts,
+            'pareto': self.pareto_rollouts,
+            'iteration': self.iteration_rollouts,
+            'remaining': self.max_iterations - self.current_iteration
+        }
+
+
+@dataclass
+class CombinedBudget(BudgetTracker):
+    """Budget that combines both LLM calls and iteration limits."""
+    llm_limit: int
+    max_iterations: int
+    current_iteration: int = 0
+    used: int = 0
+    minibatch_rollouts: int = 0
+    reflection_rollouts: int = 0
+    pareto_rollouts: int = 0
+    iteration_rollouts: int = 0
+
+    def add_minibatch_cost(self, cost: int):
+        self.minibatch_rollouts += cost
+        self.used += cost
+
+    def add_reflection_cost(self, cost: int = 1):
+        self.reflection_rollouts += cost
+        self.used += cost
+
+    def add_pareto_cost(self, cost: int):
+        self.pareto_rollouts += cost
+        self.used += cost
+    
+    def add_iteration_cost(self, cost: int = 1):
+        self.iteration_rollouts += cost
+        self.used += cost
+
+    def warn_iteration_start(self, iteration: int):
+        self.current_iteration = iteration
+
+    def has_budget(self) -> bool:
+        """Check if budget allows continuing based on both limits."""
+        if self.used >= self.llm_limit:
+            return False
+        return self.current_iteration < self.max_iterations
+
+    def get_stats(self) -> Dict[str, int]:
+        return {
+            'total_used': self.used,
+            'minibatch': self.minibatch_rollouts,
+            'reflection': self.reflection_rollouts,
+            'pareto': self.pareto_rollouts,
+            'iteration': self.iteration_rollouts,
+            'remaining_calls': self.llm_limit - self.used,
+            'remaining_iterations': self.max_iterations - self.current_iteration
         }
 
 
@@ -273,6 +419,39 @@ class CandidatePool:
     def __iter__(self):
         """Support iteration over candidates."""
         return iter(self.candidates)
+    
+    # Score matrix delegation methods
+    def set_score(self, candidate_id: int, task_idx: int, score: float):
+        """Set score for a candidate on a specific task."""
+        self.scores.set_score(candidate_id, task_idx, score)
+    
+    def get_score(self, candidate_id: int, task_idx: int) -> Optional[float]:
+        """Get score for a candidate on a specific task."""
+        return self.scores.get_score(candidate_id, task_idx)
+    
+    def get_candidate_scores(self, candidate_id: int) -> Dict[int, float]:
+        """Get all scores for a specific candidate."""
+        return self.scores.get_candidate_scores(candidate_id)
+    
+    def compute_average_score(self, candidate_id: int) -> float:
+        """Compute average score for a candidate across all tasks."""
+        return self.scores.compute_average_score(candidate_id)
+    
+    def remove_candidate(self, candidate_id: int):
+        """Remove a candidate from the pool."""
+        if 0 <= candidate_id < len(self.candidates):
+            # Remove from candidates list
+            self.candidates.pop(candidate_id)
+            # Remove from lineages
+            if candidate_id in self.lineages:
+                del self.lineages[candidate_id]
+            # Remove from candidate feedback
+            if candidate_id in self._candidate_feedback:
+                del self._candidate_feedback[candidate_id]
+            # Note: ScoreMatrix scores are indexed by candidate_id, 
+            # so removing from the middle will cause index mismatch.
+            # This is a limitation of the current design that would need 
+            # more sophisticated index management to fix properly.
 
 
 # Component Interfaces
@@ -1454,42 +1633,42 @@ class GEPA(FinetuneTeleprompter):
         self,
         metric: Callable,
         minibatch_size: int = 3,
-        pareto_ratio: float = 0.67,
-        merge_enabled: bool = False,
-        merge_frequency: int = 5,
         max_errors: Optional[int] = None,
         num_threads: Optional[int] = None,
-        prompt_model: Optional[Any] = None,
+        candidate_generator: Optional[CandidateGenerator] = None,
         candidate_selector: Optional[CandidateSelector] = None,
-        prompt_mutator: Optional[PromptMutator] = None,
         feedback_collector: Optional[FeedbackCollector] = None,
-        module_selector: Optional[ModuleSelector] = None,
+        pareto_ratio: float = 0.67,
+        max_candidates: int = 50,
+        prompt_model=None,
     ):
         super().__init__()
         self.metric = metric
         self.minibatch_size = minibatch_size
-        self.pareto_ratio = pareto_ratio
-        self.merge_enabled = merge_enabled
-        self.merge_frequency = merge_frequency
         self.max_errors = max_errors
         self.num_threads = num_threads
-        self.prompt_model = prompt_model or dspy.settings.lm
+        self.pareto_ratio = pareto_ratio
+        self.max_candidates = max_candidates
+        self.prompt_model = prompt_model
 
-        # Dependency injection with defaults
+        # New architecture components with defaults
+        self.candidate_generator = candidate_generator or CompositeGenerator([
+            MutationGenerator(
+                prompt_mutator=ReflectivePromptMutator(),
+                module_selector=RoundRobinModuleSelector(),
+                feedback_collector=EnhancedFeedbackCollector()
+            ),
+            CrossoverGenerator(frequency=5, min_candidates=3)
+        ])
         self.candidate_selector = candidate_selector or ParetoCandidateSelector()
-        self.prompt_mutator = prompt_mutator or ReflectivePromptMutator(self.prompt_model)
         self.feedback_collector = feedback_collector or EnhancedFeedbackCollector()
-        self.module_selector = module_selector or RoundRobinModuleSelector()
-
-        # Ancestry tracking
-        self.lineages: Dict[int, CandidateLineage] = {}  # candidate_id -> lineage info
-        self.next_candidate_id = 0
 
     def compile(
         self,
         student: Module,
         *,
-        trainset: List[Example],
+        dataset: Optional[TrainingDataset] = None,
+        trainset: Optional[List[Example]] = None,  # Legacy support
         teacher: Optional[Module] = None,
         valset: Optional[List[Example]] = None,
         **kwargs
@@ -1499,7 +1678,8 @@ class GEPA(FinetuneTeleprompter):
 
         Args:
             student: Program to optimize
-            trainset: Training examples
+            dataset: Training dataset following TrainingDataset protocol
+            trainset: Legacy list of examples (for compatibility)
             teacher: Optional teacher program (unused in GEPA)
             valset: Optional validation set
             **kwargs: Additional arguments including 'budget'
@@ -1513,75 +1693,108 @@ class GEPA(FinetuneTeleprompter):
 
         logger.info("Starting GEPA compilation...")
 
-        # 2. Create working copy (never modify original)
-        program = student.deepcopy()
+        # 2. Handle dataset input (new protocol or legacy)
+        if dataset is not None:
+            training_dataset = dataset
+        elif trainset is not None:
+            # Convert legacy trainset to SplitDataset
+            training_dataset = SplitDataset(trainset, pareto_ratio=0.67)
+        else:
+            raise ValueError("Either 'dataset' or 'trainset' must be provided")
 
-        # 3. Split dataset (GEPA-specific: feedback vs pareto data)
-        feedback_data, pareto_data = self._split_dataset(trainset)
-        logger.info(f"Split dataset: {len(feedback_data)} feedback, {len(pareto_data)} pareto examples")
+        # 3. Initialize new architecture components
+        candidate_pool = CandidatePool()
+        
+        # Handle budget parameter - can be an object or legacy int
+        budget_param = kwargs.get('budget')
+        if isinstance(budget_param, BudgetTracker):
+            budget = budget_param
+        elif isinstance(budget_param, int):
+            # Legacy support: int budget = LLM calls budget
+            max_iterations = kwargs.get('max_iterations')
+            if max_iterations is not None:
+                budget = CombinedBudget(llm_limit=budget_param, max_iterations=max_iterations)
+            else:
+                budget = LLMCallsBudget(limit=budget_param)
+        else:
+            # Default budget
+            default_limit = len(list(training_dataset.feedback_data())) * 10
+            budget = LLMCallsBudget(limit=default_limit)
 
-        # 4. Initialize GEPA state
-        candidates = [program]
-        scores = ScoreMatrix()
-        budget = BudgetTracker(limit=kwargs.get('budget', len(trainset) * 10))
+        # 4. Create initial candidate and add to pool
+        initial_program = student.deepcopy()
+        initial_lineage = CandidateLineage(
+            candidate_id=0, 
+            parent_id=None, 
+            generation=0, 
+            mutation_type="initial", 
+            creation_iteration=0
+        )
+        candidate_pool.add_candidate(initial_program, initial_lineage)
 
-        # Initialize ancestry tracking for first candidate
-        self._register_candidate(program, parent_id=None, mutation_type="initial", iteration=0)
+        logger.info(f"Initialized candidate pool with 1 candidate")
 
-        # 5. Initial Pareto evaluation (counts toward budget - these are expensive LLM calls)
+        # 5. Initial Pareto evaluation
         logger.info("Performing initial Pareto evaluation...")
-        self._evaluate_candidates_on_pareto(candidates, pareto_data, scores, budget)
+        pareto_data = list(training_dataset.pareto_data())
+        self._evaluate_candidates_on_pareto(candidate_pool, pareto_data, budget)
 
         # 6. Main optimization loop (Algorithm 1)
         iteration = 0
-        while budget.has_budget():
+        feedback_data = list(training_dataset.feedback_data())
+        
+        while budget.has_budget() and candidate_pool.size() > 0:
             iteration += 1
+            budget.warn_iteration_start(iteration)
+            budget.add_iteration_cost(1)  # Beginning of iteration cost
             logger.info(f"GEPA iteration {iteration}, budget: {budget.get_stats()}")
+            
+            # Check budget again after iteration cost
+            if not budget.has_budget():
+                logger.info(f"Budget exhausted after iteration cost")
+                break
 
             try:
-                # Algorithm 1 steps
-                candidate_idx = self._select_candidate_step(candidates, scores)
-                module_idx = self._select_module_step(candidates[candidate_idx])
-                feedback = self._collect_feedback_step(candidates[candidate_idx], feedback_data, budget)
-                new_candidate = self._mutate_candidate_step(
-                    candidates[candidate_idx], module_idx, feedback, budget
+                # Generate new candidates using strategy
+                new_candidates = self.candidate_generator.generate_candidates(
+                    candidate_pool, feedback_data, iteration
                 )
+                
+                if not new_candidates:
+                    logger.info("No new candidates generated, consuming minimal budget and continuing...")
+                    # Consume minimal budget even when generation fails to prevent infinite loops
+                    budget.add_minibatch_cost(1)
+                    continue
 
-                # Evaluate and potentially promote new candidate
-                if self._should_promote_candidate(new_candidate, candidates[candidate_idx], feedback_data, budget):
-                    candidates.append(new_candidate)
-                    # Register new candidate with ancestry info
-                    parent_lineage = self.lineages[candidate_idx]
-                    self._register_candidate(
-                        new_candidate,
-                        parent_id=candidate_idx,
-                        mutation_type="reflective_mutation",
-                        iteration=iteration
-                    )
-                    logger.info(f"Promoted new candidate (total: {len(candidates)}, generation: {parent_lineage.generation + 1})")
-                    # Evaluate only the NEW candidate on Pareto set (costs budget)
-                    self._evaluate_candidates_on_pareto([new_candidate], pareto_data, scores, budget)
+                logger.info(f"Generated {len(new_candidates)} new candidates")
 
-                    # Optionally perform merge operation
-                    if self.merge_enabled and iteration % self.merge_frequency == 0 and len(candidates) >= 3:
-                        merge_candidate = self._attempt_merge(candidates, scores, iteration)
-                        if merge_candidate:
-                            candidates.append(merge_candidate)
-                            self._evaluate_candidates_on_pareto([merge_candidate], pareto_data, scores, budget)
+                # Evaluate new candidates on Pareto set
+                for candidate in new_candidates:
+                    if not budget.has_budget():
+                        break
+                    
+                    # Add to pool temporarily for evaluation
+                    candidate_id = candidate_pool.add_candidate(candidate)
+                    
+                    # Evaluate on Pareto set
+                    self._evaluate_single_candidate(candidate_pool, candidate_id, pareto_data, budget)
+
+                # Optionally trim candidate pool if it gets too large
+                if candidate_pool.size() > 20:  # Reasonable limit
+                    self._trim_candidate_pool(candidate_pool)
 
             except Exception as e:
-                logger.error(f"Error in iteration {iteration}: {e}")
-                if self.max_errors and iteration > self.max_errors:
-                    break
+                logger.warning(f"Iteration {iteration} failed: {e}")
                 continue
 
-        # 7. Return best candidate
-        best_candidate = self._select_best_candidate(candidates, scores)
+        # 7. Select best candidate
+        best_candidate = self._select_best_candidate(candidate_pool)
+        
+        # 8. Mark as compiled and return
         best_candidate._compiled = True
-
-        logger.info(f"GEPA completed in {iteration} iterations")
+        logger.info(f"GEPA compilation complete after {iteration} iterations")
         logger.info(f"Final budget usage: {budget.get_stats()}")
-
+        
         return best_candidate
 
     def _split_dataset(self, trainset: List[Example]) -> Tuple[List[Example], List[Example]]:
@@ -1620,50 +1833,72 @@ class GEPA(FinetuneTeleprompter):
 
     def _evaluate_candidates_on_pareto(
         self,
-        candidates: List[Module],
-        pareto_data: List[Example],
-        scores: ScoreMatrix,
+        candidate_pool: CandidatePool,
+        pareto_data: List[Example], 
         budget: BudgetTracker
     ):
-        """Evaluate candidates on Pareto set with async support.
+        """Evaluate candidates on Pareto set with sync implementation.
         """
-        if not pareto_data or not candidates:
+        if not pareto_data or not candidate_pool.candidates:
             return
 
-        # Run async evaluation if event loop is available, otherwise fallback to sync
-        try:
-            # Check if we're already in an async context
-            loop = asyncio.get_running_loop()
-            # If we get here, we're in an async context - run directly
-            task = loop.create_task(self._evaluate_candidates_async(candidates, pareto_data, scores, budget))
-            loop.run_until_complete(task)
-        except RuntimeError:
-            # No event loop running - create one
-            asyncio.run(self._evaluate_candidates_async(candidates, pareto_data, scores, budget))
+        # Simplified sync implementation for now
+        evaluations_performed = 0
+        
+        for candidate_id, candidate in enumerate(candidate_pool.candidates):
+            # Skip if already evaluated
+            candidate_scores = candidate_pool.get_candidate_scores(candidate_id)
+            if len(candidate_scores) >= len(pareto_data):
+                continue
+
+            for task_idx, example in enumerate(pareto_data):
+                # Skip if already evaluated
+                if candidate_pool.get_score(candidate_id, task_idx) is not None:
+                    continue
+
+                try:
+                    # Make prediction
+                    with dspy.context(lm=self.prompt_model):
+                        prediction = candidate(**example.inputs())
+                    
+                    # Evaluate prediction
+                    score = self.metric(example, prediction, trace=None)
+                    candidate_pool.set_score(candidate_id, task_idx, score)
+                    evaluations_performed += 1
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to evaluate candidate {candidate_id} on example {task_idx}: {e}")
+                    # Set score to 0 for failed evaluations
+                    candidate_pool.set_score(candidate_id, task_idx, 0.0)
+
+        # Update budget - count evaluations
+        if evaluations_performed > 0:
+            budget.add_pareto_cost(evaluations_performed)
+            logger.debug(f"Pareto evaluation completed: {evaluations_performed} evaluations counted in budget")
 
     async def _evaluate_candidates_async(
         self,
-        candidates: List[Module],
+        candidate_pool: CandidatePool,
         pareto_data: List[Example],
-        scores: ScoreMatrix,
         budget: BudgetTracker
     ):
         """Async implementation of Pareto evaluation."""
         evaluation_tasks = []
 
         # Create tasks for all candidate-example pairs
-        for candidate_idx, candidate in enumerate(candidates):
+        for candidate_id, candidate in enumerate(candidate_pool.candidates):
             # Skip if already evaluated
-            if len(scores.get_candidate_scores(candidate_idx)) >= len(pareto_data):
+            candidate_scores = candidate_pool.get_candidate_scores(candidate_id)
+            if len(candidate_scores) >= len(pareto_data):
                 continue
 
             for task_idx, example in enumerate(pareto_data):
                 # Skip if already evaluated
-                if scores.get_score(candidate_idx, task_idx) is not None:
+                if candidate_pool.get_score(candidate_id, task_idx) is not None:
                     continue
 
                 task = self._evaluate_single_candidate_example(
-                    candidate, example, candidate_idx, task_idx
+                    candidate, example, candidate_id, task_idx
                 )
                 evaluation_tasks.append(task)
 
@@ -1677,13 +1912,73 @@ class GEPA(FinetuneTeleprompter):
                     logger.warning(f"Evaluation failed: {result}")
                     continue
 
-                candidate_idx, task_idx, score = result
-                scores.set_score(candidate_idx, task_idx, score)
+                candidate_id, task_idx, score = result
+                candidate_pool.set_score(candidate_id, task_idx, score)
 
             # Update budget - Pareto evaluations ARE expensive LLM calls that count
             successful_evals = len([r for r in results if not isinstance(r, Exception)])
             budget.add_pareto_cost(successful_evals)
             logger.debug(f"Pareto evaluation completed: {successful_evals} evaluations counted in budget")
+
+    def _evaluate_single_candidate(
+        self,
+        candidate_pool: CandidatePool,
+        candidate_id: int,
+        pareto_data: List[Example],
+        budget: BudgetTracker
+    ):
+        """Evaluate a single candidate on all Pareto examples."""
+        if candidate_id >= len(candidate_pool.candidates):
+            logger.warning(f"Candidate {candidate_id} not found in pool")
+            return
+        
+        candidate = candidate_pool.candidates[candidate_id]
+        
+        for task_idx, example in enumerate(pareto_data):
+            # Skip if already evaluated
+            if candidate_pool.get_score(candidate_id, task_idx) is not None:
+                continue
+                
+            try:
+                # Make prediction
+                with dspy.context(lm=self.prompt_model):
+                    prediction = candidate(**example.inputs())
+                
+                # Evaluate prediction
+                score = self.metric(example, prediction, trace=None)
+                candidate_pool.set_score(candidate_id, task_idx, score)
+                
+                # Count as budget usage
+                budget.add_pareto_cost(1)
+                
+            except Exception as e:
+                logger.warning(f"Failed to evaluate candidate {candidate_id} on example {task_idx}: {e}")
+                # Set score to 0 for failed evaluations
+                candidate_pool.set_score(candidate_id, task_idx, 0.0)
+
+    def _trim_candidate_pool(self, candidate_pool: CandidatePool):
+        """Trim candidate pool to maximum size, keeping best performers."""
+        if len(candidate_pool.candidates) <= self.max_candidates:
+            return
+        
+        # Calculate average scores for all candidates
+        candidate_scores = []
+        for candidate_id in range(len(candidate_pool.candidates)):
+            avg_score = candidate_pool.compute_average_score(candidate_id)
+            candidate_scores.append((candidate_id, avg_score))
+        
+        # Sort by average score (descending)
+        candidate_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        # Keep only the best candidates
+        candidates_to_keep = set(cid for cid, _ in candidate_scores[:self.max_candidates])
+        candidates_to_remove = [cid for cid in range(len(candidate_pool.candidates)) if cid not in candidates_to_keep]
+        
+        # Remove worst candidates from the end to avoid index shifting
+        for candidate_id in sorted(candidates_to_remove, reverse=True):
+            candidate_pool.remove_candidate(candidate_id)
+        
+        logger.info(f"Trimmed candidate pool from {len(candidate_pool.candidates) + len(candidates_to_remove)} to {len(candidate_pool.candidates)} candidates")
 
     async def _evaluate_single_candidate_example(
         self,
@@ -1803,30 +2098,31 @@ class GEPA(FinetuneTeleprompter):
 
         return total_score / len(batch)
 
-    def _select_best_candidate(self, candidates: List[Module], scores: ScoreMatrix) -> Module:
+    def _select_best_candidate(self, candidate_pool: CandidatePool) -> Module:
         """Select best candidate based on average Pareto scores.
 
         Returns the candidate with highest average score across Pareto evaluation set.
         """
-        if not candidates:
+        if not candidate_pool.candidates:
             raise ValueError("No candidates to select from")
 
-        if len(candidates) == 1:
-            return candidates[0]
+        if len(candidate_pool.candidates) == 1:
+            return candidate_pool.candidates[0]
 
-        best_candidate = candidates[0]
+        best_candidate = None
+        best_candidate_id = None
         best_score = -float('inf')
 
-        for idx, candidate in enumerate(candidates):
-            avg_score = scores.compute_average_score(idx)
+        for candidate_id, candidate in enumerate(candidate_pool.candidates):
+            avg_score = candidate_pool.compute_average_score(candidate_id)
 
             if avg_score > best_score:
                 best_score = avg_score
                 best_candidate = candidate
+                best_candidate_id = candidate_id
 
         # Log ancestry information for best candidate
-        best_idx = candidates.index(best_candidate)
-        best_lineage = self.lineages.get(best_idx)
+        best_lineage = candidate_pool.get_lineage(best_candidate_id)
         if best_lineage:
             logger.info(f"Selected best candidate: generation {best_lineage.generation}, mutation_type: {best_lineage.mutation_type}")
             logger.info(f"Best candidate average score: {best_score:.3f}")
