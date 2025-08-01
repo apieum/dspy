@@ -5,6 +5,7 @@ Following DSPy test patterns and BDD approach for GEPA implementation.
 
 import pytest
 from unittest.mock import Mock, patch
+from typing import Iterable, List
 
 import dspy
 from dspy.primitives.example import Example
@@ -25,6 +26,10 @@ from dspy.teleprompt.gepa import (
     SplitDataset,
     CandidatePool,
     CandidateLineage,
+    CandidateGenerator,
+    MutationGenerator,
+    CrossoverGenerator,
+    CompositeGenerator,
 )
 from dspy.utils.dummies import DummyLM
 
@@ -791,6 +796,436 @@ class TestCandidatePool:
         assert pool.size() == 2
         assert len(pool.get_candidates()) == 2
         assert 99 not in pool.get_lineages()
+
+
+class TestCandidateGenerator:
+    """Test CandidateGenerator interface and basic functionality."""
+    
+    def test_candidate_generator_is_abstract(self):
+        """CandidateGenerator should be abstract and not instantiable."""
+        with pytest.raises(TypeError):
+            CandidateGenerator()
+    
+    def test_candidate_generator_interface_methods(self):
+        """CandidateGenerator should have the required abstract methods."""
+        # Check that the interface defines the required method
+        assert hasattr(CandidateGenerator, 'generate_candidates')
+        assert callable(getattr(CandidateGenerator, 'generate_candidates'))
+        
+        # The method should be abstract
+        assert getattr(CandidateGenerator.generate_candidates, '__isabstractmethod__', False)
+
+
+class DummyCandidateGenerator(CandidateGenerator):
+    """Dummy implementation for testing the interface."""
+    
+    def __init__(self, return_candidates=None):
+        self.return_candidates = return_candidates or []
+        self.call_history = []
+    
+    def generate_candidates(self, candidate_pool: CandidatePool,
+                          feedback_data: Iterable[Example], 
+                          iteration: int) -> List[Module]:
+        """Dummy implementation that records calls and returns preset candidates."""
+        self.call_history.append({
+            'pool_size': candidate_pool.size(),
+            'feedback_data': list(feedback_data),
+            'iteration': iteration
+        })
+        return self.return_candidates.copy()
+
+
+class TestCandidateGeneratorInterface:
+    """Test the CandidateGenerator interface with concrete implementations."""
+    
+    def test_concrete_implementation_works(self, simple_trainset):
+        """Concrete CandidateGenerator implementation should work properly."""
+        pool = CandidatePool()
+        pool.add_candidate(SimpleQA())
+        pool.add_candidate(SimpleQA())
+        
+        # Create dummy generator
+        new_candidate = SimpleQA()
+        generator = DummyCandidateGenerator(return_candidates=[new_candidate])
+        
+        # Test generation
+        feedback_data = simple_trainset[:2]
+        iteration = 5
+        
+        result = generator.generate_candidates(pool, feedback_data, iteration)
+        
+        # Check result
+        assert len(result) == 1
+        assert result[0] is new_candidate
+        
+        # Check call was recorded
+        assert len(generator.call_history) == 1
+        call = generator.call_history[0]
+        assert call['pool_size'] == 2
+        assert len(call['feedback_data']) == 2
+        assert call['iteration'] == 5
+    
+    def test_generator_with_empty_pool(self, simple_trainset):
+        """Generator should handle empty candidate pool gracefully."""
+        empty_pool = CandidatePool()
+        generator = DummyCandidateGenerator(return_candidates=[])
+        
+        result = generator.generate_candidates(empty_pool, simple_trainset, 1)
+        
+        assert result == []
+        assert len(generator.call_history) == 1
+        assert generator.call_history[0]['pool_size'] == 0
+    
+    def test_generator_with_empty_feedback_data(self):
+        """Generator should handle empty feedback data gracefully."""
+        pool = CandidatePool()
+        pool.add_candidate(SimpleQA())
+        
+        generator = DummyCandidateGenerator(return_candidates=[])
+        result = generator.generate_candidates(pool, [], 1)
+        
+        assert result == []
+        assert len(generator.call_history) == 1
+        assert len(generator.call_history[0]['feedback_data']) == 0
+    
+    def test_generator_iteration_parameter(self, simple_trainset):
+        """Generator should receive and can use iteration parameter."""
+        pool = CandidatePool()
+        pool.add_candidate(SimpleQA())
+        
+        generator = DummyCandidateGenerator()
+        
+        # Call with different iterations
+        generator.generate_candidates(pool, simple_trainset, 1)
+        generator.generate_candidates(pool, simple_trainset, 5)
+        generator.generate_candidates(pool, simple_trainset, 10)
+        
+        # Check iterations were recorded
+        assert len(generator.call_history) == 3
+        assert generator.call_history[0]['iteration'] == 1
+        assert generator.call_history[1]['iteration'] == 5
+        assert generator.call_history[2]['iteration'] == 10
+    
+    def test_generator_candidate_pool_access(self, simple_trainset):
+        """Generator should have full access to candidate pool state."""
+        pool = CandidatePool()
+        candidate1 = SimpleQA()
+        candidate2 = SimpleQA()
+        lineage = CandidateLineage(candidate_id=0, generation=1)
+        
+        pool.add_candidate(candidate1, lineage)
+        pool.add_candidate(candidate2)
+        
+        # Set some scores
+        pool.get_scores().set_score(0, 0, 0.8)
+        pool.get_scores().set_score(1, 0, 0.6)
+        
+        class InspectingGenerator(CandidateGenerator):
+            def __init__(self):
+                self.inspected_data = {}
+            
+            def generate_candidates(self, candidate_pool, feedback_data, iteration):
+                # Inspect pool state
+                self.inspected_data = {
+                    'candidates': candidate_pool.get_candidates(),
+                    'scores': candidate_pool.get_scores(),
+                    'lineages': candidate_pool.get_lineages(),
+                    'pool_size': candidate_pool.size()
+                }
+                return []
+        
+        generator = InspectingGenerator()
+        generator.generate_candidates(pool, simple_trainset, 1)
+        
+        # Verify generator had access to all pool data
+        assert len(generator.inspected_data['candidates']) == 2
+        assert generator.inspected_data['candidates'][0] is candidate1
+        assert generator.inspected_data['candidates'][1] is candidate2
+        assert generator.inspected_data['pool_size'] == 2
+        assert 0 in generator.inspected_data['lineages']
+        assert generator.inspected_data['lineages'][0] is lineage
+        assert generator.inspected_data['scores'].get_score(0, 0) == 0.8
+
+
+class TestMutationGenerator:
+    """Test MutationGenerator concrete implementation."""
+    
+    def test_mutation_generator_initialization(self):
+        """MutationGenerator should initialize with required components."""
+        prompt_mutator = ReflectivePromptMutator()
+        module_selector = RoundRobinModuleSelector()
+        feedback_collector = EnhancedFeedbackCollector()
+        
+        generator = MutationGenerator(prompt_mutator, module_selector, feedback_collector)
+        
+        assert generator.prompt_mutator is prompt_mutator
+        assert generator.module_selector is module_selector
+        assert generator.feedback_collector is feedback_collector
+    
+    def test_mutation_with_empty_pool(self, simple_trainset):
+        """MutationGenerator should handle empty candidate pool."""
+        generator = MutationGenerator(
+            ReflectivePromptMutator(),
+            RoundRobinModuleSelector(),
+            EnhancedFeedbackCollector()
+        )
+        
+        empty_pool = CandidatePool()
+        result = generator.generate_candidates(empty_pool, simple_trainset, 1)
+        
+        assert result == []
+    
+    def test_mutation_with_empty_feedback_data(self):
+        """MutationGenerator should handle empty feedback data."""
+        generator = MutationGenerator(
+            ReflectivePromptMutator(),
+            RoundRobinModuleSelector(),
+            EnhancedFeedbackCollector()
+        )
+        
+        pool = CandidatePool()
+        pool.add_candidate(SimpleQA())
+        
+        result = generator.generate_candidates(pool, [], 1)
+        assert result == []
+    
+    def test_mutation_parent_selection(self, simple_trainset, dummy_lm):
+        """MutationGenerator should select best performing parent."""
+        with dspy.context(lm=dummy_lm):
+            generator = MutationGenerator(
+                ReflectivePromptMutator(),
+                RoundRobinModuleSelector(),
+                EnhancedFeedbackCollector()
+            )
+            
+            pool = CandidatePool()
+            candidate1 = SimpleQA()
+            candidate2 = SimpleQA()
+            pool.add_candidate(candidate1)
+            pool.add_candidate(candidate2)
+            
+            # Set scores - candidate2 has better performance
+            pool.get_scores().set_score(0, 0, 0.3)  # candidate1: low score
+            pool.get_scores().set_score(1, 0, 0.8)  # candidate2: high score
+            
+            # Generate candidates
+            result = generator.generate_candidates(pool, simple_trainset[:1], 1)
+            
+            # Should generate one mutated candidate
+            assert len(result) == 1
+            assert isinstance(result[0], Module)
+
+
+class TestCrossoverGenerator:
+    """Test CrossoverGenerator concrete implementation."""
+    
+    def test_crossover_generator_initialization(self):
+        """CrossoverGenerator should initialize with timing parameters."""
+        generator = CrossoverGenerator(frequency=3, min_candidates=2)
+        
+        assert generator.frequency == 3
+        assert generator.min_candidates == 2
+    
+    def test_crossover_default_parameters(self):
+        """CrossoverGenerator should use default parameters."""
+        generator = CrossoverGenerator()
+        
+        assert generator.frequency == 5
+        assert generator.min_candidates == 3
+    
+    def test_crossover_timing_conditions(self, simple_trainset):
+        """CrossoverGenerator should respect timing conditions."""
+        generator = CrossoverGenerator(frequency=5, min_candidates=2)
+        
+        pool = CandidatePool()
+        pool.add_candidate(SimpleQA())
+        pool.add_candidate(SimpleQA())
+        
+        # Too early (iteration < 3)
+        result = generator.generate_candidates(pool, simple_trainset, 1)
+        assert result == []
+        
+        result = generator.generate_candidates(pool, simple_trainset, 2)
+        assert result == []
+        
+        # Wrong frequency (iteration % frequency != 0)
+        result = generator.generate_candidates(pool, simple_trainset, 4)
+        assert result == []
+        
+        result = generator.generate_candidates(pool, simple_trainset, 6)
+        assert result == []
+        
+        # Correct timing should attempt crossover (iteration=5, 5%5==0, >=3)
+        # Should return empty because we need different lineages, but at least it tries
+        result = generator.generate_candidates(pool, simple_trainset, 5)
+        # Result could be [] if no different lineages found, which is OK
+        assert isinstance(result, list)
+    
+    def test_crossover_minimum_candidates(self, simple_trainset):
+        """CrossoverGenerator should require minimum candidates."""
+        generator = CrossoverGenerator(frequency=5, min_candidates=3)
+        
+        pool = CandidatePool()
+        pool.add_candidate(SimpleQA())
+        pool.add_candidate(SimpleQA())  # Only 2 candidates, need 3
+        
+        result = generator.generate_candidates(pool, simple_trainset, 5)
+        assert result == []
+    
+    def test_crossover_lineage_requirements(self, simple_trainset):
+        """CrossoverGenerator should require different lineages."""
+        generator = CrossoverGenerator(frequency=5, min_candidates=2)
+        
+        pool = CandidatePool()
+        
+        # Add candidates with different lineages
+        lineage1 = CandidateLineage(candidate_id=0, generation=1, mutation_type="mutation")
+        lineage2 = CandidateLineage(candidate_id=1, generation=1, mutation_type="mutation")
+        
+        pool.add_candidate(SimpleQA(), lineage1)
+        pool.add_candidate(SimpleQA(), lineage2)
+        
+        # Set some scores
+        pool.get_scores().set_score(0, 0, 0.7)
+        pool.get_scores().set_score(1, 0, 0.8)
+        
+        # Should attempt crossover with different lineages
+        result = generator.generate_candidates(pool, simple_trainset, 5)
+        
+        # Could be empty if crossover fails, but should not crash
+        assert isinstance(result, list)
+        assert len(result) <= 1  # At most one merged candidate
+
+
+class TestCompositeGenerator:
+    """Test CompositeGenerator implementation."""
+    
+    def test_composite_generator_initialization(self):
+        """CompositeGenerator should initialize with list of generators."""
+        gen1 = DummyCandidateGenerator()
+        gen2 = DummyCandidateGenerator()
+        
+        composite = CompositeGenerator([gen1, gen2])
+        
+        assert len(composite.generators) == 2
+        assert composite.generators[0] is gen1
+        assert composite.generators[1] is gen2
+    
+    def test_composite_generator_empty_list(self):
+        """CompositeGenerator should reject empty generator list."""
+        with pytest.raises(ValueError, match="requires at least one generator"):
+            CompositeGenerator([])
+    
+    def test_composite_generator_combines_results(self, simple_trainset):
+        """CompositeGenerator should combine results from all generators."""
+        candidate1 = SimpleQA()
+        candidate2 = SimpleQA()
+        candidate3 = SimpleQA()
+        
+        gen1 = DummyCandidateGenerator([candidate1])
+        gen2 = DummyCandidateGenerator([candidate2, candidate3])
+        
+        composite = CompositeGenerator([gen1, gen2])
+        
+        pool = CandidatePool()
+        pool.add_candidate(SimpleQA())
+        
+        result = composite.generate_candidates(pool, simple_trainset, 1)
+        
+        # Should combine results from both generators
+        assert len(result) == 3
+        assert candidate1 in result
+        assert candidate2 in result
+        assert candidate3 in result
+    
+    def test_composite_generator_handles_failures(self, simple_trainset):
+        """CompositeGenerator should handle individual generator failures."""
+        candidate1 = SimpleQA()
+        
+        class FailingGenerator(CandidateGenerator):
+            def generate_candidates(self, candidate_pool, feedback_data, iteration):
+                raise RuntimeError("Generator failed")
+        
+        gen1 = FailingGenerator()
+        gen2 = DummyCandidateGenerator([candidate1])
+        
+        composite = CompositeGenerator([gen1, gen2])
+        
+        pool = CandidatePool()
+        pool.add_candidate(SimpleQA())
+        
+        # Should continue despite first generator failing
+        result = composite.generate_candidates(pool, simple_trainset, 1)
+        
+        assert len(result) == 1
+        assert candidate1 in result
+    
+    def test_composite_generator_reuses_feedback_data(self, simple_trainset):
+        """CompositeGenerator should reuse feedback data for efficiency."""
+        gen1 = DummyCandidateGenerator()
+        gen2 = DummyCandidateGenerator()
+        
+        composite = CompositeGenerator([gen1, gen2])
+        
+        pool = CandidatePool()
+        pool.add_candidate(SimpleQA())
+        
+        composite.generate_candidates(pool, simple_trainset, 1)
+        
+        # Both generators should have received the same feedback data
+        assert gen1.call_history[0]['feedback_data'] == gen2.call_history[0]['feedback_data']
+        assert len(gen1.call_history[0]['feedback_data']) == len(simple_trainset)
+
+
+class TestGeneratorIntegration:
+    """Test generator integration with existing components."""
+    
+    def test_mutation_generator_with_existing_components(self, simple_trainset, dummy_lm):
+        """MutationGenerator should work with existing GEPA components."""
+        with dspy.context(lm=dummy_lm):
+            # Use actual GEPA components
+            generator = MutationGenerator(
+                prompt_mutator=ReflectivePromptMutator(),
+                module_selector=RoundRobinModuleSelector(),
+                feedback_collector=EnhancedFeedbackCollector()
+            )
+            
+            pool = CandidatePool()
+            pool.add_candidate(SimpleQA())
+            pool.get_scores().set_score(0, 0, 0.5)
+            
+            result = generator.generate_candidates(pool, simple_trainset[:1], 1)
+            
+            # Should generate at least one candidate or fail gracefully
+            assert isinstance(result, list)
+            # If successful, should return one mutated candidate
+            if result:
+                assert len(result) == 1
+                assert isinstance(result[0], Module)
+    
+    def test_crossover_generator_with_lineage_tracking(self, simple_trainset):
+        """CrossoverGenerator should work with lineage tracking."""
+        generator = CrossoverGenerator(frequency=5, min_candidates=2)
+        
+        pool = CandidatePool()
+        
+        # Create candidates with proper lineages from different roots
+        lineage1 = CandidateLineage(candidate_id=0, parent_id=None, generation=0)
+        lineage2 = CandidateLineage(candidate_id=1, parent_id=None, generation=0)
+        
+        pool.add_candidate(SimpleQA(), lineage1)
+        pool.add_candidate(SimpleQA(), lineage2)
+        
+        # Set scores
+        pool.get_scores().set_score(0, 0, 0.6)
+        pool.get_scores().set_score(1, 0, 0.8)
+        
+        result = generator.generate_candidates(pool, simple_trainset, 5)
+        
+        # Should handle lineage tracking properly
+        assert isinstance(result, list)
+        # May be empty if merge fails, but should not crash
+        assert len(result) <= 1
 
 
 if __name__ == "__main__":
