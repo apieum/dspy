@@ -21,6 +21,8 @@ from dspy.teleprompt.gepa import (
     ReflectivePromptMutator,
     EnhancedFeedbackCollector,
     RoundRobinModuleSelector,
+    TrainingDataset,
+    SplitDataset,
 )
 from dspy.utils.dummies import DummyLM
 
@@ -424,6 +426,194 @@ class TestGEPAAlgorithmStructure:
         
         # With single candidate, should return that candidate
         assert result is candidates[0]
+
+
+class TestIntelligentCrossover:
+    """Test intelligent crossover strategies for GEPA+Merge."""
+    
+    def test_complementary_instruction_detection(self):
+        """Should detect complementary instructions."""
+        gepa = GEPA(metric=simple_metric)
+        
+        # Test complementary pair: accuracy + clarity
+        inst1 = "Answer with precise and accurate information"
+        inst2 = "Provide clear and concise responses"
+        
+        assert gepa._are_complementary(inst1, inst2) is True
+        
+        # Test non-complementary instructions
+        inst3 = "Answer questions thoroughly"
+        inst4 = "Respond to queries completely"
+        
+        assert gepa._are_complementary(inst3, inst4) is False
+    
+    def test_adversarial_instruction_detection(self):
+        """Should detect adversarial (conflicting) instructions."""
+        gepa = GEPA(metric=simple_metric)
+        
+        # Test adversarial pair: brief vs detailed
+        inst1 = "Provide brief and concise answers"
+        inst2 = "Give detailed and comprehensive responses"
+        
+        assert gepa._are_adversarial(inst1, inst2) is True
+        
+        # Test non-adversarial instructions
+        inst3 = "Answer questions accurately"
+        inst4 = "Respond with helpful information"
+        
+        assert gepa._are_adversarial(inst3, inst4) is False
+    
+    def test_complementary_merge_strategy(self):
+        """Should properly merge complementary instructions."""
+        gepa = GEPA(metric=simple_metric)
+        
+        inst1 = "Be accurate and precise"
+        inst2 = "Be clear and concise"
+        
+        result = gepa._complementary_merge(inst1, inst2)
+        
+        assert inst1 in result
+        assert inst2 in result
+        assert len(result) > len(inst1)
+    
+    def test_adversarial_merge_strategy(self):
+        """Should balance adversarial instructions."""
+        gepa = GEPA(metric=simple_metric)
+        
+        inst1 = "Be brief"
+        inst2 = "Be thorough"
+        
+        result = gepa._adversarial_merge(inst1, inst2)
+        
+        assert inst1 in result
+        assert "balance" in result.lower()
+        assert len(result) > len(inst1)
+    
+    def test_hybrid_merge_strategy(self):
+        """Should use context-aware hybrid merging."""
+        gepa = GEPA(metric=simple_metric)
+        
+        inst1 = "Answer questions"
+        inst2 = "Help users"
+        
+        # Different strategies for different module indices
+        result0 = gepa._hybrid_merge(inst1, inst2, 0)  # First module
+        result1 = gepa._hybrid_merge(inst1, inst2, 1)  # Odd module
+        result2 = gepa._hybrid_merge(inst1, inst2, 2)  # Even module
+        
+        assert "clarity" in result0.lower()
+        assert "combine" in result1.lower()
+        assert "additionally" in result2.lower()
+    
+    def test_instruction_compatibility_calculation(self):
+        """Should calculate instruction compatibility scores."""
+        gepa = GEPA(metric=simple_metric)
+        
+        # Create candidates with different instruction types
+        candidate1 = SimpleQA()
+        candidate2 = SimpleQA()
+        
+        # Set complementary instructions
+        from dspy.signatures.signature import make_signature
+        from dspy.teleprompt.utils import set_signature
+        
+        sig1 = make_signature("question -> answer")
+        sig1.instructions = "Be precise and accurate"
+        sig2 = make_signature("question -> answer") 
+        sig2.instructions = "Be clear and concise"
+        
+        set_signature(candidate1.answer, sig1)
+        set_signature(candidate2.answer, sig2)
+        
+        compatibility = gepa._calculate_instruction_compatibility(candidate1, candidate2)
+        
+        # Should detect high compatibility for complementary instructions
+        assert isinstance(compatibility, float)
+        assert 0.0 <= compatibility <= 1.0
+        assert compatibility > 0.5  # Should be high for complementary instructions
+
+
+class TestDatasetProtocol:
+    """Test Dataset Protocol implementation."""
+    
+    def test_split_dataset_initialization(self, simple_trainset):
+        """SplitDataset should split examples according to pareto_ratio."""
+        dataset = SplitDataset(simple_trainset, pareto_ratio=0.6)
+        
+        feedback_data = list(dataset.feedback_data())
+        pareto_data = list(dataset.pareto_data())
+        
+        # Check split proportions
+        total_examples = len(simple_trainset)
+        expected_pareto = int(total_examples * 0.6)
+        expected_feedback = total_examples - expected_pareto
+        
+        assert len(pareto_data) == expected_pareto
+        assert len(feedback_data) == expected_feedback
+        assert len(feedback_data) + len(pareto_data) == total_examples
+    
+    def test_split_dataset_default_ratio(self, simple_trainset):
+        """SplitDataset should use default pareto_ratio of 0.67."""
+        dataset = SplitDataset(simple_trainset)
+        
+        feedback_data = list(dataset.feedback_data())
+        pareto_data = list(dataset.pareto_data())
+        
+        # Check default 0.67 ratio
+        total_examples = len(simple_trainset)
+        expected_pareto = int(total_examples * 0.67)
+        expected_feedback = total_examples - expected_pareto
+        
+        assert len(pareto_data) == expected_pareto
+        assert len(feedback_data) == expected_feedback
+    
+    def test_split_dataset_no_overlap(self, simple_trainset):
+        """Feedback and Pareto data should not overlap."""
+        dataset = SplitDataset(simple_trainset, pareto_ratio=0.5)
+        
+        feedback_data = list(dataset.feedback_data())
+        pareto_data = list(dataset.pareto_data())
+        
+        # Check no overlap between sets
+        feedback_questions = {ex.question for ex in feedback_data}
+        pareto_questions = {ex.question for ex in pareto_data}
+        
+        assert len(feedback_questions & pareto_questions) == 0  # No overlap
+    
+    def test_split_dataset_invalid_ratio(self, simple_trainset):
+        """SplitDataset should reject invalid pareto_ratio values."""
+        with pytest.raises(ValueError, match="pareto_ratio must be between 0 and 1"):
+            SplitDataset(simple_trainset, pareto_ratio=0.0)
+        
+        with pytest.raises(ValueError, match="pareto_ratio must be between 0 and 1"):
+            SplitDataset(simple_trainset, pareto_ratio=1.0)
+        
+        with pytest.raises(ValueError, match="pareto_ratio must be between 0 and 1"):
+            SplitDataset(simple_trainset, pareto_ratio=1.5)
+    
+    def test_training_dataset_protocol_compliance(self, simple_trainset):
+        """SplitDataset should comply with TrainingDataset protocol."""
+        dataset = SplitDataset(simple_trainset)
+        
+        # Should implement the protocol methods
+        assert hasattr(dataset, 'feedback_data')
+        assert hasattr(dataset, 'pareto_data')
+        assert callable(dataset.feedback_data)
+        assert callable(dataset.pareto_data)
+        
+        # Should return iterables of Examples
+        feedback_data = dataset.feedback_data()
+        pareto_data = dataset.pareto_data()
+        
+        assert hasattr(feedback_data, '__iter__')
+        assert hasattr(pareto_data, '__iter__')
+        
+        # All items should be Examples
+        for example in feedback_data:
+            assert isinstance(example, Example)
+        
+        for example in pareto_data:
+            assert isinstance(example, Example)
 
 
 if __name__ == "__main__":

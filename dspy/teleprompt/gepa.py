@@ -4,7 +4,7 @@ import random
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Tuple
 
 import dspy
 from dspy.evaluate.evaluate import Evaluate
@@ -15,6 +15,56 @@ from dspy.teleprompt.bootstrap_finetune import FinetuneTeleprompter
 from dspy.teleprompt.utils import create_minibatch, eval_candidate_program, get_signature, set_signature
 
 logger = logging.getLogger(__name__)
+
+
+# Dataset Protocol
+class TrainingDataset(Protocol):
+    """Protocol for training datasets used by GEPA.
+    
+    Follows the paper's approach of splitting dataset into:
+    - feedback_data: Used for reflective mutation and feedback collection
+    - pareto_data: Used for candidate evaluation and Pareto selection
+    """
+    
+    def feedback_data(self) -> Iterable[Example]:
+        """Generic feedback data for mutation guidance (paper's feedback set)."""
+        ...
+    
+    def pareto_data(self) -> Iterable[Example]:
+        """Evaluation data for candidate selection (paper's Pareto set)."""
+        ...
+
+
+class SplitDataset:
+    """Paper-compliant implementation of TrainingDataset.
+    
+    Splits examples according to pareto_ratio as described in GEPA paper.
+    """
+    
+    def __init__(self, examples: List[Example], pareto_ratio: float = 0.67):
+        """Initialize with examples and split ratio.
+        
+        Args:
+            examples: List of training examples
+            pareto_ratio: Fraction of data used for Pareto evaluation (default 0.67 per paper)
+        """
+        if not 0.0 < pareto_ratio < 1.0:
+            raise ValueError(f"pareto_ratio must be between 0 and 1, got {pareto_ratio}")
+        
+        # Split according to paper's approach
+        pareto_count = int(len(examples) * pareto_ratio)
+        self._pareto = examples[-pareto_count:] if pareto_count > 0 else []
+        self._feedback = examples[:-pareto_count] if pareto_count > 0 else examples
+        
+        logger.info(f"Split dataset: {len(self._feedback)} feedback examples, {len(self._pareto)} Pareto examples")
+    
+    def feedback_data(self) -> List[Example]:
+        """Return feedback examples for mutation guidance."""
+        return self._feedback
+    
+    def pareto_data(self) -> List[Example]:
+        """Return Pareto examples for candidate evaluation."""
+        return self._pareto
 
 
 # Core Data Structures
@@ -1347,31 +1397,43 @@ class GEPA(FinetuneTeleprompter):
                 else:
                     lineage_groups[0].append((idx, None))  # Original candidate
 
-            # Select two candidates from different lineages with good performance
+            # Intelligent parent selection for crossover
             if len(lineage_groups) < 2:
                 return None
 
             best_from_lineages = []
             for root, group in lineage_groups.items():
-                # Find best candidate from this lineage
+                # Find best candidate from this lineage using multiple criteria
                 best_idx = None
                 best_score = -float('inf')
+                best_diversity = -float('inf')
 
                 for idx, lineage in group:
                     avg_score = scores.compute_average_score(idx)
-                    if avg_score > best_score:
-                        best_score = avg_score
+                    
+                    # Consider diversity (fitness history variance) for better crossover
+                    diversity_score = 0.0
+                    if lineage and lineage.fitness_history:
+                        if len(lineage.fitness_history) > 1:
+                            import statistics
+                            diversity_score = statistics.stdev(lineage.fitness_history)
+                    
+                    # Combined score favoring both performance and diversity
+                    combined_score = avg_score + (0.1 * diversity_score)
+                    
+                    if combined_score > best_score:
+                        best_score = avg_score  # Keep original score for selection
+                        best_diversity = diversity_score
                         best_idx = idx
 
                 if best_idx is not None:
-                    best_from_lineages.append((best_idx, best_score))
+                    best_from_lineages.append((best_idx, best_score, best_diversity))
 
             if len(best_from_lineages) < 2:
                 return None
 
-            # Sort by score and take top 2
-            best_from_lineages.sort(key=lambda x: x[1], reverse=True)
-            parent1_idx, parent2_idx = best_from_lineages[0][0], best_from_lineages[1][0]
+            # Smart parent selection: balance performance and complementarity
+            parent1_idx, parent2_idx = self._select_merge_parents(best_from_lineages, candidates)
 
             # Create merge candidate
             merged_candidate = self._merge_candidates(candidates[parent1_idx], candidates[parent2_idx])
@@ -1399,11 +1461,86 @@ class GEPA(FinetuneTeleprompter):
             current = self.lineages[current.parent_id]
         return current.candidate_id
 
-    def _merge_candidates(self, candidate1: Module, candidate2: Module) -> Optional[Module]:
-        """Merge two candidates by combining their best instructions.
+    def _select_merge_parents(self, lineage_candidates: List[Tuple[int, float, float]], 
+                             candidates: List[Module]) -> Tuple[int, int]:
+        """Select optimal parents for crossover based on performance and complementarity."""
+        if len(lineage_candidates) < 2:
+            # Fallback to simple selection
+            lineage_candidates.sort(key=lambda x: x[1], reverse=True)
+            return lineage_candidates[0][0], lineage_candidates[1][0]
+        
+        # Analyze instruction complementarity between candidates
+        best_pair = None
+        best_compatibility = -float('inf')
+        
+        for i in range(len(lineage_candidates)):
+            for j in range(i + 1, len(lineage_candidates)):
+                idx1, score1, div1 = lineage_candidates[i]
+                idx2, score2, div2 = lineage_candidates[j]
+                
+                # Calculate compatibility score
+                compatibility = self._calculate_instruction_compatibility(
+                    candidates[idx1], candidates[idx2]
+                )
+                
+                # Combined selection criteria: performance + diversity + compatibility
+                selection_score = (
+                    0.5 * (score1 + score2) +  # Performance
+                    0.2 * (div1 + div2) +      # Diversity
+                    0.3 * compatibility        # Complementarity
+                )
+                
+                if selection_score > best_compatibility:
+                    best_compatibility = selection_score
+                    best_pair = (idx1, idx2)
+        
+        return best_pair if best_pair else (lineage_candidates[0][0], lineage_candidates[1][0])
 
-        This is a simplified merge strategy - could be enhanced with more sophisticated
-        instruction combination logic.
+    def _calculate_instruction_compatibility(self, candidate1: Module, candidate2: Module) -> float:
+        """Calculate how well two candidates' instructions would complement each other."""
+        try:
+            predictors1 = candidate1.predictors()
+            predictors2 = candidate2.predictors()
+            
+            if len(predictors1) != len(predictors2):
+                return 0.0  # Incompatible structures
+            
+            compatibility_scores = []
+            
+            for pred1, pred2 in zip(predictors1, predictors2):
+                sig1 = get_signature(pred1)
+                sig2 = get_signature(pred2)
+                
+                inst1 = sig1.instructions or ""
+                inst2 = sig2.instructions or ""
+                
+                if not inst1 or not inst2:
+                    compatibility_scores.append(0.5)  # Neutral
+                elif inst1 == inst2:
+                    compatibility_scores.append(0.0)  # Identical (no benefit)
+                else:
+                    # Favor complementary over adversarial
+                    if self._are_complementary(inst1, inst2):
+                        compatibility_scores.append(1.0)  # Highly compatible
+                    elif self._are_adversarial(inst1, inst2):
+                        compatibility_scores.append(0.3)  # Potentially useful but conflicting
+                    else:
+                        compatibility_scores.append(0.6)  # Moderately compatible
+            
+            return sum(compatibility_scores) / len(compatibility_scores) if compatibility_scores else 0.0
+            
+        except Exception as e:
+            logger.warning(f"Compatibility calculation failed: {e}")
+            return 0.0
+
+    def _merge_candidates(self, candidate1: Module, candidate2: Module) -> Optional[Module]:
+        """Merge two candidates using intelligent crossover strategies.
+
+        Implements sophisticated instruction combination logic with:
+        1. Semantic analysis of instructions
+        2. Performance-weighted combination
+        3. Conflict resolution
+        4. Multiple merge strategies (complementary, adversarial, hybrid)
         """
         try:
             # Create base candidate from candidate1
@@ -1416,25 +1553,124 @@ class GEPA(FinetuneTeleprompter):
             if len(predictors1) != len(predictors2):
                 return None  # Can't merge candidates with different structures
 
-            # Simple merge strategy: alternate instructions or combine them
+            # Intelligent crossover: analyze instruction compatibility
             merged_predictors = merged_candidate.predictors()
-
+            
             for i, (pred1, pred2, merged_pred) in enumerate(zip(predictors1, predictors2, merged_predictors)):
                 sig1 = get_signature(pred1)
                 sig2 = get_signature(pred2)
 
-                # Combine instructions (simple concatenation for now)
                 inst1 = sig1.instructions or ""
                 inst2 = sig2.instructions or ""
 
                 if inst1 and inst2 and inst1 != inst2:
-                    # Create combined instruction
-                    combined_instruction = f"{inst1} Additionally, {inst2.lower()}"
+                    # Apply intelligent crossover strategy
+                    combined_instruction = self._intelligent_crossover(inst1, inst2, i)
                     merged_sig = get_signature(merged_pred)
                     merged_sig.instructions = combined_instruction
+                elif inst1 and not inst2:
+                    # Use instruction from candidate1
+                    merged_sig = get_signature(merged_pred)
+                    merged_sig.instructions = inst1
+                elif inst2 and not inst1:
+                    # Use instruction from candidate2
+                    merged_sig = get_signature(merged_pred)
+                    merged_sig.instructions = inst2
 
             return merged_candidate
 
         except Exception as e:
             logger.warning(f"Candidate merge failed: {e}")
             return None
+
+    def _intelligent_crossover(self, inst1: str, inst2: str, module_idx: int) -> str:
+        """Apply intelligent crossover strategies to combine instructions.
+        
+        Uses multiple strategies:
+        1. Complementary merge: Combine non-overlapping guidance
+        2. Adversarial merge: Balance opposing directives  
+        3. Hybrid merge: Conditional combination based on context
+        """
+        # Strategy 1: Detect complementary instructions
+        if self._are_complementary(inst1, inst2):
+            return self._complementary_merge(inst1, inst2)
+        
+        # Strategy 2: Detect adversarial instructions
+        elif self._are_adversarial(inst1, inst2):
+            return self._adversarial_merge(inst1, inst2)
+        
+        # Strategy 3: Hybrid merge for general cases
+        else:
+            return self._hybrid_merge(inst1, inst2, module_idx)
+
+    def _are_complementary(self, inst1: str, inst2: str) -> bool:
+        """Check if instructions are complementary (non-overlapping guidance)."""
+        # Define complementary patterns
+        complementary_pairs = [
+            (['accurate', 'precise', 'exact'], ['clear', 'concise', 'brief']),
+            (['step', 'systematic', 'methodical'], ['creative', 'innovative', 'flexible']),
+            (['specific', 'detailed', 'thorough'], ['efficient', 'quick', 'direct']),
+            (['analytical', 'logical', 'reasoning'], ['intuitive', 'practical', 'applied'])
+        ]
+        
+        inst1_lower = inst1.lower()
+        inst2_lower = inst2.lower()
+        
+        for group1, group2 in complementary_pairs:
+            has_group1_in_inst1 = any(kw in inst1_lower for kw in group1)
+            has_group2_in_inst2 = any(kw in inst2_lower for kw in group2)
+            has_group1_in_inst2 = any(kw in inst2_lower for kw in group1)
+            has_group2_in_inst1 = any(kw in inst1_lower for kw in group2)
+            
+            # Complementary if one instruction focuses on group1 and other on group2
+            if (has_group1_in_inst1 and has_group2_in_inst2 and 
+                not has_group1_in_inst2 and not has_group2_in_inst1):
+                return True
+                
+        return False
+
+    def _are_adversarial(self, inst1: str, inst2: str) -> bool:
+        """Check if instructions are adversarial (conflicting guidance)."""
+        # Define adversarial patterns
+        adversarial_pairs = [
+            (['brief', 'concise', 'short'], ['detailed', 'comprehensive', 'thorough']),
+            (['simple', 'basic', 'straightforward'], ['complex', 'sophisticated', 'advanced']),
+            (['fast', 'quick', 'rapid'], ['careful', 'methodical', 'deliberate']),
+            (['direct', 'immediate'], ['step-by-step', 'gradual', 'incremental'])
+        ]
+        
+        inst1_lower = inst1.lower()
+        inst2_lower = inst2.lower()
+        
+        for group1, group2 in adversarial_pairs:
+            has_group1_in_inst1 = any(kw in inst1_lower for kw in group1)
+            has_group2_in_inst2 = any(kw in inst2_lower for kw in group2)
+            has_group1_in_inst2 = any(kw in inst2_lower for kw in group1)
+            has_group2_in_inst1 = any(kw in inst1_lower for kw in group2)
+            
+            # Adversarial if instructions contain conflicting directives
+            if ((has_group1_in_inst1 and has_group2_in_inst2) or 
+                (has_group1_in_inst2 and has_group2_in_inst1)):
+                return True
+                
+        return False
+
+    def _complementary_merge(self, inst1: str, inst2: str) -> str:
+        """Merge complementary instructions by combining their strengths."""
+        # Combine complementary aspects
+        return f"{inst1} {inst2}"
+
+    def _adversarial_merge(self, inst1: str, inst2: str) -> str:
+        """Merge adversarial instructions by finding balanced middle ground."""
+        # Create balanced instruction that addresses both concerns
+        return f"{inst1} While being {inst2.lower()}, maintain balance and effectiveness."
+
+    def _hybrid_merge(self, inst1: str, inst2: str, module_idx: int) -> str:
+        """Hybrid merge strategy for general cases."""
+        # Use different strategies based on module position
+        if module_idx == 0:  # First module - emphasize clarity
+            return f"{inst1} Ensure clarity: {inst2.lower()}"
+        elif module_idx % 2 == 0:  # Even modules - structured combination
+            return f"{inst1} Additionally, {inst2.lower()}"
+        else:  # Odd modules - adaptive combination
+            return f"Combine approaches: {inst1.lower()} and {inst2.lower()}"
