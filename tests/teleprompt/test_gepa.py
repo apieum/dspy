@@ -45,11 +45,11 @@ def simple_metric(example, prediction, trace=None):
 def simple_trainset():
     """Simple training dataset for testing."""
     return [
-        Example(question="What is 2+2?", answer="4"),
-        Example(question="What color is the sky?", answer="blue"),
-        Example(question="What is the capital of France?", answer="Paris"),
-        Example(question="How many legs does a cat have?", answer="4"),
-        Example(question="What planet do we live on?", answer="Earth"),
+        Example(question="What is 2+2?", answer="4").with_inputs("question"),
+        Example(question="What color is the sky?", answer="blue").with_inputs("question"),
+        Example(question="What is the capital of France?", answer="Paris").with_inputs("question"),
+        Example(question="How many legs does a cat have?", answer="4").with_inputs("question"),
+        Example(question="What planet do we live on?", answer="Earth").with_inputs("question"),
     ]
 
 
@@ -179,9 +179,12 @@ class TestGEPABehavior:
             program = SimpleQA()
             gepa = GEPA(metric=simple_metric)
             
-            # This will fail due to NotImplementedError, but we're testing structure
-            with pytest.raises(NotImplementedError):
-                compiled_program = gepa.compile(program, trainset=simple_trainset, budget=50)
+            # Now GEPA should actually work - test that it returns a compiled program
+            compiled_program = gepa.compile(program, trainset=simple_trainset, budget=50)
+            
+            assert compiled_program is not None
+            assert hasattr(compiled_program, '_compiled')
+            assert compiled_program._compiled is True
                 
     def test_gepa_preserves_original_program(self, simple_trainset, dummy_lm):
         """GEPA should not modify the original student program."""
@@ -191,49 +194,62 @@ class TestGEPABehavior:
             
             gepa = GEPA(metric=simple_metric)
             
-            # This will fail due to NotImplementedError, but we're testing structure
-            with pytest.raises(NotImplementedError):
-                gepa.compile(original_program, trainset=simple_trainset, budget=50)
+            # Now GEPA should actually work
+            compiled_program = gepa.compile(original_program, trainset=simple_trainset, budget=50)
                 
             # Original program should be unchanged
             assert getattr(original_program, '_compiled', False) == original_compiled_state
+            # Compiled program should be different instance
+            assert original_program is not compiled_program
 
 
 class TestComponentInterfaces:
     """Test that component interfaces are properly defined."""
     
     def test_candidate_selector_interface(self):
-        """CandidateSelector should define select_candidate method."""
+        """CandidateSelector should work with candidates and scores."""
         selector = ParetoCandidateSelector()
+        program = SimpleQA()
+        scores = ScoreMatrix()
         
-        with pytest.raises(NotImplementedError):
-            selector.select_candidate([], ScoreMatrix())
+        # Should work with empty candidates
+        result = selector.select_candidate([program], scores)
+        assert isinstance(result, int)
+        assert 0 <= result < 1
             
     def test_prompt_mutator_interface(self):
-        """PromptMutator should define mutate_signature method."""
+        """PromptMutator should mutate signatures based on feedback."""
         mutator = ReflectivePromptMutator()
         signature = make_signature("question -> answer")
         feedback = FeedbackResult(traces=[], diagnostics=[], scores=[])
         
-        with pytest.raises(NotImplementedError):
-            mutator.mutate_signature(signature, feedback)
+        # Should return a signature (might be same or different)
+        result = mutator.mutate_signature(signature, feedback)
+        assert result is not None
+        assert hasattr(result, 'fields')
             
     def test_feedback_collector_interface(self):
-        """FeedbackCollector should define collect_feedback method."""
+        """FeedbackCollector should collect feedback from program execution."""
         collector = EnhancedFeedbackCollector()
         program = SimpleQA()
         examples = []
         
-        with pytest.raises(NotImplementedError):
-            collector.collect_feedback(program, examples, simple_metric)
+        # Should work with empty examples
+        result = collector.collect_feedback(program, examples, simple_metric)
+        assert isinstance(result, FeedbackResult)
+        assert result.traces == []
+        assert result.diagnostics == []
+        assert result.scores == []
             
     def test_module_selector_interface(self):
-        """ModuleSelector should define select_module method."""
+        """ModuleSelector should select modules from programs."""
         selector = RoundRobinModuleSelector()
         program = SimpleQA()
         
-        with pytest.raises(NotImplementedError):
-            selector.select_module(program)
+        # Should return valid module index
+        result = selector.select_module(program)
+        assert isinstance(result, int)
+        assert 0 <= result < len(program.predictors())
 
 
 class TestGEPAAlgorithmStructure:
@@ -243,8 +259,12 @@ class TestGEPAAlgorithmStructure:
         """GEPA should split dataset into feedback and Pareto sets."""
         gepa = GEPA(metric=simple_metric)
         
-        with pytest.raises(NotImplementedError, match="Dataset splitting"):
-            gepa._split_dataset(simple_trainset)
+        # Should split dataset according to pareto_ratio
+        feedback_data, pareto_data = gepa._split_dataset(simple_trainset)
+        
+        assert len(feedback_data) + len(pareto_data) == len(simple_trainset)
+        assert len(pareto_data) == int(len(simple_trainset) * gepa.pareto_ratio)
+        assert len(feedback_data) == len(simple_trainset) - len(pareto_data)
             
     def test_gepa_pareto_evaluation_structure(self):
         """GEPA should evaluate candidates on Pareto set."""
@@ -254,8 +274,11 @@ class TestGEPAAlgorithmStructure:
         scores = ScoreMatrix() 
         budget = BudgetTracker(limit=100)
         
-        with pytest.raises(NotImplementedError, match="Pareto evaluation"):
-            gepa._evaluate_candidates_on_pareto(candidates, pareto_data, scores, budget)
+        # Should handle empty pareto_data gracefully
+        gepa._evaluate_candidates_on_pareto(candidates, pareto_data, scores, budget)
+        
+        # Should not crash with valid inputs
+        assert True  # If we get here, the method worked
             
     def test_gepa_candidate_promotion_structure(self):
         """GEPA should have candidate promotion logic."""
@@ -265,8 +288,12 @@ class TestGEPAAlgorithmStructure:
         feedback_data = []
         budget = BudgetTracker(limit=100)
         
-        with pytest.raises(NotImplementedError, match="promotion logic"):
-            gepa._should_promote_candidate(new_candidate, parent_candidate, feedback_data, budget)
+        # Should return boolean decision
+        result = gepa._should_promote_candidate(new_candidate, parent_candidate, feedback_data, budget)
+        assert isinstance(result, bool)
+        
+        # With empty feedback_data, should return False
+        assert result is False
             
     def test_gepa_best_candidate_selection_structure(self):
         """GEPA should select best candidate from scores."""
@@ -274,8 +301,12 @@ class TestGEPAAlgorithmStructure:
         candidates = [SimpleQA()]
         scores = ScoreMatrix()
         
-        with pytest.raises(NotImplementedError, match="Best candidate selection"):
-            gepa._select_best_candidate(candidates, scores)
+        # Should return a candidate from the list
+        result = gepa._select_best_candidate(candidates, scores)
+        assert result in candidates
+        
+        # With single candidate, should return that candidate
+        assert result is candidates[0]
 
 
 if __name__ == "__main__":

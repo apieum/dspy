@@ -126,9 +126,178 @@ class ModuleSelector(ABC):
 class ParetoCandidateSelector(CandidateSelector):
     """Pareto-based candidate selection (Algorithm 2)."""
     
+    def __init__(self):
+        self.selection_counts = defaultdict(int)
+        
     def select_candidate(self, candidates: List[Module], scores: ScoreMatrix) -> int:
-        # TODO: Implement Algorithm 2 from paper
-        raise NotImplementedError("Pareto selection not yet implemented")
+        """Select candidate using Pareto-based illumination strategy (Algorithm 2).
+        
+        Implementation of Algorithm 2 from GEPA paper:
+        1. Identify highest score for each training instance across all candidates
+        2. Compile candidates that achieve best score on at least one training task
+        3. Prune strictly dominated candidates
+        4. Stochastically sample from remaining candidates based on their "winning" frequency
+        """
+        if not candidates:
+            return 0
+            
+        # Get candidates with scores
+        candidate_indices = list(range(len(candidates)))
+        scored_candidates = [idx for idx in candidate_indices if scores.get_candidate_scores(idx)]
+        
+        if not scored_candidates:
+            # No candidates have scores yet, select first
+            return 0
+            
+        if len(scored_candidates) == 1:
+            # Only one candidate scored, select it
+            self.selection_counts[scored_candidates[0]] += 1
+            return scored_candidates[0]
+            
+        # Algorithm 2: Pareto-based selection
+        pareto_candidates = self._find_pareto_frontier(scored_candidates, scores)
+        selected_idx = self._stochastic_sample_from_pareto(pareto_candidates, scores)
+        
+        self.selection_counts[selected_idx] += 1
+        return selected_idx
+    
+    def _find_pareto_frontier(self, candidate_indices: List[int], scores: ScoreMatrix) -> List[int]:
+        """Find Pareto frontier of candidates based on task-level performance.
+        
+        A candidate is in the Pareto frontier if it achieves the best score
+        on at least one training task, and is not strictly dominated.
+        """
+        # Get all task indices by examining score matrix
+        all_task_indices = set()
+        for candidate_idx in candidate_indices:
+            all_task_indices.update(scores.get_candidate_scores(candidate_idx).keys())
+        all_task_indices = list(all_task_indices)
+        
+        if not all_task_indices:
+            return candidate_indices[:1]  # Fallback to first candidate
+            
+        # Step 1: Find best score for each task
+        task_best_scores = {}
+        for task_idx in all_task_indices:
+            best_score = -float('inf')
+            for candidate_idx in candidate_indices:
+                score = scores.get_score(candidate_idx, task_idx)
+                if score is not None and score > best_score:
+                    best_score = score
+            task_best_scores[task_idx] = best_score
+            
+        # Step 2: Find candidates that achieve best score on at least one task
+        winning_candidates = set()
+        candidate_wins = defaultdict(list)  # candidate_idx -> list of tasks where it wins
+        
+        for task_idx in all_task_indices:
+            best_score = task_best_scores[task_idx]
+            for candidate_idx in candidate_indices:
+                score = scores.get_score(candidate_idx, task_idx)
+                if score is not None and abs(score - best_score) < 1e-6:  # Account for float precision
+                    winning_candidates.add(candidate_idx)
+                    candidate_wins[candidate_idx].append(task_idx)
+                    
+        if not winning_candidates:
+            return candidate_indices[:1]  # Fallback
+            
+        # Step 3: Prune strictly dominated candidates
+        pareto_candidates = list(winning_candidates)
+        pareto_candidates = self._remove_dominated_candidates(pareto_candidates, scores, all_task_indices)
+        
+        return pareto_candidates if pareto_candidates else candidate_indices[:1]
+    
+    def _remove_dominated_candidates(self, candidates: List[int], scores: ScoreMatrix, task_indices: List[int]) -> List[int]:
+        """Remove strictly dominated candidates.
+        
+        Candidate A dominates candidate B if A performs >= B on all tasks
+        and A performs > B on at least one task.
+        """
+        non_dominated = []
+        
+        for i, candidate_a in enumerate(candidates):
+            is_dominated = False
+            
+            for j, candidate_b in enumerate(candidates):
+                if i == j:
+                    continue
+                    
+                # Check if candidate_b dominates candidate_a
+                dominates = True
+                strictly_better_on_some = False
+                
+                for task_idx in task_indices:
+                    score_a = scores.get_score(candidate_a, task_idx) or 0.0
+                    score_b = scores.get_score(candidate_b, task_idx) or 0.0
+                    
+                    if score_b < score_a:
+                        dominates = False
+                        break
+                    elif score_b > score_a:
+                        strictly_better_on_some = True
+                        
+                if dominates and strictly_better_on_some:
+                    is_dominated = True
+                    break
+                    
+            if not is_dominated:
+                non_dominated.append(candidate_a)
+                
+        return non_dominated
+    
+    def _stochastic_sample_from_pareto(self, pareto_candidates: List[int], scores: ScoreMatrix) -> int:
+        """Stochastically sample from Pareto frontier based on winning frequency.
+        
+        Candidates with higher winning frequency (more tasks where they achieve best score)
+        are more likely to be selected.
+        """
+        if len(pareto_candidates) == 1:
+            return pareto_candidates[0]
+            
+        # Count wins for each candidate
+        candidate_wins = defaultdict(int)
+        all_task_indices = set()
+        
+        for candidate_idx in pareto_candidates:
+            all_task_indices.update(scores.get_candidate_scores(candidate_idx).keys())
+        all_task_indices = list(all_task_indices)
+        
+        # Count wins per candidate
+        for task_idx in all_task_indices:
+            best_score = -float('inf')
+            best_candidates = []
+            
+            for candidate_idx in pareto_candidates:
+                score = scores.get_score(candidate_idx, task_idx) or 0.0
+                if score > best_score:
+                    best_score = score
+                    best_candidates = [candidate_idx]
+                elif abs(score - best_score) < 1e-6:
+                    best_candidates.append(candidate_idx)
+                    
+            # Award wins to tied candidates
+            for candidate_idx in best_candidates:
+                candidate_wins[candidate_idx] += 1.0 / len(best_candidates)
+                
+        # Convert to probabilities
+        total_wins = sum(candidate_wins.values())
+        if total_wins == 0:
+            # Uniform selection if no wins computed
+            return random.choice(pareto_candidates)
+            
+        probabilities = [candidate_wins[candidate_idx] / total_wins for candidate_idx in pareto_candidates]
+        
+        # Stochastic selection based on winning frequency
+        cumulative_prob = 0.0
+        rand_val = random.random()
+        
+        for i, prob in enumerate(probabilities):
+            cumulative_prob += prob
+            if rand_val <= cumulative_prob:
+                return pareto_candidates[i]
+                
+        # Fallback (should not reach here)
+        return pareto_candidates[-1]
 
 
 class ReflectivePromptMutator(PromptMutator):
@@ -136,18 +305,199 @@ class ReflectivePromptMutator(PromptMutator):
     
     def __init__(self, prompt_model: Optional[Any] = None):
         self.prompt_model = prompt_model
+        self.mutation_history = []
         
     def mutate_signature(self, current_signature: Signature, feedback: FeedbackResult) -> Signature:
-        # TODO: Implement meta-prompt based reflection
-        raise NotImplementedError("Reflective mutation not yet implemented")
+        """Mutate signature using reflective feedback from execution traces.
+        
+        This implements the core GEPA innovation: using execution traces and
+        performance feedback to guide prompt evolution through natural language reflection.
+        """
+        try:
+            # Generate reflection prompt using feedback
+            reflection_prompt = self._create_reflection_prompt(current_signature, feedback)
+            
+            # Get LLM reflection on how to improve the instruction
+            with dspy.context(lm=self.prompt_model):
+                reflection_predictor = dspy.Predict("analysis, current_instruction -> improved_instruction")
+                reflection_result = reflection_predictor(
+                    analysis=reflection_prompt,
+                    current_instruction=current_signature.instructions or "Answer the question."
+                )
+            
+            # Create new signature with improved instruction
+            # Use make_signature to properly create a new signature
+            from dspy.signatures.signature import make_signature
+            
+            # Extract field names for signature creation
+            input_fields = []
+            output_fields = []
+            
+            for field_name, field_info in current_signature.fields.items():
+                if hasattr(field_info, 'json_schema_extra') and field_info.json_schema_extra:
+                    field_type = field_info.json_schema_extra.get('__dspy_field_type')
+                    if field_type == 'input':
+                        input_fields.append(field_name)
+                    elif field_type == 'output':
+                        output_fields.append(field_name)
+                else:
+                    # Fallback: assume last field is output
+                    field_names = list(current_signature.fields.keys())
+                    if field_name == field_names[-1]:
+                        output_fields.append(field_name)
+                    else:
+                        input_fields.append(field_name)
+            
+            # Create signature string
+            if not input_fields or not output_fields:
+                # Fallback to original signature
+                new_signature = current_signature
+            else:
+                signature_str = f"{', '.join(input_fields)} -> {', '.join(output_fields)}"
+                new_signature = make_signature(signature_str)
+            
+            # Update instruction
+            improved_instruction = reflection_result.improved_instruction.strip()
+            if improved_instruction and improved_instruction != current_signature.instructions:
+                new_signature.instructions = improved_instruction
+                
+                # Log mutation for analysis
+                self.mutation_history.append({
+                    'original': current_signature.instructions,
+                    'improved': improved_instruction,
+                    'feedback_scores': feedback.scores,
+                    'avg_score': sum(feedback.scores) / len(feedback.scores) if feedback.scores else 0.0
+                })
+                
+                logger.debug(f"Mutated instruction: '{current_signature.instructions}' -> '{improved_instruction}'")
+            else:
+                # Fallback: make minor variation to avoid stagnation
+                new_signature.instructions = self._make_variation(current_signature.instructions)
+                
+            return new_signature
+            
+        except Exception as e:
+            logger.warning(f"Reflective mutation failed: {e}")
+            # Fallback to original signature
+            return current_signature
+    
+    def _create_reflection_prompt(self, signature: Signature, feedback: FeedbackResult) -> str:
+        """Create analysis prompt for LLM reflection."""
+        # Summarize performance
+        avg_score = sum(feedback.scores) / len(feedback.scores) if feedback.scores else 0.0
+        performance_summary = f"Average score: {avg_score:.2f} on {len(feedback.scores)} examples"
+        
+        # Extract key failure patterns from diagnostics
+        failures = [diag for diag, score in zip(feedback.diagnostics, feedback.scores) if score <= 0.5]
+        failure_summary = "\n".join(failures[:3]) if failures else "No major failures observed"
+        
+        # Current instruction context
+        current_instruction = signature.instructions or "Answer the question."
+        
+        # Input/output field context
+        input_fields = [name for name, field in signature.fields.items() if hasattr(field, 'json_schema_extra') and field.json_schema_extra.get('__dspy_field_type') == 'input']
+        output_fields = [name for name, field in signature.fields.items() if hasattr(field, 'json_schema_extra') and field.json_schema_extra.get('__dspy_field_type') == 'output']
+        
+        reflection_prompt = f"""Analyze this AI system's performance and suggest instruction improvements:
+
+Current Instruction: "{current_instruction}"
+Task: {' -> '.join(input_fields)} -> {' -> '.join(output_fields)}
+
+Performance Analysis:
+{performance_summary}
+
+Failure Examples:
+{failure_summary}
+
+The instruction should be clear, specific, and guide the model toward better performance on this task. Consider what reasoning steps, constraints, or clarifications might help."""
+        
+        return reflection_prompt
+    
+    def _make_variation(self, instruction: str) -> str:
+        """Make small variation to instruction to avoid stagnation."""
+        if not instruction:
+            return "Answer the question clearly and accurately."
+            
+        # Simple variations to maintain exploration
+        variations = [
+            f"{instruction} Be precise and thorough.",
+            f"{instruction} Think step by step.",
+            f"Carefully {instruction.lower()}",
+            f"{instruction} Provide detailed reasoning."
+        ]
+        
+        # Select variation that's different from original
+        for variation in variations:
+            if variation != instruction:
+                return variation
+                
+        return instruction + " Be comprehensive."
 
 
 class EnhancedFeedbackCollector(FeedbackCollector):
     """Enhanced feedback with diagnostic traces."""
     
     def collect_feedback(self, program: Module, examples: List[Example], metric: Callable) -> FeedbackResult:
-        # TODO: Implement enhanced feedback with traces
-        raise NotImplementedError("Enhanced feedback collection not yet implemented")
+        """Collect enhanced feedback with DSPy traces and diagnostics.
+        
+        Returns FeedbackResult with:
+        - traces: DSPy execution traces for each example
+        - diagnostics: Human-readable diagnostic messages
+        - scores: Scalar scores from metric evaluation
+        """
+        if not examples:
+            return FeedbackResult(traces=[], diagnostics=[], scores=[])
+            
+        traces = []
+        diagnostics = []
+        scores = []
+        
+        for example in examples:
+            try:
+                # Collect trace during execution
+                trace = []
+                with dspy.context(trace=trace):
+                    prediction = program(**example.inputs())
+                    
+                # Extract trace from context
+                execution_trace = trace
+                traces.append(execution_trace)
+                
+                # Compute score
+                score = metric(example, prediction)
+                scores.append(float(score))
+                
+                # Generate diagnostic message
+                diagnostic = self._generate_diagnostic(example, prediction, score, execution_trace)
+                diagnostics.append(diagnostic)
+                
+            except Exception as e:
+                logger.warning(f"Failed to collect feedback for example: {e}")
+                traces.append([])
+                scores.append(0.0)
+                diagnostics.append(f"Execution failed: {str(e)}")
+                
+        return FeedbackResult(traces=traces, diagnostics=diagnostics, scores=scores)
+    
+    def _generate_diagnostic(self, example: Example, prediction: Any, score: float, trace: List) -> str:
+        """Generate human-readable diagnostic message."""
+        # Basic diagnostic - can be enhanced with more sophisticated analysis
+        status = "CORRECT" if score > 0.5 else "INCORRECT"
+        
+        # Extract key information from prediction
+        pred_summary = str(prediction)[:100] + "..." if len(str(prediction)) > 100 else str(prediction)
+        
+        # Count reasoning steps from trace
+        reasoning_steps = len([step for step in trace if hasattr(step, 'reasoning')])
+        
+        diagnostic = f"[{status}] Score: {score:.2f}, Steps: {reasoning_steps}, Prediction: {pred_summary}"
+        
+        # Add specific failure analysis for low scores
+        if score <= 0.5:
+            expected = getattr(example, 'answer', 'N/A')
+            diagnostic += f" | Expected: {expected}"
+            
+        return diagnostic
 
 
 class RoundRobinModuleSelector(ModuleSelector):
@@ -157,8 +507,23 @@ class RoundRobinModuleSelector(ModuleSelector):
         self.module_counts = defaultdict(int)
         
     def select_module(self, program: Module) -> int:
-        # TODO: Implement round-robin selection
-        raise NotImplementedError("Round-robin selection not yet implemented")
+        """Select module using round-robin strategy."""
+        predictors = program.predictors()
+        if not predictors:
+            return 0
+            
+        # Find the module with the lowest selection count
+        program_id = id(program)
+        min_count = min(self.module_counts[program_id, i] for i in range(len(predictors)))
+        
+        # Among modules with min count, select the first one
+        for i in range(len(predictors)):
+            if self.module_counts[program_id, i] == min_count:
+                self.module_counts[program_id, i] += 1
+                return i
+                
+        # Fallback (should never reach here)
+        return 0
 
 
 # Main GEPA Implementation
@@ -241,7 +606,7 @@ class GEPA(FinetuneTeleprompter):
         scores = ScoreMatrix()
         budget = BudgetTracker(limit=kwargs.get('budget', len(trainset) * 10))
         
-        # 5. Initial Pareto evaluation
+        # 5. Initial Pareto evaluation (counts toward budget - these are expensive LLM calls)
         logger.info("Performing initial Pareto evaluation...")
         self._evaluate_candidates_on_pareto(candidates, pareto_data, scores, budget)
         
@@ -264,6 +629,7 @@ class GEPA(FinetuneTeleprompter):
                 if self._should_promote_candidate(new_candidate, candidates[candidate_idx], feedback_data, budget):
                     candidates.append(new_candidate)
                     logger.info(f"Promoted new candidate (total: {len(candidates)})")
+                    # Evaluate only the NEW candidate on Pareto set (costs budget)
                     self._evaluate_candidates_on_pareto([new_candidate], pareto_data, scores, budget)
                 
             except Exception as e:
@@ -282,9 +648,38 @@ class GEPA(FinetuneTeleprompter):
         return best_candidate
     
     def _split_dataset(self, trainset: List[Example]) -> Tuple[List[Example], List[Example]]:
-        """Split dataset into feedback and Pareto evaluation sets."""
-        # TODO: Implement dataset splitting based on pareto_ratio
-        raise NotImplementedError("Dataset splitting not yet implemented")
+        """Split dataset into feedback and Pareto evaluation sets.
+        
+        Args:
+            trainset: Full training dataset
+            
+        Returns:
+            Tuple of (feedback_data, pareto_data) where:
+            - feedback_data: Used for minibatch evaluation and learning signals
+            - pareto_data: Used for Pareto frontier evaluation and candidate ranking
+        """
+        if not trainset:
+            return [], []
+            
+        # Calculate split sizes based on pareto_ratio
+        total_size = len(trainset)
+        pareto_size = int(total_size * self.pareto_ratio)
+        feedback_size = total_size - pareto_size
+        
+        # Ensure minimum sizes
+        if pareto_size == 0 and total_size > 0:
+            pareto_size = 1
+            feedback_size = total_size - 1
+        if feedback_size == 0 and total_size > 1:
+            feedback_size = 1
+            pareto_size = total_size - 1
+            
+        # Split dataset (pareto_data first, feedback_data second)
+        # This follows paper convention where validation set is typically first portion
+        pareto_data = trainset[:pareto_size]
+        feedback_data = trainset[pareto_size:]
+        
+        return feedback_data, pareto_data
     
     def _evaluate_candidates_on_pareto(
         self, 
@@ -293,9 +688,88 @@ class GEPA(FinetuneTeleprompter):
         scores: ScoreMatrix,
         budget: BudgetTracker
     ):
-        """Evaluate candidates on Pareto set with async support."""
-        # TODO: Implement async Pareto evaluation
-        raise NotImplementedError("Pareto evaluation not yet implemented")
+        """Evaluate candidates on Pareto set with async support.
+        
+        This is where GEPA gets major speedup over MIPROv2 through parallel evaluation.
+        """
+        if not pareto_data or not candidates:
+            return
+            
+        # Run async evaluation if event loop is available, otherwise fallback to sync
+        try:
+            # Check if we're already in an async context
+            loop = asyncio.get_running_loop()
+            # If we get here, we're in an async context - run directly
+            task = loop.create_task(self._evaluate_candidates_async(candidates, pareto_data, scores, budget))
+            loop.run_until_complete(task)
+        except RuntimeError:
+            # No event loop running - create one
+            asyncio.run(self._evaluate_candidates_async(candidates, pareto_data, scores, budget))
+    
+    async def _evaluate_candidates_async(
+        self, 
+        candidates: List[Module], 
+        pareto_data: List[Example], 
+        scores: ScoreMatrix,
+        budget: BudgetTracker
+    ):
+        """Async implementation of Pareto evaluation."""
+        evaluation_tasks = []
+        
+        # Create tasks for all candidate-example pairs
+        for candidate_idx, candidate in enumerate(candidates):
+            # Skip if already evaluated
+            if len(scores.get_candidate_scores(candidate_idx)) >= len(pareto_data):
+                continue
+                
+            for task_idx, example in enumerate(pareto_data):
+                # Skip if already evaluated
+                if scores.get_score(candidate_idx, task_idx) is not None:
+                    continue
+                    
+                task = self._evaluate_single_candidate_example(
+                    candidate, example, candidate_idx, task_idx
+                )
+                evaluation_tasks.append(task)
+        
+        # Execute all evaluations in parallel
+        if evaluation_tasks:
+            results = await asyncio.gather(*evaluation_tasks, return_exceptions=True)
+            
+            # Process results and update scores
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.warning(f"Evaluation failed: {result}")
+                    continue
+                    
+                candidate_idx, task_idx, score = result
+                scores.set_score(candidate_idx, task_idx, score)
+                
+            # Update budget - Pareto evaluations ARE expensive LLM calls that count
+            successful_evals = len([r for r in results if not isinstance(r, Exception)])
+            budget.add_pareto_cost(successful_evals)
+            logger.debug(f"Pareto evaluation completed: {successful_evals} evaluations counted in budget")
+    
+    async def _evaluate_single_candidate_example(
+        self, 
+        candidate: Module, 
+        example: Example, 
+        candidate_idx: int, 
+        task_idx: int
+    ) -> Tuple[int, int, float]:
+        """Evaluate single candidate on single example."""
+        try:
+            # Use DSPy's trace collection pattern
+            with dspy.context(trace=[]):
+                prediction = candidate(**example.inputs())
+                
+            # Compute score using metric
+            score = self.metric(example, prediction)
+            return candidate_idx, task_idx, float(score)
+            
+        except Exception as e:
+            logger.warning(f"Failed to evaluate candidate {candidate_idx} on task {task_idx}: {e}")
+            return candidate_idx, task_idx, 0.0
     
     def _select_candidate_step(self, candidates: List[Module], scores: ScoreMatrix) -> int:
         """Step 1: Select candidate using Pareto-based strategy."""
@@ -314,7 +788,8 @@ class GEPA(FinetuneTeleprompter):
         """Step 3: Collect feedback on minibatch."""
         minibatch = create_minibatch(feedback_data, self.minibatch_size)
         feedback = self.feedback_collector.collect_feedback(candidate, minibatch, self.metric)
-        budget.add_minibatch_cost(len(minibatch) * len(candidate.predictors()))
+        # Count actual LLM calls in minibatch (this is what counts as "rollouts")
+        budget.add_minibatch_cost(len(minibatch))
         return feedback
     
     def _mutate_candidate_step(
@@ -344,11 +819,74 @@ class GEPA(FinetuneTeleprompter):
         feedback_data: List[Example], 
         budget: BudgetTracker
     ) -> bool:
-        """Decide whether to promote candidate to full evaluation."""
-        # TODO: Implement promotion decision logic
-        raise NotImplementedError("Candidate promotion logic not yet implemented")
+        """Decide whether to promote candidate to full evaluation.
+        
+        Strategy: Promote if new candidate shows improvement on small minibatch.
+        This balances exploration with budget efficiency.
+        """
+        if not feedback_data or not budget.has_budget():
+            return False
+            
+        try:
+            # Create small evaluation batch
+            eval_batch_size = min(3, len(feedback_data))
+            eval_batch = create_minibatch(feedback_data, eval_batch_size)
+            
+            # Evaluate both candidates on same batch
+            new_score = self._evaluate_candidate_on_batch(new_candidate, eval_batch)
+            parent_score = self._evaluate_candidate_on_batch(parent_candidate, eval_batch)
+            
+            # Update budget for evaluation costs
+            budget.add_minibatch_cost(eval_batch_size * 2)  # Two candidates evaluated
+            
+            # Promote if new candidate is better or tied (encourage exploration)
+            promotion_threshold = parent_score - 0.05  # Small tolerance for exploration
+            should_promote = new_score >= promotion_threshold
+            
+            logger.debug(f"Promotion eval: new={new_score:.3f}, parent={parent_score:.3f}, promote={should_promote}")
+            return should_promote
+            
+        except Exception as e:
+            logger.warning(f"Promotion evaluation failed: {e}")
+            return False  # Conservative: don't promote on evaluation failure
+    
+    def _evaluate_candidate_on_batch(self, candidate: Module, batch: List[Example]) -> float:
+        """Evaluate candidate on a small batch, return average score."""
+        if not batch:
+            return 0.0
+            
+        total_score = 0.0
+        for example in batch:
+            try:
+                prediction = candidate(**example.inputs())
+                score = self.metric(example, prediction)
+                total_score += float(score)
+            except Exception:
+                # Failed predictions contribute 0 score
+                continue
+                
+        return total_score / len(batch)
     
     def _select_best_candidate(self, candidates: List[Module], scores: ScoreMatrix) -> Module:
-        """Select best candidate based on average Pareto scores."""
-        # TODO: Implement best candidate selection
-        raise NotImplementedError("Best candidate selection not yet implemented")
+        """Select best candidate based on average Pareto scores.
+        
+        Returns the candidate with highest average score across Pareto evaluation set.
+        """
+        if not candidates:
+            raise ValueError("No candidates to select from")
+            
+        if len(candidates) == 1:
+            return candidates[0]
+            
+        best_candidate = candidates[0]
+        best_score = -float('inf')
+        
+        for idx, candidate in enumerate(candidates):
+            avg_score = scores.compute_average_score(idx)
+            
+            if avg_score > best_score:
+                best_score = avg_score
+                best_candidate = candidate
+                
+        logger.info(f"Selected best candidate with average score: {best_score:.3f}")
+        return best_candidate
