@@ -189,6 +189,92 @@ class ScoreMatrix:
         return sum(candidate_scores.values()) / len(candidate_scores)
 
 
+class CandidatePool:
+    """Encapsulates candidates, scores, and lineages in a single object.
+    
+    Manages the state of all candidates in the GEPA optimization process,
+    providing clean access to candidates, their performance scores, and
+    evolutionary lineages. Includes extension points for future per-candidate
+    feedback and over-specialization detection.
+    """
+    
+    def __init__(self):
+        self.candidates: List[Module] = []
+        self.scores: ScoreMatrix = ScoreMatrix()
+        self.lineages: Dict[int, CandidateLineage] = {}
+        # Extension point for future candidate-specific feedback
+        self._candidate_feedback: Dict[int, FeedbackResult] = {}
+        self._next_candidate_id = 0
+    
+    def add_candidate(self, candidate: Module, lineage: Optional[CandidateLineage] = None) -> int:
+        """Add a new candidate to the pool.
+        
+        Args:
+            candidate: The candidate module to add
+            lineage: Optional lineage information for tracking evolution
+            
+        Returns:
+            The candidate ID assigned to this candidate
+        """
+        candidate_id = len(self.candidates)
+        self.candidates.append(candidate)
+        
+        if lineage is not None:
+            self.lineages[candidate_id] = lineage
+        
+        return candidate_id
+    
+    def get_candidates(self) -> List[Module]:
+        """Get all candidates in the pool."""
+        return self.candidates.copy()
+    
+    def get_candidate(self, candidate_id: int) -> Optional[Module]:
+        """Get a specific candidate by ID."""
+        if 0 <= candidate_id < len(self.candidates):
+            return self.candidates[candidate_id]
+        return None
+    
+    def get_scores(self) -> ScoreMatrix:
+        """Get the score matrix for all candidates."""
+        return self.scores
+    
+    def get_lineages(self) -> Dict[int, CandidateLineage]:
+        """Get lineage information for all candidates."""
+        return self.lineages.copy()
+    
+    def get_lineage(self, candidate_id: int) -> Optional[CandidateLineage]:
+        """Get lineage information for a specific candidate."""
+        return self.lineages.get(candidate_id)
+    
+    def size(self) -> int:
+        """Number of candidates in pool."""
+        return len(self.candidates)
+    
+    def set_candidate_feedback(self, candidate_id: int, feedback: FeedbackResult):
+        """Set feedback for a specific candidate (extension point)."""
+        self._candidate_feedback[candidate_id] = feedback
+    
+    def get_candidate_feedback(self, candidate_id: int) -> Optional[FeedbackResult]:
+        """Get feedback for a specific candidate (extension point)."""
+        return self._candidate_feedback.get(candidate_id)
+    
+    def clear(self):
+        """Clear all candidates, scores, and lineages."""
+        self.candidates.clear()
+        self.scores = ScoreMatrix()
+        self.lineages.clear()
+        self._candidate_feedback.clear()
+        self._next_candidate_id = 0
+    
+    def __len__(self) -> int:
+        """Support len() operation."""
+        return len(self.candidates)
+    
+    def __iter__(self):
+        """Support iteration over candidates."""
+        return iter(self.candidates)
+
+
 # Component Interfaces
 class CandidateSelector(ABC):
     """Interface for candidate selection strategies (Algorithm 2 from paper)."""

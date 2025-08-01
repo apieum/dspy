@@ -23,6 +23,8 @@ from dspy.teleprompt.gepa import (
     RoundRobinModuleSelector,
     TrainingDataset,
     SplitDataset,
+    CandidatePool,
+    CandidateLineage,
 )
 from dspy.utils.dummies import DummyLM
 
@@ -614,6 +616,181 @@ class TestDatasetProtocol:
         
         for example in pareto_data:
             assert isinstance(example, Example)
+
+
+class TestCandidatePool:
+    """Test CandidatePool state management."""
+    
+    def test_candidate_pool_initialization(self):
+        """CandidatePool should initialize empty."""
+        pool = CandidatePool()
+        
+        assert pool.size() == 0
+        assert len(pool) == 0
+        assert len(pool.get_candidates()) == 0
+        assert len(pool.get_lineages()) == 0
+        assert isinstance(pool.get_scores(), ScoreMatrix)
+    
+    def test_add_candidate_without_lineage(self):
+        """Should add candidates without lineage information."""
+        pool = CandidatePool()
+        candidate = SimpleQA()
+        
+        candidate_id = pool.add_candidate(candidate)
+        
+        assert candidate_id == 0
+        assert pool.size() == 1
+        assert len(pool) == 1
+        assert pool.get_candidate(0) is candidate
+        assert candidate in pool.get_candidates()
+        assert pool.get_lineage(0) is None
+    
+    def test_add_candidate_with_lineage(self):
+        """Should add candidates with lineage information."""
+        pool = CandidatePool()
+        candidate = SimpleQA()
+        lineage = CandidateLineage(candidate_id=0, generation=1, mutation_type="reflective")
+        
+        candidate_id = pool.add_candidate(candidate, lineage)
+        
+        assert candidate_id == 0
+        assert pool.get_lineage(0) is lineage
+        assert 0 in pool.get_lineages()
+        assert pool.get_lineages()[0] is lineage
+    
+    def test_add_multiple_candidates(self):
+        """Should handle multiple candidates with sequential IDs."""
+        pool = CandidatePool()
+        candidate1 = SimpleQA()
+        candidate2 = SimpleQA()
+        candidate3 = SimpleQA()
+        
+        id1 = pool.add_candidate(candidate1)
+        id2 = pool.add_candidate(candidate2)
+        id3 = pool.add_candidate(candidate3)
+        
+        assert id1 == 0
+        assert id2 == 1
+        assert id3 == 2
+        assert pool.size() == 3
+        assert pool.get_candidate(0) is candidate1
+        assert pool.get_candidate(1) is candidate2
+        assert pool.get_candidate(2) is candidate3
+    
+    def test_get_candidate_bounds_checking(self):
+        """Should handle invalid candidate IDs gracefully."""
+        pool = CandidatePool()
+        candidate = SimpleQA()
+        pool.add_candidate(candidate)
+        
+        # Valid ID
+        assert pool.get_candidate(0) is candidate
+        
+        # Invalid IDs
+        assert pool.get_candidate(-1) is None
+        assert pool.get_candidate(1) is None
+        assert pool.get_candidate(100) is None
+    
+    def test_scores_integration(self):
+        """Should provide access to score matrix."""
+        pool = CandidatePool()
+        candidate1 = SimpleQA()
+        candidate2 = SimpleQA()
+        
+        pool.add_candidate(candidate1)
+        pool.add_candidate(candidate2)
+        
+        # Set some scores
+        scores = pool.get_scores()
+        scores.set_score(0, 0, 0.8)
+        scores.set_score(1, 0, 0.6)
+        
+        # Verify scores are accessible
+        assert scores.get_score(0, 0) == 0.8
+        assert scores.get_score(1, 0) == 0.6
+        assert scores.compute_average_score(0) == 0.8
+        assert scores.compute_average_score(1) == 0.6
+    
+    def test_candidate_feedback_extension_point(self):
+        """Should support per-candidate feedback (extension point)."""
+        pool = CandidatePool()
+        candidate = SimpleQA()
+        candidate_id = pool.add_candidate(candidate)
+        
+        # Initially no feedback
+        assert pool.get_candidate_feedback(candidate_id) is None
+        
+        # Set feedback
+        feedback = FeedbackResult(traces=[], diagnostics=["test"], scores=[0.5])
+        pool.set_candidate_feedback(candidate_id, feedback)
+        
+        # Retrieve feedback
+        retrieved_feedback = pool.get_candidate_feedback(candidate_id)
+        assert retrieved_feedback is feedback
+        assert retrieved_feedback.diagnostics == ["test"]
+        assert retrieved_feedback.scores == [0.5]
+    
+    def test_iteration_support(self):
+        """Should support iteration over candidates."""
+        pool = CandidatePool()
+        candidate1 = SimpleQA()
+        candidate2 = SimpleQA()
+        
+        pool.add_candidate(candidate1)
+        pool.add_candidate(candidate2)
+        
+        candidates = list(pool)
+        assert len(candidates) == 2
+        assert candidate1 in candidates
+        assert candidate2 in candidates
+    
+    def test_clear_functionality(self):
+        """Should clear all pool state."""
+        pool = CandidatePool()
+        candidate = SimpleQA()
+        lineage = CandidateLineage(candidate_id=0)
+        feedback = FeedbackResult(traces=[], diagnostics=[], scores=[])
+        
+        # Add data
+        candidate_id = pool.add_candidate(candidate, lineage)
+        pool.get_scores().set_score(0, 0, 0.5)
+        pool.set_candidate_feedback(candidate_id, feedback)
+        
+        assert pool.size() == 1
+        assert pool.get_lineage(0) is not None
+        assert pool.get_candidate_feedback(0) is not None
+        
+        # Clear
+        pool.clear()
+        
+        assert pool.size() == 0
+        assert len(pool.get_candidates()) == 0
+        assert len(pool.get_lineages()) == 0
+        assert pool.get_candidate_feedback(0) is None
+        assert pool.get_scores().get_score(0, 0) is None
+    
+    def test_immutable_getters(self):
+        """Getters should return copies to prevent external mutation."""
+        pool = CandidatePool()
+        candidate1 = SimpleQA()
+        candidate2 = SimpleQA()
+        lineage = CandidateLineage(candidate_id=0)
+        
+        pool.add_candidate(candidate1, lineage)
+        pool.add_candidate(candidate2)
+        
+        # Get copies
+        candidates = pool.get_candidates()
+        lineages = pool.get_lineages()
+        
+        # Modify copies
+        candidates.append(SimpleQA())
+        lineages[99] = CandidateLineage(candidate_id=99)
+        
+        # Original pool should be unchanged
+        assert pool.size() == 2
+        assert len(pool.get_candidates()) == 2
+        assert 99 not in pool.get_lineages()
 
 
 if __name__ == "__main__":
