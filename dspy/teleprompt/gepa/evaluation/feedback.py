@@ -1,6 +1,5 @@
-"""Core data structures for GEPA optimization."""
+"""Feedback data structures for evaluation step."""
 
-from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -53,28 +52,3 @@ class FeedbackResult:
             self.feedback_text = []
         if self.fitness_history is None:
             self.fitness_history = []
-
-
-class ScoreMatrix:
-    """Manages candidate scores across Pareto evaluation set."""
-
-    def __init__(self):
-        self.scores: Dict[int, Dict[int, float]] = defaultdict(dict)  # candidate_idx -> task_idx -> score
-
-    def set_score(self, candidate_idx: int, task_idx: int, score: float):
-        self.scores[candidate_idx][task_idx] = score
-
-    def get_score(self, candidate_idx: int, task_idx: int) -> Optional[float]:
-        return self.scores.get(candidate_idx, {}).get(task_idx)
-
-    def get_candidate_scores(self, candidate_idx: int) -> Dict[int, float]:
-        return self.scores.get(candidate_idx, {})
-
-    def get_all_candidates(self) -> List[int]:
-        return list(self.scores.keys())
-
-    def compute_average_score(self, candidate_idx: int) -> float:
-        candidate_scores = self.get_candidate_scores(candidate_idx)
-        if not candidate_scores:
-            return 0.0
-        return sum(candidate_scores.values()) / len(candidate_scores)

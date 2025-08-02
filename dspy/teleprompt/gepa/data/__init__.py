@@ -1,16 +1,11 @@
 """Data structures for GEPA optimization."""
 
-from .structures import ScoreMatrix, FeedbackResult, EvaluationTrace, ModuleFeedback
-from .candidate_pool import CandidatePool, CandidateLineage
-from .dataset import TrainingDataset, SplitDataset
+from .candidate import Candidate
+from .score_matrix import ScoreMatrix
+from .candidate_pool import CandidatePool
 
 __all__ = [
+    'Candidate',
     'ScoreMatrix',
-    'FeedbackResult', 
-    'EvaluationTrace',
-    'ModuleFeedback',
     'CandidatePool',
-    'CandidateLineage',
-    'TrainingDataset',
-    'SplitDataset'
 ]

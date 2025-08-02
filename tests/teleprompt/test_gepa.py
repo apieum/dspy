@@ -13,26 +13,17 @@ from dspy.primitives.module import Module
 from dspy.signatures.signature import make_signature
 from dspy.teleprompt.gepa import (
     GEPA, 
-    BudgetTracker,
-    LLMCallsBudget,
-    IterationBudget,
-    CombinedBudget,
+    Candidate,
+    Generation,
     ScoreMatrix,
-    FeedbackResult,
-    EvaluationTrace,
-    ModuleFeedback,
-    ParetoCandidateSelector,
-    ReflectivePromptMutator,
-    EnhancedFeedbackCollector,
-    RoundRobinModuleSelector,
-    TrainingDataset,
-    SplitDataset,
     CandidatePool,
-    CandidateLineage,
-    CandidateGenerator,
-    MutationGenerator,
-    CrossoverGenerator,
-    CompositeGenerator,
+    Budget,
+    Scoring,
+    Selection,
+    Generator,
+    Evaluator,
+    create_basic_gepa,
+    create_diversity_gepa,
 )
 from dspy.utils.dummies import DummyLM
 
@@ -80,1190 +71,189 @@ def dummy_lm():
     ])
 
 
-class TestDataStructures:
-    """Test core data structures."""
-    
-    def test_budget_tracker_initialization(self):
-        """LLMCallsBudget should initialize with zero usage."""
-        budget = LLMCallsBudget(limit=100)
-        assert budget.used == 0
-        assert budget.limit == 100
-        assert budget.has_budget() is True
-        
-    def test_budget_tracker_cost_tracking(self):
-        """LLMCallsBudget should correctly track different cost types."""
-        budget = LLMCallsBudget(limit=100)
-        
-        budget.add_minibatch_cost(10)
-        budget.add_reflection_cost(1)
-        budget.add_pareto_cost(20)
-        
-        stats = budget.get_stats()
-        assert stats['minibatch'] == 10
-        assert stats['reflection'] == 1
-        assert stats['pareto'] == 20
-        assert stats['total_used'] == 31
-        assert stats['remaining'] == 69
-        
-    def test_budget_tracker_limit_checking(self):
-        """LLMCallsBudget should correctly check budget limits."""
-        budget = LLMCallsBudget(limit=10)
-        assert budget.has_budget() is True
-        
-        budget.add_minibatch_cost(10)
-        assert budget.has_budget() is False
-    
-    def test_iteration_budget_tracking(self):
-        """IterationBudget should limit by iterations only."""
-        budget = IterationBudget(max_iterations=3)
-        
-        # Should allow iteration 1 and 2
-        budget.warn_iteration_start(1)
-        assert budget.has_budget() is True
-        budget.add_iteration_cost(1)
-        budget.add_minibatch_cost(100)  # Large LLM cost doesn't matter
-        
-        budget.warn_iteration_start(2)
-        assert budget.has_budget() is True
-        
-        # Should not allow iteration 3 (0-indexed)
-        budget.warn_iteration_start(3)
-        assert budget.has_budget() is False
-    
-    def test_combined_budget_tracking(self):
-        """CombinedBudget should limit by both LLM calls and iterations."""
-        budget = CombinedBudget(llm_limit=10, max_iterations=3)
-        
-        # Should stop when LLM limit reached first
-        budget.warn_iteration_start(1)
-        budget.add_minibatch_cost(15)  # Exceed LLM limit
-        assert budget.has_budget() is False
-        
-        # Reset for iteration limit test
-        budget2 = CombinedBudget(llm_limit=100, max_iterations=2)
-        budget2.warn_iteration_start(2)
-        assert budget2.has_budget() is False  # Exceed iteration limit
-        
-    def test_score_matrix_operations(self):
-        """Score matrix should handle candidate-task score management."""
-        scores = ScoreMatrix()
-        
-        # Set scores
-        scores.set_score(0, 0, 0.8)  # candidate 0, task 0, score 0.8
-        scores.set_score(0, 1, 0.6)  # candidate 0, task 1, score 0.6
-        scores.set_score(1, 0, 0.9)  # candidate 1, task 0, score 0.9
-        
-        # Get scores
-        assert scores.get_score(0, 0) == 0.8
-        assert scores.get_score(0, 1) == 0.6
-        assert scores.get_score(1, 0) == 0.9
-        assert scores.get_score(2, 0) is None  # Non-existent candidate
-        
-        # Compute averages
-        assert scores.compute_average_score(0) == 0.7  # (0.8 + 0.6) / 2
-        assert scores.compute_average_score(1) == 0.9  # 0.9 / 1
-        assert scores.compute_average_score(2) == 0.0  # No scores
-        
-    def test_feedback_result_structure(self):
-        """FeedbackResult should contain enhanced feedback with μf function support."""
-        feedback = FeedbackResult(
-            traces=[[], []],
-            diagnostics=["Good", "Needs improvement"],
-            scores=[0.8, 0.3],
-            evaluation_traces=[],  # Enhanced: Rich evaluation traces
-            module_feedback=[],    # Enhanced: Module-level feedback
-            feedback_text=[]       # Enhanced: Textual feedback
-        )
-        
-        assert len(feedback.traces) == 2
-        assert len(feedback.diagnostics) == 2
-        assert len(feedback.scores) == 2
-        assert feedback.scores[0] == 0.8
-        
-        # Test enhanced fields
-        assert hasattr(feedback, 'evaluation_traces')
-        assert hasattr(feedback, 'module_feedback')
-        assert hasattr(feedback, 'feedback_text')
-
-
 class TestGEPABehavior:
-    """Test GEPA behavioral requirements."""
+    """Test GEPA core behavior and algorithm structure."""
     
-    def test_gepa_initialization_with_defaults(self):
-        """GEPA should initialize with default components."""
-        gepa = GEPA(metric=simple_metric)
-        
-        assert gepa.metric == simple_metric
-        assert gepa.minibatch_size == 3
-        assert gepa.pareto_ratio == 0.67
-        assert gepa.max_candidates == 50
-        assert gepa.candidate_selector.__class__.__name__ == 'ParetoCandidateSelector'
-        assert gepa.candidate_generator.__class__.__name__ == 'CompositeGenerator'
-        assert gepa.feedback_collector.__class__.__name__ == 'EnhancedFeedbackCollector'
-        
-    def test_gepa_initialization_with_custom_components(self):
-        """GEPA should accept custom components via dependency injection.""" 
-        custom_selector = Mock(spec=ParetoCandidateSelector)
-        custom_generator = Mock(spec=CandidateGenerator)
-        custom_collector = Mock(spec=EnhancedFeedbackCollector)
-        
-        gepa = GEPA(
-            metric=simple_metric,
-            candidate_selector=custom_selector,
-            candidate_generator=custom_generator,
-            feedback_collector=custom_collector
-        )
-        
-        assert gepa.candidate_selector == custom_selector
-        assert gepa.candidate_generator == custom_generator
-        assert gepa.feedback_collector == custom_collector
-        
-    def test_gepa_rejects_compiled_student(self):
-        """GEPA should reject pre-compiled student programs."""
-        program = SimpleQA()
-        program._compiled = True
-        
-        gepa = GEPA(metric=simple_metric)
-        
-        with pytest.raises(ValueError, match="should not be pre-compiled"):
-            gepa.compile(program, trainset=[])
-            
     def test_gepa_returns_compiled_program(self, simple_trainset, dummy_lm):
-        """GEPA should return a compiled program."""
+        """GEPA should return a compiled program when given valid inputs."""
         with dspy.context(lm=dummy_lm):
-            program = SimpleQA()
-            gepa = GEPA(metric=simple_metric)
+            student = SimpleQA()
+            optimizer = create_basic_gepa(simple_metric, max_calls=50)
             
-            # Now GEPA should actually work - test that it returns a compiled program
-            compiled_program = gepa.compile(program, trainset=simple_trainset, budget=LLMCallsBudget(3))
+            result = optimizer.compile(student, simple_trainset[:3], simple_trainset[3:])
             
-            assert compiled_program is not None
-            assert hasattr(compiled_program, '_compiled')
-            assert compiled_program._compiled is True
-                
-    def test_gepa_preserves_original_program(self, simple_trainset, dummy_lm):
-        """GEPA should not modify the original student program."""
-        with dspy.context(lm=dummy_lm):
-            original_program = SimpleQA()
-            original_compiled_state = getattr(original_program, '_compiled', False)
-            
-            gepa = GEPA(metric=simple_metric)
-            
-            # Now GEPA should actually work
-            compiled_program = gepa.compile(original_program, trainset=simple_trainset, budget=LLMCallsBudget(3))
-                
-            # Original program should be unchanged
-            assert getattr(original_program, '_compiled', False) == original_compiled_state
-            # Compiled program should be different instance
-            assert original_program is not compiled_program
+            assert isinstance(result, Module)
+            assert result is not student  # Should return a compiled copy
+            assert hasattr(result, '_compiled')
+            assert result._compiled is True
 
 
 class TestComponentInterfaces:
-    """Test that component interfaces are properly defined."""
+    """Test that strategy interfaces work correctly."""
     
-    def test_candidate_selector_interface(self):
-        """CandidateSelector should work with candidates and scores."""
-        selector = ParetoCandidateSelector()
-        program = SimpleQA()
-        scores = ScoreMatrix()
+    def test_budget_interface(self):
+        """Budget components should implement required interface."""
+        from dspy.teleprompt.gepa.strategies.implementations import LLMCallsBudgetStrategy
         
-        # Should work with empty candidates
-        result = selector.select_candidate([program], scores)
-        assert isinstance(result, int)
-        assert 0 <= result < 1
-            
-    def test_prompt_mutator_interface(self):
-        """PromptMutator should mutate signatures based on feedback."""
-        mutator = ReflectivePromptMutator()
-        signature = make_signature("question -> answer")
-        feedback = FeedbackResult(traces=[], diagnostics=[], scores=[], evaluation_traces=[], module_feedback=[], feedback_text=[])
+        budget = LLMCallsBudgetStrategy(100)
         
-        # Should return a signature (might be same or different)
-        result = mutator.mutate_signature(signature, feedback)
-        assert result is not None
-        assert hasattr(result, 'fields')
-            
-    def test_feedback_collector_interface(self):
-        """FeedbackCollector should collect feedback from program execution."""
-        collector = EnhancedFeedbackCollector()
-        program = SimpleQA()
-        examples = []
+        # Interface methods
+        assert hasattr(budget, 'can_afford')
+        assert hasattr(budget, 'consume')
+        assert hasattr(budget, 'is_empty')
         
-        # Should work with empty examples
-        result = collector.collect_feedback(program, examples, simple_metric)
-        assert isinstance(result, FeedbackResult)
-        assert result.traces == []
-        assert result.diagnostics == []
-        assert result.scores == []
-        
-        # Test enhanced fields
-        assert result.evaluation_traces == []
-        assert result.module_feedback == []
-        assert result.feedback_text == []
-
-
-class TestEnhancedFeedbackFunction:
-    """Test enhanced feedback function μf implementation."""
+        # Behavior
+        assert budget.can_afford(10, "test")
+        budget.consume(50, "test")
+        assert budget.can_afford(10, "test")
+        budget.consume(50, "test")
+        assert budget.is_empty()
     
-    def test_evaluation_trace_structure(self):
-        """EvaluationTrace should contain rich evaluation information."""
-        trace = EvaluationTrace(
-            execution_steps=["Step 1: Initialize", "Step 2: Process"],
-            compilation_errors=[],
-            intermediate_outputs=[{"step1": "result"}],
-            module_outputs={0: "output1", 1: "output2"},
-            reasoning_chains=["First, analyze...", "Then, conclude..."],
-            tool_calls=[{"tool": "search", "query": "test"}],
-            error_messages=[],
-            performance_metrics={"execution_time": 0.5, "score": 0.8}
-        )
+    def test_scoring_interface(self):
+        """Scoring components should implement required interface."""
+        from dspy.teleprompt.gepa.strategies.implementations import ParetoScoringStrategy
         
-        assert len(trace.execution_steps) == 2
-        assert len(trace.intermediate_outputs) == 1
-        assert len(trace.module_outputs) == 2
-        assert len(trace.reasoning_chains) == 2
-        assert len(trace.tool_calls) == 1
-        assert trace.performance_metrics["score"] == 0.8
-    
-    def test_module_feedback_structure(self):
-        """ModuleFeedback should contain per-module performance information."""
-        feedback = ModuleFeedback(
-            module_id=0,
-            module_name="QueryModule",
-            input_data="What is the capital?",
-            output_data="Paris",
-            execution_time=0.2,
-            success=True,
-            error_message=None,
-            intermediate_reasoning=["Analyzing query...", "Retrieving answer..."],
-            confidence_score=0.9
-        )
+        strategy = ParetoScoringStrategy(simple_metric)
         
-        assert feedback.module_id == 0
-        assert feedback.module_name == "QueryModule"
-        assert feedback.success is True
-        assert feedback.confidence_score == 0.9
-        assert len(feedback.intermediate_reasoning) == 2
-    
-    def test_enhanced_feedback_collector_with_examples(self, simple_trainset, dummy_lm):
-        """Enhanced feedback collector should provide rich evaluation traces."""
-        with dspy.context(lm=dummy_lm):
-            collector = EnhancedFeedbackCollector(
-                collect_module_feedback=True,
-                collect_evaluation_traces=True
-            )
-            program = SimpleQA()
-            examples = simple_trainset[:2]  # Use first 2 examples
-            
-            result = collector.collect_feedback(program, examples, simple_metric)
-            
-            # Test basic fields
-            assert isinstance(result, FeedbackResult)
-            assert len(result.traces) == 2
-            assert len(result.diagnostics) == 2
-            assert len(result.scores) == 2
-            
-            # Test enhanced fields
-            assert len(result.evaluation_traces) == 2
-            assert len(result.module_feedback) == 2
-            assert len(result.feedback_text) == 2
-            
-            # Test evaluation trace content
-            for eval_trace in result.evaluation_traces:
-                assert isinstance(eval_trace, EvaluationTrace)
-                assert hasattr(eval_trace, 'execution_steps')
-                assert hasattr(eval_trace, 'performance_metrics')
-            
-            # Test feedback text content
-            for feedback_text in result.feedback_text:
-                assert isinstance(feedback_text, str)
-                assert len(feedback_text) > 0
-    
-    def test_domain_specific_feedback(self):
-        """Test domain-specific feedback handling."""
-        collector = EnhancedFeedbackCollector()
+        # Interface methods
+        assert hasattr(strategy, 'calculate_scores')
         
-        # Register a custom domain handler
-        def code_feedback_handler(example, prediction, trace):
-            return {
-                'compilation_status': 'success',
-                'code_quality': 'high',
-                'performance': 'optimized'
-            }
+    def test_generation_interface(self):
+        """Generation components should implement required interface."""
+        from dspy.teleprompt.gepa.strategies.implementations import MutationGenerationStrategy
         
-        collector.register_domain_handler('code', code_feedback_handler)
-        assert 'code' in collector.domain_handlers
+        strategy = MutationGenerationStrategy(mutation_rate=0.5)
         
-        # Test domain detection
-        code_example = Example(
-            question="Write a Python function to sort a list",
-            code="def sort_list(lst): return sorted(lst)"
-        ).with_inputs("question")
+        # Interface methods
+        assert hasattr(strategy, 'generate')
         
-        domain = collector._detect_domain(code_example)
-        assert domain == 'code'
-            
-    def test_module_selector_interface(self):
-        """ModuleSelector should select modules from programs."""
-        selector = RoundRobinModuleSelector()
-        program = SimpleQA()
+    def test_filtering_interface(self):
+        """Filtering components should implement required interface."""
+        from dspy.teleprompt.gepa.strategies.implementations import ElitistFilteringStrategy
         
-        # Should return valid module index
-        result = selector.select_module(program)
-        assert isinstance(result, int)
-        assert 0 <= result < len(program.predictors())
+        strategy = ElitistFilteringStrategy(keep_top_n=5)
+        
+        # Interface methods
+        assert hasattr(strategy, 'filter')
+        
+    def test_evaluation_interface(self):
+        """Evaluation components should implement required interface."""
+        from dspy.teleprompt.gepa.strategies.implementations import PromotionEvaluationStrategy
+        
+        strategy = PromotionEvaluationStrategy(simple_metric, promotion_threshold=0.6)
+        
+        # Interface methods
+        assert hasattr(strategy, 'evaluate')
 
 
 class TestGEPAAlgorithmStructure:
-    """Test that GEPA implements the correct algorithm structure."""
+    """Test the GEPA algorithm follows the correct structure."""
     
-    def test_gepa_dataset_splitting_structure(self, simple_trainset):
-        """GEPA should split dataset into feedback and Pareto sets."""
-        gepa = GEPA(metric=simple_metric)
-        
-        # Should split dataset according to pareto_ratio
-        feedback_data, pareto_data = gepa._split_dataset(simple_trainset)
-        
-        assert len(feedback_data) + len(pareto_data) == len(simple_trainset)
-        assert len(pareto_data) == int(len(simple_trainset) * gepa.pareto_ratio)
-        assert len(feedback_data) == len(simple_trainset) - len(pareto_data)
+    def test_gepa_algorithm_phases(self, simple_trainset, dummy_lm):
+        """GEPA should follow the defined algorithm phases."""
+        with dspy.context(lm=dummy_lm):
+            student = SimpleQA()
+            optimizer = create_basic_gepa(simple_metric, max_calls=20)
             
-    def test_gepa_pareto_evaluation_structure(self):
-        """GEPA should evaluate candidates on Pareto set."""
-        gepa = GEPA(metric=simple_metric)
-        candidate_pool = CandidatePool()
-        candidate_pool.add_candidate(SimpleQA())
-        pareto_data = []
-        budget = LLMCallsBudget(limit=100)
-        
-        # Should handle empty pareto_data gracefully
-        gepa._evaluate_candidates_on_pareto(candidate_pool, pareto_data, budget)
-        
-        # Should not crash with valid inputs
-        assert True  # If we get here, the method worked
-            
-    def test_gepa_candidate_promotion_structure(self):
-        """GEPA should have candidate promotion logic."""
-        gepa = GEPA(metric=simple_metric)
-        new_candidate = SimpleQA()
-        parent_candidate = SimpleQA()
-        feedback_data = []
-        budget = LLMCallsBudget(limit=100)
-        
-        # Should return boolean decision
-        result = gepa._should_promote_candidate(new_candidate, parent_candidate, feedback_data, budget)
-        assert isinstance(result, bool)
-        
-        # With empty feedback_data, should return False
-        assert result is False
-            
-    def test_gepa_best_candidate_selection_structure(self):
-        """GEPA should select best candidate from scores."""
-        gepa = GEPA(metric=simple_metric)
-        candidate_pool = CandidatePool()
-        candidate = SimpleQA()
-        candidate_pool.add_candidate(candidate)
-        
-        # Should return a candidate from the pool
-        result = gepa._select_best_candidate(candidate_pool)
-        assert result in candidate_pool.candidates
-        
-        # With single candidate, should return that candidate
-        assert result is candidate
+            # Mock the optimization components to track calls
+            with patch.object(optimizer.scoring, 'calculate_scores', wraps=optimizer.scoring.calculate_scores) as mock_scoring, \
+                 patch.object(optimizer.selection, 'filter', wraps=optimizer.selection.filter) as mock_filtering, \
+                 patch.object(optimizer.generator, 'generate', wraps=optimizer.generator.generate) as mock_generation, \
+                 patch.object(optimizer.evaluator, 'evaluate', wraps=optimizer.evaluator.evaluate) as mock_evaluation:
+                
+                result = optimizer.compile(student, simple_trainset[:2], simple_trainset[2:])
+                
+                # Verify algorithm phases were called
+                assert mock_scoring.called
+                assert mock_filtering.called  
+                assert mock_generation.called
+                assert mock_evaluation.called
 
 
-class TestIntelligentCrossover:
-    """Test intelligent crossover strategies for GEPA+Merge."""
+class TestDataStructures:
+    """Test core data structures work correctly."""
     
-    def test_complementary_instruction_detection(self):
-        """Should detect complementary instructions."""
-        gepa = GEPA(metric=simple_metric)
+    def test_candidate_creation(self):
+        """Candidates should be created with proper structure."""
+        module = SimpleQA()
+        candidate = Candidate(module=module, generation_number=1)
         
-        # Test complementary pair: accuracy + clarity
-        inst1 = "Answer with precise and accurate information"
-        inst2 = "Provide clear and concise responses"
+        assert candidate.module is module
+        assert candidate.generation_number == 1
+        assert candidate.candidate_id is None  # Assigned by pool
+        assert isinstance(candidate.task_scores, list)
         
-        assert gepa._are_complementary(inst1, inst2) is True
+    def test_generation_creation(self):
+        """Generations should manage candidates correctly."""
+        candidates = [Candidate(SimpleQA(), generation_number=0)]
+        generation = Generation(candidates, generation_id=0)
         
-        # Test non-complementary instructions
-        inst3 = "Answer questions thoroughly"
-        inst4 = "Respond to queries completely"
+        assert generation.size() == 1
+        assert not generation.is_empty()
         
-        assert gepa._are_complementary(inst3, inst4) is False
-    
-    def test_adversarial_instruction_detection(self):
-        """Should detect adversarial (conflicting) instructions."""
-        gepa = GEPA(metric=simple_metric)
-        
-        # Test adversarial pair: brief vs detailed
-        inst1 = "Provide brief and concise answers"
-        inst2 = "Give detailed and comprehensive responses"
-        
-        assert gepa._are_adversarial(inst1, inst2) is True
-        
-        # Test non-adversarial instructions
-        inst3 = "Answer questions accurately"
-        inst4 = "Respond with helpful information"
-        
-        assert gepa._are_adversarial(inst3, inst4) is False
-    
-    def test_complementary_merge_strategy(self):
-        """Should properly merge complementary instructions."""
-        gepa = GEPA(metric=simple_metric)
-        
-        inst1 = "Be accurate and precise"
-        inst2 = "Be clear and concise"
-        
-        result = gepa._complementary_merge(inst1, inst2)
-        
-        assert inst1 in result
-        assert inst2 in result
-        assert len(result) > len(inst1)
-    
-    def test_adversarial_merge_strategy(self):
-        """Should balance adversarial instructions."""
-        gepa = GEPA(metric=simple_metric)
-        
-        inst1 = "Be brief"
-        inst2 = "Be thorough"
-        
-        result = gepa._adversarial_merge(inst1, inst2)
-        
-        assert inst1 in result
-        assert "balance" in result.lower()
-        assert len(result) > len(inst1)
-    
-    def test_hybrid_merge_strategy(self):
-        """Should use context-aware hybrid merging."""
-        gepa = GEPA(metric=simple_metric)
-        
-        inst1 = "Answer questions"
-        inst2 = "Help users"
-        
-        # Different strategies for different module indices
-        result0 = gepa._hybrid_merge(inst1, inst2, 0)  # First module
-        result1 = gepa._hybrid_merge(inst1, inst2, 1)  # Odd module
-        result2 = gepa._hybrid_merge(inst1, inst2, 2)  # Even module
-        
-        assert "clarity" in result0.lower()
-        assert "combine" in result1.lower()
-        assert "additionally" in result2.lower()
-    
-    def test_instruction_compatibility_calculation(self):
-        """Should calculate instruction compatibility scores."""
-        gepa = GEPA(metric=simple_metric)
-        
-        # Create candidates with different instruction types
-        candidate1 = SimpleQA()
-        candidate2 = SimpleQA()
-        
-        # Set complementary instructions
-        from dspy.signatures.signature import make_signature
-        from dspy.teleprompt.utils import set_signature
-        
-        sig1 = make_signature("question -> answer")
-        sig1.instructions = "Be precise and accurate"
-        sig2 = make_signature("question -> answer") 
-        sig2.instructions = "Be clear and concise"
-        
-        set_signature(candidate1.answer, sig1)
-        set_signature(candidate2.answer, sig2)
-        
-        compatibility = gepa._calculate_instruction_compatibility(candidate1, candidate2)
-        
-        # Should detect high compatibility for complementary instructions
-        assert isinstance(compatibility, float)
-        assert 0.0 <= compatibility <= 1.0
-        assert compatibility > 0.5  # Should be high for complementary instructions
-
-
-class TestDatasetProtocol:
-    """Test Dataset Protocol implementation."""
-    
-    def test_split_dataset_initialization(self, simple_trainset):
-        """SplitDataset should split examples according to pareto_ratio."""
-        dataset = SplitDataset(simple_trainset, pareto_ratio=0.6)
-        
-        feedback_data = list(dataset.feedback_data())
-        pareto_data = list(dataset.pareto_data())
-        
-        # Check split proportions
-        total_examples = len(simple_trainset)
-        expected_pareto = int(total_examples * 0.6)
-        expected_feedback = total_examples - expected_pareto
-        
-        assert len(pareto_data) == expected_pareto
-        assert len(feedback_data) == expected_feedback
-        assert len(feedback_data) + len(pareto_data) == total_examples
-    
-    def test_split_dataset_default_ratio(self, simple_trainset):
-        """SplitDataset should use default pareto_ratio of 0.67."""
-        dataset = SplitDataset(simple_trainset)
-        
-        feedback_data = list(dataset.feedback_data())
-        pareto_data = list(dataset.pareto_data())
-        
-        # Check default 0.67 ratio
-        total_examples = len(simple_trainset)
-        expected_pareto = int(total_examples * 0.67)
-        expected_feedback = total_examples - expected_pareto
-        
-        assert len(pareto_data) == expected_pareto
-        assert len(feedback_data) == expected_feedback
-    
-    def test_split_dataset_no_overlap(self, simple_trainset):
-        """Feedback and Pareto data should not overlap."""
-        dataset = SplitDataset(simple_trainset, pareto_ratio=0.5)
-        
-        feedback_data = list(dataset.feedback_data())
-        pareto_data = list(dataset.pareto_data())
-        
-        # Check no overlap between sets
-        feedback_questions = {ex.question for ex in feedback_data}
-        pareto_questions = {ex.question for ex in pareto_data}
-        
-        assert len(feedback_questions & pareto_questions) == 0  # No overlap
-    
-    def test_split_dataset_invalid_ratio(self, simple_trainset):
-        """SplitDataset should reject invalid pareto_ratio values."""
-        with pytest.raises(ValueError, match="pareto_ratio must be between 0 and 1"):
-            SplitDataset(simple_trainset, pareto_ratio=0.0)
-        
-        with pytest.raises(ValueError, match="pareto_ratio must be between 0 and 1"):
-            SplitDataset(simple_trainset, pareto_ratio=1.0)
-        
-        with pytest.raises(ValueError, match="pareto_ratio must be between 0 and 1"):
-            SplitDataset(simple_trainset, pareto_ratio=1.5)
-    
-    def test_training_dataset_protocol_compliance(self, simple_trainset):
-        """SplitDataset should comply with TrainingDataset protocol."""
-        dataset = SplitDataset(simple_trainset)
-        
-        # Should implement the protocol methods
-        assert hasattr(dataset, 'feedback_data')
-        assert hasattr(dataset, 'pareto_data')
-        assert callable(dataset.feedback_data)
-        assert callable(dataset.pareto_data)
-        
-        # Should return iterables of Examples
-        feedback_data = dataset.feedback_data()
-        pareto_data = dataset.pareto_data()
-        
-        assert hasattr(feedback_data, '__iter__')
-        assert hasattr(pareto_data, '__iter__')
-        
-        # All items should be Examples
-        for example in feedback_data:
-            assert isinstance(example, Example)
-        
-        for example in pareto_data:
-            assert isinstance(example, Example)
-
-
-class TestCandidatePool:
-    """Test CandidatePool state management."""
-    
-    def test_candidate_pool_initialization(self):
-        """CandidatePool should initialize empty."""
+    def test_candidate_pool_operations(self):
+        """CandidatePool should manage candidates correctly."""
         pool = CandidatePool()
+        candidate = Candidate(SimpleQA(), generation_number=0)
         
-        assert pool.size() == 0
-        assert len(pool) == 0
-        assert len(pool.get_candidates()) == 0
-        assert len(pool.get_lineages()) == 0
-        assert isinstance(pool.get_scores(), ScoreMatrix)
-    
-    def test_add_candidate_without_lineage(self):
-        """Should add candidates without lineage information."""
-        pool = CandidatePool()
-        candidate = SimpleQA()
-        
-        candidate_id = pool.add_candidate(candidate)
-        
-        assert candidate_id == 0
-        assert pool.size() == 1
-        assert len(pool) == 1
-        assert pool.get_candidate(0) is candidate
-        assert candidate in pool.get_candidates()
-        assert pool.get_lineage(0) is None
-    
-    def test_add_candidate_with_lineage(self):
-        """Should add candidates with lineage information."""
-        pool = CandidatePool()
-        candidate = SimpleQA()
-        lineage = CandidateLineage(candidate_id=0, generation=1, mutation_type="reflective")
-        
-        candidate_id = pool.add_candidate(candidate, lineage)
-        
-        assert candidate_id == 0
-        assert pool.get_lineage(0) is lineage
-        assert 0 in pool.get_lineages()
-        assert pool.get_lineages()[0] is lineage
-    
-    def test_add_multiple_candidates(self):
-        """Should handle multiple candidates with sequential IDs."""
-        pool = CandidatePool()
-        candidate1 = SimpleQA()
-        candidate2 = SimpleQA()
-        candidate3 = SimpleQA()
-        
-        id1 = pool.add_candidate(candidate1)
-        id2 = pool.add_candidate(candidate2)
-        id3 = pool.add_candidate(candidate3)
-        
-        assert id1 == 0
-        assert id2 == 1
-        assert id3 == 2
-        assert pool.size() == 3
-        assert pool.get_candidate(0) is candidate1
-        assert pool.get_candidate(1) is candidate2
-        assert pool.get_candidate(2) is candidate3
-    
-    def test_get_candidate_bounds_checking(self):
-        """Should handle invalid candidate IDs gracefully."""
-        pool = CandidatePool()
-        candidate = SimpleQA()
+        # Add candidate
         pool.add_candidate(candidate)
         
-        # Valid ID
-        assert pool.get_candidate(0) is candidate
-        
-        # Invalid IDs
-        assert pool.get_candidate(-1) is None
-        assert pool.get_candidate(1) is None
-        assert pool.get_candidate(100) is None
-    
-    def test_scores_integration(self):
-        """Should provide access to score matrix."""
-        pool = CandidatePool()
-        candidate1 = SimpleQA()
-        candidate2 = SimpleQA()
-        
-        pool.add_candidate(candidate1)
-        pool.add_candidate(candidate2)
-        
-        # Set some scores
-        scores = pool.get_scores()
-        scores.set_score(0, 0, 0.8)
-        scores.set_score(1, 0, 0.6)
-        
-        # Verify scores are accessible
-        assert scores.get_score(0, 0) == 0.8
-        assert scores.get_score(1, 0) == 0.6
-        assert scores.compute_average_score(0) == 0.8
-        assert scores.compute_average_score(1) == 0.6
-    
-    def test_candidate_feedback_extension_point(self):
-        """Should support per-candidate feedback (extension point)."""
-        pool = CandidatePool()
-        candidate = SimpleQA()
-        candidate_id = pool.add_candidate(candidate)
-        
-        # Initially no feedback
-        assert pool.get_candidate_feedback(candidate_id) is None
-        
-        # Set feedback
-        feedback = FeedbackResult(traces=[], diagnostics=["test"], scores=[0.5])
-        pool.set_candidate_feedback(candidate_id, feedback)
-        
-        # Retrieve feedback
-        retrieved_feedback = pool.get_candidate_feedback(candidate_id)
-        assert retrieved_feedback is feedback
-        assert retrieved_feedback.diagnostics == ["test"]
-        assert retrieved_feedback.scores == [0.5]
-    
-    def test_iteration_support(self):
-        """Should support iteration over candidates."""
-        pool = CandidatePool()
-        candidate1 = SimpleQA()
-        candidate2 = SimpleQA()
-        
-        pool.add_candidate(candidate1)
-        pool.add_candidate(candidate2)
-        
-        candidates = list(pool)
-        assert len(candidates) == 2
-        assert candidate1 in candidates
-        assert candidate2 in candidates
-    
-    def test_clear_functionality(self):
-        """Should clear all pool state."""
-        pool = CandidatePool()
-        candidate = SimpleQA()
-        lineage = CandidateLineage(candidate_id=0)
-        feedback = FeedbackResult(traces=[], diagnostics=[], scores=[])
-        
-        # Add data
-        candidate_id = pool.add_candidate(candidate, lineage)
-        pool.get_scores().set_score(0, 0, 0.5)
-        pool.set_candidate_feedback(candidate_id, feedback)
-        
         assert pool.size() == 1
-        assert pool.get_lineage(0) is not None
-        assert pool.get_candidate_feedback(0) is not None
+        assert candidate.candidate_id is not None
         
-        # Clear
-        pool.clear()
-        
-        assert pool.size() == 0
-        assert len(pool.get_candidates()) == 0
-        assert len(pool.get_lineages()) == 0
-        assert pool.get_candidate_feedback(0) is None
-        assert pool.get_scores().get_score(0, 0) is None
-    
-    def test_immutable_getters(self):
-        """Getters should return copies to prevent external mutation."""
-        pool = CandidatePool()
-        candidate1 = SimpleQA()
-        candidate2 = SimpleQA()
-        lineage = CandidateLineage(candidate_id=0)
-        
-        pool.add_candidate(candidate1, lineage)
-        pool.add_candidate(candidate2)
-        
-        # Get copies
-        candidates = pool.get_candidates()
-        lineages = pool.get_lineages()
-        
-        # Modify copies
-        candidates.append(SimpleQA())
-        lineages[99] = CandidateLineage(candidate_id=99)
-        
-        # Original pool should be unchanged
-        assert pool.size() == 2
-        assert len(pool.get_candidates()) == 2
-        assert 99 not in pool.get_lineages()
+        # Retrieve candidate
+        retrieved = pool.get_candidate(candidate.candidate_id)
+        assert retrieved is candidate
 
 
-class TestCandidateGenerator:
-    """Test CandidateGenerator interface and basic functionality."""
+class TestFactoryFunctions:
+    """Test factory functions create valid GEPA instances."""
     
-    def test_candidate_generator_is_abstract(self):
-        """CandidateGenerator should be abstract and not instantiable."""
-        with pytest.raises(TypeError):
-            CandidateGenerator()
-    
-    def test_candidate_generator_interface_methods(self):
-        """CandidateGenerator should have the required abstract methods."""
-        # Check that the interface defines the required method
-        assert hasattr(CandidateGenerator, 'generate_candidates')
-        assert callable(getattr(CandidateGenerator, 'generate_candidates'))
+    def test_create_basic_gepa(self):
+        """create_basic_gepa should return working GEPA instance."""
+        optimizer = create_basic_gepa(simple_metric, max_calls=100)
         
-        # The method should be abstract
-        assert getattr(CandidateGenerator.generate_candidates, '__isabstractmethod__', False)
+        assert isinstance(optimizer, GEPA)
+        assert hasattr(optimizer, 'budget')
+        assert hasattr(optimizer, 'scoring')
+        assert hasattr(optimizer, 'selection')
+        assert hasattr(optimizer, 'generator')
+        assert hasattr(optimizer, 'evaluator')
+        
+    def test_create_diversity_gepa(self):
+        """create_diversity_gepa should return working GEPA instance."""
+        optimizer = create_diversity_gepa(simple_metric, max_calls=100)
+        
+        assert isinstance(optimizer, GEPA)
+        # Should use diversity selection
+        from dspy.teleprompt.gepa.strategies.implementations import DiversityFilteringStrategy
+        assert isinstance(optimizer.selection, DiversityFilteringStrategy)
 
 
-class DummyCandidateGenerator(CandidateGenerator):
-    """Dummy implementation for testing the interface."""
+class TestGEPAIntegration:
+    """Integration tests for complete GEPA workflows."""
     
-    def __init__(self, return_candidates=None):
-        self.return_candidates = return_candidates or []
-        self.call_history = []
-    
-    def generate_candidates(self, candidate_pool: CandidatePool,
-                          feedback_data: Iterable[Example], 
-                          iteration: int) -> List[Module]:
-        """Dummy implementation that records calls and returns preset candidates."""
-        self.call_history.append({
-            'pool_size': candidate_pool.size(),
-            'feedback_data': list(feedback_data),
-            'iteration': iteration
-        })
-        return self.return_candidates.copy()
-
-
-class TestCandidateGeneratorInterface:
-    """Test the CandidateGenerator interface with concrete implementations."""
-    
-    def test_concrete_implementation_works(self, simple_trainset):
-        """Concrete CandidateGenerator implementation should work properly."""
-        pool = CandidatePool()
-        pool.add_candidate(SimpleQA())
-        pool.add_candidate(SimpleQA())
-        
-        # Create dummy generator
-        new_candidate = SimpleQA()
-        generator = DummyCandidateGenerator(return_candidates=[new_candidate])
-        
-        # Test generation
-        feedback_data = simple_trainset[:2]
-        iteration = 5
-        
-        result = generator.generate_candidates(pool, feedback_data, iteration)
-        
-        # Check result
-        assert len(result) == 1
-        assert result[0] is new_candidate
-        
-        # Check call was recorded
-        assert len(generator.call_history) == 1
-        call = generator.call_history[0]
-        assert call['pool_size'] == 2
-        assert len(call['feedback_data']) == 2
-        assert call['iteration'] == 5
-    
-    def test_generator_with_empty_pool(self, simple_trainset):
-        """Generator should handle empty candidate pool gracefully."""
-        empty_pool = CandidatePool()
-        generator = DummyCandidateGenerator(return_candidates=[])
-        
-        result = generator.generate_candidates(empty_pool, simple_trainset, 1)
-        
-        assert result == []
-        assert len(generator.call_history) == 1
-        assert generator.call_history[0]['pool_size'] == 0
-    
-    def test_generator_with_empty_feedback_data(self):
-        """Generator should handle empty feedback data gracefully."""
-        pool = CandidatePool()
-        pool.add_candidate(SimpleQA())
-        
-        generator = DummyCandidateGenerator(return_candidates=[])
-        result = generator.generate_candidates(pool, [], 1)
-        
-        assert result == []
-        assert len(generator.call_history) == 1
-        assert len(generator.call_history[0]['feedback_data']) == 0
-    
-    def test_generator_iteration_parameter(self, simple_trainset):
-        """Generator should receive and can use iteration parameter."""
-        pool = CandidatePool()
-        pool.add_candidate(SimpleQA())
-        
-        generator = DummyCandidateGenerator()
-        
-        # Call with different iterations
-        generator.generate_candidates(pool, simple_trainset, 1)
-        generator.generate_candidates(pool, simple_trainset, 5)
-        generator.generate_candidates(pool, simple_trainset, 10)
-        
-        # Check iterations were recorded
-        assert len(generator.call_history) == 3
-        assert generator.call_history[0]['iteration'] == 1
-        assert generator.call_history[1]['iteration'] == 5
-        assert generator.call_history[2]['iteration'] == 10
-    
-    def test_generator_candidate_pool_access(self, simple_trainset):
-        """Generator should have full access to candidate pool state."""
-        pool = CandidatePool()
-        candidate1 = SimpleQA()
-        candidate2 = SimpleQA()
-        lineage = CandidateLineage(candidate_id=0, generation=1)
-        
-        pool.add_candidate(candidate1, lineage)
-        pool.add_candidate(candidate2)
-        
-        # Set some scores
-        pool.get_scores().set_score(0, 0, 0.8)
-        pool.get_scores().set_score(1, 0, 0.6)
-        
-        class InspectingGenerator(CandidateGenerator):
-            def __init__(self):
-                self.inspected_data = {}
-            
-            def generate_candidates(self, candidate_pool, feedback_data, iteration):
-                # Inspect pool state
-                self.inspected_data = {
-                    'candidates': candidate_pool.get_candidates(),
-                    'scores': candidate_pool.get_scores(),
-                    'lineages': candidate_pool.get_lineages(),
-                    'pool_size': candidate_pool.size()
-                }
-                return []
-        
-        generator = InspectingGenerator()
-        generator.generate_candidates(pool, simple_trainset, 1)
-        
-        # Verify generator had access to all pool data
-        assert len(generator.inspected_data['candidates']) == 2
-        assert generator.inspected_data['candidates'][0] is candidate1
-        assert generator.inspected_data['candidates'][1] is candidate2
-        assert generator.inspected_data['pool_size'] == 2
-        assert 0 in generator.inspected_data['lineages']
-        assert generator.inspected_data['lineages'][0] is lineage
-        assert generator.inspected_data['scores'].get_score(0, 0) == 0.8
-
-
-class TestMutationGenerator:
-    """Test MutationGenerator concrete implementation."""
-    
-    def test_mutation_generator_initialization(self):
-        """MutationGenerator should initialize with required components."""
-        prompt_mutator = ReflectivePromptMutator()
-        module_selector = RoundRobinModuleSelector()
-        feedback_collector = EnhancedFeedbackCollector()
-        
-        generator = MutationGenerator(prompt_mutator, module_selector, feedback_collector)
-        
-        assert generator.prompt_mutator is prompt_mutator
-        assert generator.module_selector is module_selector
-        assert generator.feedback_collector is feedback_collector
-    
-    def test_mutation_with_empty_pool(self, simple_trainset):
-        """MutationGenerator should handle empty candidate pool."""
-        generator = MutationGenerator(
-            ReflectivePromptMutator(),
-            RoundRobinModuleSelector(),
-            EnhancedFeedbackCollector()
-        )
-        
-        empty_pool = CandidatePool()
-        result = generator.generate_candidates(empty_pool, simple_trainset, 1)
-        
-        assert result == []
-    
-    def test_mutation_with_empty_feedback_data(self):
-        """MutationGenerator should handle empty feedback data."""
-        generator = MutationGenerator(
-            ReflectivePromptMutator(),
-            RoundRobinModuleSelector(),
-            EnhancedFeedbackCollector()
-        )
-        
-        pool = CandidatePool()
-        pool.add_candidate(SimpleQA())
-        
-        result = generator.generate_candidates(pool, [], 1)
-        assert result == []
-    
-    def test_mutation_parent_selection(self, simple_trainset, dummy_lm):
-        """MutationGenerator should select best performing parent."""
+    def test_basic_optimization_workflow(self, simple_trainset, dummy_lm):
+        """Test basic optimization workflow end-to-end."""
         with dspy.context(lm=dummy_lm):
-            generator = MutationGenerator(
-                ReflectivePromptMutator(),
-                RoundRobinModuleSelector(),
-                EnhancedFeedbackCollector()
-            )
+            student = SimpleQA()
+            optimizer = create_basic_gepa(simple_metric, max_calls=30)
             
-            pool = CandidatePool()
-            candidate1 = SimpleQA()
-            candidate2 = SimpleQA()
-            pool.add_candidate(candidate1)
-            pool.add_candidate(candidate2)
+            # Should complete without errors
+            result = optimizer.compile(student, simple_trainset[:3], simple_trainset[3:])
             
-            # Set scores - candidate2 has better performance
-            pool.get_scores().set_score(0, 0, 0.3)  # candidate1: low score
-            pool.get_scores().set_score(1, 0, 0.8)  # candidate2: high score
+            assert isinstance(result, Module)
+            assert result._compiled is True
             
-            # Generate candidates
-            result = generator.generate_candidates(pool, simple_trainset[:1], 1)
-            
-            # Should generate one mutated candidate
-            assert len(result) == 1
-            assert isinstance(result[0], Module)
-
-
-class TestCrossoverGenerator:
-    """Test CrossoverGenerator concrete implementation."""
-    
-    def test_crossover_generator_initialization(self):
-        """CrossoverGenerator should initialize with timing parameters."""
-        generator = CrossoverGenerator(frequency=3, min_candidates=2)
-        
-        assert generator.frequency == 3
-        assert generator.min_candidates == 2
-    
-    def test_crossover_default_parameters(self):
-        """CrossoverGenerator should use default parameters."""
-        generator = CrossoverGenerator()
-        
-        assert generator.frequency == 5
-        assert generator.min_candidates == 3
-    
-    def test_crossover_timing_conditions(self, simple_trainset):
-        """CrossoverGenerator should respect timing conditions."""
-        generator = CrossoverGenerator(frequency=5, min_candidates=2)
-        
-        pool = CandidatePool()
-        pool.add_candidate(SimpleQA())
-        pool.add_candidate(SimpleQA())
-        
-        # Too early (iteration < 3)
-        result = generator.generate_candidates(pool, simple_trainset, 1)
-        assert result == []
-        
-        result = generator.generate_candidates(pool, simple_trainset, 2)
-        assert result == []
-        
-        # Wrong frequency (iteration % frequency != 0)
-        result = generator.generate_candidates(pool, simple_trainset, 4)
-        assert result == []
-        
-        result = generator.generate_candidates(pool, simple_trainset, 6)
-        assert result == []
-        
-        # Correct timing should attempt crossover (iteration=5, 5%5==0, >=3)
-        # Should return empty because we need different lineages, but at least it tries
-        result = generator.generate_candidates(pool, simple_trainset, 5)
-        # Result could be [] if no different lineages found, which is OK
-        assert isinstance(result, list)
-    
-    def test_crossover_minimum_candidates(self, simple_trainset):
-        """CrossoverGenerator should require minimum candidates."""
-        generator = CrossoverGenerator(frequency=5, min_candidates=3)
-        
-        pool = CandidatePool()
-        pool.add_candidate(SimpleQA())
-        pool.add_candidate(SimpleQA())  # Only 2 candidates, need 3
-        
-        result = generator.generate_candidates(pool, simple_trainset, 5)
-        assert result == []
-    
-    def test_crossover_lineage_requirements(self, simple_trainset):
-        """CrossoverGenerator should require different lineages."""
-        generator = CrossoverGenerator(frequency=5, min_candidates=2)
-        
-        pool = CandidatePool()
-        
-        # Add candidates with different lineages
-        lineage1 = CandidateLineage(candidate_id=0, generation=1, mutation_type="mutation")
-        lineage2 = CandidateLineage(candidate_id=1, generation=1, mutation_type="mutation")
-        
-        pool.add_candidate(SimpleQA(), lineage1)
-        pool.add_candidate(SimpleQA(), lineage2)
-        
-        # Set some scores
-        pool.get_scores().set_score(0, 0, 0.7)
-        pool.get_scores().set_score(1, 0, 0.8)
-        
-        # Should attempt crossover with different lineages
-        result = generator.generate_candidates(pool, simple_trainset, 5)
-        
-        # Could be empty if crossover fails, but should not crash
-        assert isinstance(result, list)
-        assert len(result) <= 1  # At most one merged candidate
-
-
-class TestCompositeGenerator:
-    """Test CompositeGenerator implementation."""
-    
-    def test_composite_generator_initialization(self):
-        """CompositeGenerator should initialize with list of generators."""
-        gen1 = DummyCandidateGenerator()
-        gen2 = DummyCandidateGenerator()
-        
-        composite = CompositeGenerator([gen1, gen2])
-        
-        assert len(composite.generators) == 2
-        assert composite.generators[0] is gen1
-        assert composite.generators[1] is gen2
-    
-    def test_composite_generator_empty_list(self):
-        """CompositeGenerator should reject empty generator list."""
-        with pytest.raises(ValueError, match="requires at least one generator"):
-            CompositeGenerator([])
-    
-    def test_composite_generator_combines_results(self, simple_trainset):
-        """CompositeGenerator should combine results from all generators."""
-        candidate1 = SimpleQA()
-        candidate2 = SimpleQA()
-        candidate3 = SimpleQA()
-        
-        gen1 = DummyCandidateGenerator([candidate1])
-        gen2 = DummyCandidateGenerator([candidate2, candidate3])
-        
-        composite = CompositeGenerator([gen1, gen2])
-        
-        pool = CandidatePool()
-        pool.add_candidate(SimpleQA())
-        
-        result = composite.generate_candidates(pool, simple_trainset, 1)
-        
-        # Should combine results from both generators
-        assert len(result) == 3
-        assert candidate1 in result
-        assert candidate2 in result
-        assert candidate3 in result
-    
-    def test_composite_generator_handles_failures(self, simple_trainset):
-        """CompositeGenerator should handle individual generator failures."""
-        candidate1 = SimpleQA()
-        
-        class FailingGenerator(CandidateGenerator):
-            def generate_candidates(self, candidate_pool, feedback_data, iteration):
-                raise RuntimeError("Generator failed")
-        
-        gen1 = FailingGenerator()
-        gen2 = DummyCandidateGenerator([candidate1])
-        
-        composite = CompositeGenerator([gen1, gen2])
-        
-        pool = CandidatePool()
-        pool.add_candidate(SimpleQA())
-        
-        # Should continue despite first generator failing
-        result = composite.generate_candidates(pool, simple_trainset, 1)
-        
-        assert len(result) == 1
-        assert candidate1 in result
-    
-    def test_composite_generator_reuses_feedback_data(self, simple_trainset):
-        """CompositeGenerator should reuse feedback data for efficiency."""
-        gen1 = DummyCandidateGenerator()
-        gen2 = DummyCandidateGenerator()
-        
-        composite = CompositeGenerator([gen1, gen2])
-        
-        pool = CandidatePool()
-        pool.add_candidate(SimpleQA())
-        
-        composite.generate_candidates(pool, simple_trainset, 1)
-        
-        # Both generators should have received the same feedback data
-        assert gen1.call_history[0]['feedback_data'] == gen2.call_history[0]['feedback_data']
-        assert len(gen1.call_history[0]['feedback_data']) == len(simple_trainset)
-
-
-class TestGeneratorIntegration:
-    """Test generator integration with existing components."""
-    
-    def test_mutation_generator_with_existing_components(self, simple_trainset, dummy_lm):
-        """MutationGenerator should work with existing GEPA components."""
+    def test_diversity_optimization_workflow(self, simple_trainset, dummy_lm):
+        """Test diversity-focused optimization workflow."""
         with dspy.context(lm=dummy_lm):
-            # Use actual GEPA components
-            generator = MutationGenerator(
-                prompt_mutator=ReflectivePromptMutator(),
-                module_selector=RoundRobinModuleSelector(),
-                feedback_collector=EnhancedFeedbackCollector()
-            )
+            student = SimpleQA()
+            optimizer = create_diversity_gepa(simple_metric, max_calls=30)
             
-            pool = CandidatePool()
-            pool.add_candidate(SimpleQA())
-            pool.get_scores().set_score(0, 0, 0.5)
+            # Should complete without errors
+            result = optimizer.compile(student, simple_trainset[:3], simple_trainset[3:])
             
-            result = generator.generate_candidates(pool, simple_trainset[:1], 1)
-            
-            # Should generate at least one candidate or fail gracefully
-            assert isinstance(result, list)
-            # If successful, should return one mutated candidate
-            if result:
-                assert len(result) == 1
-                assert isinstance(result[0], Module)
-    
-    def test_crossover_generator_with_lineage_tracking(self, simple_trainset):
-        """CrossoverGenerator should work with lineage tracking."""
-        generator = CrossoverGenerator(frequency=5, min_candidates=2)
-        
-        pool = CandidatePool()
-        
-        # Create candidates with proper lineages from different roots
-        lineage1 = CandidateLineage(candidate_id=0, parent_id=None, generation=0)
-        lineage2 = CandidateLineage(candidate_id=1, parent_id=None, generation=0)
-        
-        pool.add_candidate(SimpleQA(), lineage1)
-        pool.add_candidate(SimpleQA(), lineage2)
-        
-        # Set scores
-        pool.get_scores().set_score(0, 0, 0.6)
-        pool.get_scores().set_score(1, 0, 0.8)
-        
-        result = generator.generate_candidates(pool, simple_trainset, 5)
-        
-        # Should handle lineage tracking properly
-        assert isinstance(result, list)
-        # May be empty if merge fails, but should not crash
-        assert len(result) <= 1
-
-
-if __name__ == "__main__":
-    pytest.main([__file__])
+            assert isinstance(result, Module)
+            assert result._compiled is True

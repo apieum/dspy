@@ -1,231 +1,204 @@
-"""Candidate pool and lineage management for GEPA optimization."""
+"""Enhanced CandidatePool for the GEPA strategy framework.
 
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+Provides generation-aware candidate management with integrated ScoreMatrix
+for fast access to best candidates per task.
+"""
 
-import dspy
-from dspy import Module
+from collections import defaultdict
+from typing import Dict, List, Optional, Callable
+import weakref
 
-from .structures import ScoreMatrix, FeedbackResult
-
-
-@dataclass
-class CandidateLineage:
-    """Track ancestry and evolutionary history of candidates."""
-    candidate_id: int
-    parent_id: Optional[int] = None
-    generation: int = 0
-    mutation_type: str = "initial"
-    creation_iteration: int = 0
-    fitness_history: List[float] = None
-
-    def __post_init__(self):
-        if self.fitness_history is None:
-            self.fitness_history = []
+from .candidate import Candidate
+from .score_matrix import ScoreMatrix
+from ..generation.generation import Generation
 
 
 class CandidatePool:
-    """Encapsulates candidates, scores, and lineages in a single object.
+    """Framework-aware candidate pool with integrated task-based scoring.
     
-    Manages the state of all candidates in the GEPA optimization process,
-    providing clean access to candidates, their performance scores, and
-    evolutionary lineages. Includes extension points for future per-candidate
-    feedback and over-specialization detection.
+    Manages candidates across generations with integrated ScoreMatrix
+    for fast access to best candidates per task.
     """
     
     def __init__(self):
-        self.candidates: List[Module] = []
-        self.scores: ScoreMatrix = ScoreMatrix()
-        self.lineages: Dict[int, CandidateLineage] = {}
-        # Extension point for future candidate-specific feedback
-        self._candidate_feedback: Dict[int, FeedbackResult] = {}
-        self._next_candidate_id = 0
+        # Primary storage
+        self.candidates: Dict[int, Candidate] = {}
+        self.next_candidate_id = 0
+        
+        # Generation indexing for efficient access
+        self.candidates_by_generation: Dict[int, List[int]] = defaultdict(list)
+        self.current_generation_id = 0
+        
+        # Lineage relationships (for research analysis)
+        self.children_by_parent: Dict[int, List[int]] = defaultdict(list)
+        self.parent_relationships: Dict[int, List[int]] = {}  # child_id -> parent_ids
+        
+        # Integrated task-based scoring matrix
+        self.score_matrix = ScoreMatrix()
     
-    def add_candidate(self, candidate: Module, lineage: Optional[CandidateLineage] = None) -> int:
-        """Add a new candidate to the pool.
+    def extend(self, generation: Generation) -> ScoreMatrix:
+        """Add a generation to the pool and return score matrix.
         
-        Args:
-            candidate: The candidate module to add
-            lineage: Optional lineage information for tracking evolution
-            
-        Returns:
-            The candidate ID assigned to this candidate
+        Candidates should already have their task_scores populated from evaluation.
         """
-        candidate_id = len(self.candidates)
-        self.candidates.append(candidate)
+        for candidate in generation.candidates:
+            self._add_candidate_to_pool(candidate, generation.generation_id)
         
-        if lineage is not None:
-            self.lineages[candidate_id] = lineage
+        # Update score matrix with the new candidates
+        self.score_matrix.update_scores(generation.candidates)
+        
+        return self.score_matrix
+    
+    def add_candidate(self, candidate: Candidate) -> ScoreMatrix:
+        """Add a candidate to the pool.
+        
+        The candidate should already have its task_scores populated from evaluation.
+        
+        Returns:
+            The updated score matrix
+        """
+        # Add candidate to pool
+        generation_id = candidate.generation_number
+        candidate_id = self._add_candidate_to_pool(candidate, generation_id)
+        
+        # Update score matrix with this new candidate
+        self.score_matrix.update_scores([candidate])
+        
+        return self.score_matrix
+    
+    def add_candidate_with_scores(self, candidate: Candidate, task_scores: Dict[int, float]) -> ScoreMatrix:
+        """Add a candidate to the pool with explicit task scores (for backward compatibility).
+        
+        This method sets the scores in the candidate first, then adds it.
+        """
+        # Store scores in the candidate  
+        candidate.set_task_scores(task_scores)
+        return self.add_candidate(candidate)
+    
+    
+    def _add_candidate_to_pool(self, candidate: Candidate, generation_id: int) -> int:
+        """Internal method to add candidate with ID assignment and indexing."""
+        # Assign candidate ID if not already set
+        if candidate.candidate_id is None:
+            candidate.candidate_id = self.next_candidate_id
+            self.next_candidate_id += 1
+        
+        candidate_id = candidate.candidate_id
+        
+        # Store candidate
+        self.candidates[candidate_id] = candidate
+        
+        # Update generation index
+        self.candidates_by_generation[generation_id].append(candidate_id)
+        
+        # Update lineage tracking
+        if candidate.parent_ids:
+            self.parent_relationships[candidate_id] = candidate.parent_ids.copy()
+            for parent_id in candidate.parent_ids:
+                self.children_by_parent[parent_id].append(candidate_id)
         
         return candidate_id
     
-    def get_candidates(self) -> List[Module]:
+    def get_candidate(self, candidate_id: int) -> Optional[Candidate]:
+        """Get candidate by ID."""
+        return self.candidates.get(candidate_id)
+    
+    def get_all_candidates(self) -> List[Candidate]:
         """Get all candidates in the pool."""
-        return self.candidates.copy()
+        return list(self.candidates.values())
     
-    def get_candidate(self, candidate_id: int) -> Optional[Module]:
-        """Get a specific candidate by ID."""
-        if 0 <= candidate_id < len(self.candidates):
-            return self.candidates[candidate_id]
-        return None
+    def get_generation_candidates(self, generation_id: int) -> List[Candidate]:
+        """Get all candidates from a specific generation."""
+        candidate_ids = self.candidates_by_generation[generation_id]
+        return [self.candidates[cid] for cid in candidate_ids if cid in self.candidates]
     
-    def get_scores(self) -> ScoreMatrix:
-        """Get the score matrix for all candidates."""
-        return self.scores
     
-    def get_lineages(self) -> Dict[int, CandidateLineage]:
-        """Get lineage information for all candidates."""
-        return self.lineages.copy()
     
-    def get_lineage(self, candidate_id: int) -> Optional[CandidateLineage]:
-        """Get lineage information for a specific candidate."""
-        return self.lineages.get(candidate_id)
+    def filter_scores(self, strategy) -> List[Candidate]:
+        """Apply filtering strategy to task scores.
+        
+        The pool iterates over each task and passes task_id -> List[scores] 
+        to the strategy for filtering.
+        """
+        task_scores_data = {}
+        
+        # Collect scores for each task
+        for task_id in self.score_matrix.get_all_task_ids():
+            candidate_scores = []
+            for candidate in self.candidates.values():
+                score = candidate.get_task_score(task_id)
+                if score is not None:
+                    candidate_scores.append((candidate.candidate_id, score))
+            task_scores_data[task_id] = candidate_scores
+        
+        # Pass to strategy for filtering
+        selected_candidate_ids = strategy.filter(task_scores_data)
+        
+        # Return selected candidates
+        return [self.candidates[cid] for cid in selected_candidate_ids if cid in self.candidates]
+    
+    def filter_best(self, strategy) -> List[Candidate]:
+        """Apply filtering strategy to best candidates.
+        
+        The pool iterates over best candidates and passes them to the strategy.
+        """
+        best_candidates_data = {}
+        
+        for task_id in self.score_matrix.get_all_task_ids():
+            best_candidate = self.score_matrix.get_best_candidate_for_task(task_id)
+            if best_candidate is not None:
+                score = best_candidate.get_task_score(task_id)
+                best_candidates_data[task_id] = (best_candidate.candidate_id, score)
+        
+        # Pass to strategy for filtering  
+        selected_candidate_ids = strategy.filter(best_candidates_data)
+        
+        # Return selected candidates
+        return [self.candidates[cid] for cid in selected_candidate_ids if cid in self.candidates]
+    
+    def filter_top(self, n: int, strategy) -> List[Candidate]:
+        """Apply filtering strategy to top N candidates.
+        
+        The pool gets top candidates and passes them to the strategy for filtering.
+        """
+        # Get all candidates with their average scores
+        candidate_averages = []
+        for candidate in self.candidates.values():
+            if candidate.task_scores:
+                avg_score = candidate.get_average_task_score()
+                candidate_averages.append((candidate.candidate_id, avg_score))
+        
+        # Sort by average score and take top N
+        candidate_averages.sort(key=lambda x: x[1], reverse=True)
+        top_candidates_data = candidate_averages[:n]
+        
+        # Pass to strategy for filtering
+        selected_candidate_ids = strategy.filter(top_candidates_data)
+        
+        # Return selected candidates
+        return [self.candidates[cid] for cid in selected_candidate_ids if cid in self.candidates]
     
     def size(self) -> int:
-        """Number of candidates in pool."""
+        """Total number of candidates in pool."""
         return len(self.candidates)
     
-    def set_candidate_feedback(self, candidate_id: int, feedback: FeedbackResult):
-        """Set feedback for a specific candidate (extension point)."""
-        self._candidate_feedback[candidate_id] = feedback
+    def generation_count(self) -> int:
+        """Number of generations in pool."""
+        return len(self.candidates_by_generation)
     
-    def get_candidate_feedback(self, candidate_id: int) -> Optional[FeedbackResult]:
-        """Get feedback for a specific candidate (extension point)."""
-        return self._candidate_feedback.get(candidate_id)
-    
-    def clear(self):
-        """Clear all candidates, scores, and lineages."""
-        self.candidates.clear()
-        self.scores = ScoreMatrix()
-        self.lineages.clear()
-        self._candidate_feedback.clear()
-        self._next_candidate_id = 0
-    
-    def __len__(self) -> int:
-        """Support len() operation."""
-        return len(self.candidates)
-    
-    def __iter__(self):
-        """Support iteration over candidates."""
-        return iter(self.candidates)
-    
-    # Score matrix delegation methods
-    def set_score(self, candidate_id: int, task_idx: int, score: float):
-        """Set score for a candidate on a specific task."""
-        self.scores.set_score(candidate_id, task_idx, score)
-    
-    def get_score(self, candidate_id: int, task_idx: int) -> Optional[float]:
-        """Get score for a candidate on a specific task."""
-        return self.scores.get_score(candidate_id, task_idx)
-    
-    def get_candidate_scores(self, candidate_id: int) -> Dict[int, float]:
-        """Get all scores for a specific candidate."""
-        return self.scores.get_candidate_scores(candidate_id)
-    
-    def compute_average_score(self, candidate_id: int) -> float:
-        """Compute average score for a candidate across all tasks."""
-        return self.scores.compute_average_score(candidate_id)
-    
-    def remove_candidate(self, candidate_id: int):
-        """Remove a candidate from the pool."""
-        if 0 <= candidate_id < len(self.candidates):
-            # Remove from candidates list
-            self.candidates.pop(candidate_id)
-            # Remove from lineages
-            if candidate_id in self.lineages:
-                del self.lineages[candidate_id]
-            # Remove from candidate feedback
-            if candidate_id in self._candidate_feedback:
-                del self._candidate_feedback[candidate_id]
-            # Note: ScoreMatrix scores are indexed by candidate_id, 
-            # so removing from the middle will cause index mismatch.
-            # This is a limitation of the current design that would need 
-            # more sophisticated index management to fix properly.
-    
-    def evaluate(self, evaluation_function, tasks, skip_evaluated=True):
-        """Evaluate candidates using visitor pattern.
+    def select_best(self, metric, evaluation_data: List, n: int = 1) -> List[Candidate]:
+        """Select the best N candidates from the entire pool."""
+        if not self.candidates:
+            return []
         
-        Args:
-            evaluation_function: Function that takes (candidate, task_idx, task) and returns score
-            tasks: List of tasks/examples to evaluate on
-            skip_evaluated: Skip already evaluated candidate-task pairs
-            
-        Returns:
-            Number of evaluations performed
-        """
-        evaluations_performed = 0
+        # Evaluate all candidates and sort by performance
+        candidate_scores = []
+        for candidate in self.candidates.values():
+            score = candidate.evaluate_on_batch(evaluation_data, metric)
+            candidate_scores.append((candidate, score))
         
-        for candidate_id, candidate in enumerate(self.candidates):
-            if skip_evaluated:
-                # Skip if already fully evaluated
-                candidate_scores = self.get_candidate_scores(candidate_id)
-                if len(candidate_scores) >= len(tasks):
-                    continue
-            
-            for task_idx, task in enumerate(tasks):
-                if skip_evaluated:
-                    # Skip if this specific candidate-task pair already evaluated
-                    if self.get_score(candidate_id, task_idx) is not None:
-                        continue
-                
-                try:
-                    # Use visitor pattern - delegate evaluation to provided function
-                    score = evaluation_function(candidate, task_idx, task)
-                    self.set_score(candidate_id, task_idx, score)
-                    evaluations_performed += 1
-                    
-                except Exception as e:
-                    # Handle evaluation failures gracefully
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.warning(f"Failed to evaluate candidate {candidate_id} on task {task_idx}: {e}")
-                    self.set_score(candidate_id, task_idx, 0.0)
-        
-        return evaluations_performed
+        # Sort by score (descending) and return top N
+        candidate_scores.sort(key=lambda x: x[1], reverse=True)
+        return [candidate for candidate, _ in candidate_scores[:n]]
     
-    def evaluate_specific_candidates(self, evaluation_function, tasks, candidate_ids, skip_evaluated=True):
-        """Evaluate specific candidates using visitor pattern.
-        
-        Args:
-            evaluation_function: Function that takes (candidate, task_idx, task) and returns score
-            tasks: List of tasks/examples to evaluate on
-            candidate_ids: List of specific candidate IDs to evaluate
-            skip_evaluated: Skip already evaluated candidate-task pairs
-            
-        Returns:
-            Number of evaluations performed
-        """
-        evaluations_performed = 0
-        
-        for candidate_id in candidate_ids:
-            if candidate_id >= len(self.candidates):
-                continue
-                
-            candidate = self.candidates[candidate_id]
-            
-            if skip_evaluated:
-                # Skip if already fully evaluated
-                candidate_scores = self.get_candidate_scores(candidate_id)
-                if len(candidate_scores) >= len(tasks):
-                    continue
-            
-            for task_idx, task in enumerate(tasks):
-                if skip_evaluated:
-                    # Skip if this specific candidate-task pair already evaluated
-                    if self.get_score(candidate_id, task_idx) is not None:
-                        continue
-                
-                try:
-                    # Use visitor pattern - delegate evaluation to provided function
-                    score = evaluation_function(candidate, task_idx, task)
-                    self.set_score(candidate_id, task_idx, score)
-                    evaluations_performed += 1
-                    
-                except Exception as e:
-                    # Handle evaluation failures gracefully
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.warning(f"Failed to evaluate candidate {candidate_id} on task {task_idx}: {e}")
-                    self.set_score(candidate_id, task_idx, 0.0)
-        
-        return evaluations_performed
+    

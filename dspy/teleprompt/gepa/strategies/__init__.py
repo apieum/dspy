@@ -1,26 +1,20 @@
-"""GEPA: Genetic-Pareto optimizer for compound AI systems.
+"""Optimization components for GEPA.
 
-A well-structured module implementation of the GEPA optimization algorithm
-from "GEPA: Genetic-Pareto Optimization for Task-Specific Instruction Evolution".
+This module defines the protocol interfaces and concrete implementations
+for each step of the GEPA optimization process.
 """
 
-# Main GEPA implementation
-from .core import GEPA
-from .data.candidate import Candidate
-from .data.score_matrix import ScoreMatrix
-from .data.candidate_pool import CandidatePool
-from .generation.generation import Generation
-
-# Strategy interfaces and implementations
-from .strategies import (
-    # Protocol interfaces
+# Protocol interfaces
+from .protocols import (
     Budget,
     Scoring,
-    Selection, 
+    Selection,
     Generator,
-    Evaluator,
-    
-    # Concrete implementations
+    Evaluator
+)
+
+# Concrete implementations
+from .implementations import (
     LLMCallsBudgetStrategy,
     IterationBudgetStrategy,
     ParetoScoringStrategy,
@@ -29,9 +23,11 @@ from .strategies import (
     MutationGenerationStrategy,
     CrossoverGenerationStrategy,
     PromotionEvaluationStrategy,
-    AdaptiveBudgetStrategy,
-    
-    # Factory functions
+    AdaptiveBudgetStrategy
+)
+
+# Factory functions
+from .factory import (
     create_basic_gepa,
     create_diversity_gepa,
     create_iteration_limited_gepa,
@@ -39,24 +35,26 @@ from .strategies import (
     create_research_gepa
 )
 
+# Filtering strategies
+from .filtering_strategies import (
+    ParetoFrontierStrategy,
+    TopScoresStrategy,
+    BalancedTopStrategy,
+    ThresholdStrategy,
+    DiversityStrategy
+)
+
 __all__ = [
-    # Core classes
-    'GEPA',
-    'Candidate', 
-    'Generation',
-    'ScoreMatrix',
-    'CandidatePool',
-    
-    # Optimization components
+    # Protocol interfaces
     'Budget',
     'Scoring', 
     'Selection',
     'Generator',
     'Evaluator',
     
-    # Strategy implementations
+    # Concrete implementations
     'LLMCallsBudgetStrategy',
-    'IterationBudgetStrategy',
+    'IterationBudgetStrategy', 
     'ParetoScoringStrategy',
     'ElitistFilteringStrategy',
     'DiversityFilteringStrategy',
@@ -68,7 +66,14 @@ __all__ = [
     # Factory functions
     'create_basic_gepa',
     'create_diversity_gepa',
-    'create_iteration_limited_gepa',
+    'create_iteration_limited_gepa', 
     'create_adaptive_gepa',
     'create_research_gepa',
+    
+    # Filtering strategies  
+    'ParetoFrontierStrategy',
+    'TopScoresStrategy',
+    'BalancedTopStrategy',
+    'ThresholdStrategy',
+    'DiversityStrategy'
 ]
