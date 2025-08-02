@@ -11,33 +11,23 @@ from .data.score_matrix import ScoreMatrix
 from .data.candidate_pool import CandidatePool
 from .generation.generation import Generation
 
-# Strategy interfaces and implementations
-from .strategies import (
-    # Protocol interfaces
-    Budget,
-    Scoring,
-    Selection, 
-    Generator,
-    Evaluator,
-    
-    # Concrete implementations
-    LLMCallsBudgetStrategy,
-    IterationBudgetStrategy,
-    ParetoScoringStrategy,
-    ElitistFilteringStrategy,
-    DiversityFilteringStrategy,
-    MutationGenerationStrategy,
-    CrossoverGenerationStrategy,
-    PromotionEvaluationStrategy,
-    AdaptiveBudgetStrategy,
-    
-    # Factory functions
-    create_basic_gepa,
-    create_diversity_gepa,
-    create_iteration_limited_gepa,
-    create_adaptive_gepa,
-    create_research_gepa
-)
+# Protocol interfaces
+from .budget import Budget
+from .scoring import Scoring
+from .selection import Selection 
+from .generation import Generator
+from .evaluation import Evaluator
+from .filtering import Filtering
+
+# Business step implementations
+from .budget import LLMCallsBudget, IterationBudget, AdaptiveBudget
+from .scoring import ParetoScoring
+from .selection import ElitistSelection, DiversitySelection
+from .generation import MutationGenerator, CrossoverGenerator
+from .evaluation import PromotionEvaluator
+from .filtering import ParetoFrontier, TopScores, BalancedTop, Threshold, Diversity
+
+# Factory functions are now static methods on GEPA class
 
 __all__ = [
     # Core classes
@@ -47,28 +37,29 @@ __all__ = [
     'ScoreMatrix',
     'CandidatePool',
     
-    # Optimization components
+    # Protocol interfaces
     'Budget',
     'Scoring', 
     'Selection',
     'Generator',
     'Evaluator',
+    'Filtering',
     
-    # Strategy implementations
-    'LLMCallsBudgetStrategy',
-    'IterationBudgetStrategy',
-    'ParetoScoringStrategy',
-    'ElitistFilteringStrategy',
-    'DiversityFilteringStrategy',
-    'MutationGenerationStrategy',
-    'CrossoverGenerationStrategy',
-    'PromotionEvaluationStrategy',
-    'AdaptiveBudgetStrategy',
+    # Business step implementations
+    'LLMCallsBudget',
+    'IterationBudget',
+    'AdaptiveBudget',
+    'ParetoScoring',
+    'ElitistSelection',
+    'DiversitySelection',
+    'MutationGenerator',
+    'CrossoverGenerator',
+    'PromotionEvaluator',
     
-    # Factory functions
-    'create_basic_gepa',
-    'create_diversity_gepa',
-    'create_iteration_limited_gepa',
-    'create_adaptive_gepa',
-    'create_research_gepa',
+    # Filtering implementations
+    'ParetoFrontier',
+    'TopScores',
+    'BalancedTop',
+    'Threshold',
+    'Diversity',
 ]

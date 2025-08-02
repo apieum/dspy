@@ -22,8 +22,6 @@ from dspy.teleprompt.gepa import (
     Selection,
     Generator,
     Evaluator,
-    create_basic_gepa,
-    create_diversity_gepa,
 )
 from dspy.utils.dummies import DummyLM
 
@@ -78,7 +76,7 @@ class TestGEPABehavior:
         """GEPA should return a compiled program when given valid inputs."""
         with dspy.context(lm=dummy_lm):
             student = SimpleQA()
-            optimizer = create_basic_gepa(simple_metric, max_calls=50)
+            optimizer = GEPA.create_basic(simple_metric, max_calls=50)
             
             result = optimizer.compile(student, simple_trainset[:3], simple_trainset[3:])
             
@@ -93,9 +91,9 @@ class TestComponentInterfaces:
     
     def test_budget_interface(self):
         """Budget components should implement required interface."""
-        from dspy.teleprompt.gepa.strategies.implementations import LLMCallsBudgetStrategy
+        from dspy.teleprompt.gepa.budget import LLMCallsBudget
         
-        budget = LLMCallsBudgetStrategy(100)
+        budget = LLMCallsBudget(100)
         
         # Interface methods
         assert hasattr(budget, 'can_afford')
@@ -111,36 +109,36 @@ class TestComponentInterfaces:
     
     def test_scoring_interface(self):
         """Scoring components should implement required interface."""
-        from dspy.teleprompt.gepa.strategies.implementations import ParetoScoringStrategy
+        from dspy.teleprompt.gepa.scoring import ParetoScoring
         
-        strategy = ParetoScoringStrategy(simple_metric)
+        strategy = ParetoScoring(simple_metric)
         
         # Interface methods
         assert hasattr(strategy, 'calculate_scores')
         
     def test_generation_interface(self):
         """Generation components should implement required interface."""
-        from dspy.teleprompt.gepa.strategies.implementations import MutationGenerationStrategy
+        from dspy.teleprompt.gepa.generation import MutationGenerator
         
-        strategy = MutationGenerationStrategy(mutation_rate=0.5)
+        strategy = MutationGenerator(mutation_rate=0.5)
         
         # Interface methods
         assert hasattr(strategy, 'generate')
         
     def test_filtering_interface(self):
         """Filtering components should implement required interface."""
-        from dspy.teleprompt.gepa.strategies.implementations import ElitistFilteringStrategy
+        from dspy.teleprompt.gepa.selection import ElitistSelection
         
-        strategy = ElitistFilteringStrategy(keep_top_n=5)
+        strategy = ElitistSelection(keep_top_n=5)
         
         # Interface methods
         assert hasattr(strategy, 'filter')
         
     def test_evaluation_interface(self):
         """Evaluation components should implement required interface."""
-        from dspy.teleprompt.gepa.strategies.implementations import PromotionEvaluationStrategy
+        from dspy.teleprompt.gepa.evaluation import PromotionEvaluator
         
-        strategy = PromotionEvaluationStrategy(simple_metric, promotion_threshold=0.6)
+        strategy = PromotionEvaluator(simple_metric, promotion_threshold=0.6)
         
         # Interface methods
         assert hasattr(strategy, 'evaluate')
@@ -153,7 +151,7 @@ class TestGEPAAlgorithmStructure:
         """GEPA should follow the defined algorithm phases."""
         with dspy.context(lm=dummy_lm):
             student = SimpleQA()
-            optimizer = create_basic_gepa(simple_metric, max_calls=20)
+            optimizer = GEPA.create_basic(simple_metric, max_calls=20)
             
             # Mock the optimization components to track calls
             with patch.object(optimizer.scoring, 'calculate_scores', wraps=optimizer.scoring.calculate_scores) as mock_scoring, \
@@ -211,8 +209,8 @@ class TestFactoryFunctions:
     """Test factory functions create valid GEPA instances."""
     
     def test_create_basic_gepa(self):
-        """create_basic_gepa should return working GEPA instance."""
-        optimizer = create_basic_gepa(simple_metric, max_calls=100)
+        """GEPA.create_basic should return working GEPA instance."""
+        optimizer = GEPA.create_basic(simple_metric, max_calls=100)
         
         assert isinstance(optimizer, GEPA)
         assert hasattr(optimizer, 'budget')
@@ -222,13 +220,13 @@ class TestFactoryFunctions:
         assert hasattr(optimizer, 'evaluator')
         
     def test_create_diversity_gepa(self):
-        """create_diversity_gepa should return working GEPA instance."""
-        optimizer = create_diversity_gepa(simple_metric, max_calls=100)
+        """GEPA.create_diversity should return working GEPA instance."""
+        optimizer = GEPA.create_diversity(simple_metric, max_calls=100)
         
         assert isinstance(optimizer, GEPA)
         # Should use diversity selection
-        from dspy.teleprompt.gepa.strategies.implementations import DiversityFilteringStrategy
-        assert isinstance(optimizer.selection, DiversityFilteringStrategy)
+        from dspy.teleprompt.gepa.selection import DiversitySelection
+        assert isinstance(optimizer.selection, DiversitySelection)
 
 
 class TestGEPAIntegration:
@@ -238,7 +236,7 @@ class TestGEPAIntegration:
         """Test basic optimization workflow end-to-end."""
         with dspy.context(lm=dummy_lm):
             student = SimpleQA()
-            optimizer = create_basic_gepa(simple_metric, max_calls=30)
+            optimizer = GEPA.create_basic(simple_metric, max_calls=30)
             
             # Should complete without errors
             result = optimizer.compile(student, simple_trainset[:3], simple_trainset[3:])
@@ -250,7 +248,7 @@ class TestGEPAIntegration:
         """Test diversity-focused optimization workflow."""
         with dspy.context(lm=dummy_lm):
             student = SimpleQA()
-            optimizer = create_diversity_gepa(simple_metric, max_calls=30)
+            optimizer = GEPA.create_diversity(simple_metric, max_calls=30)
             
             # Should complete without errors
             result = optimizer.compile(student, simple_trainset[:3], simple_trainset[3:])
