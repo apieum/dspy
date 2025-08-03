@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from ..data.candidate import Candidate
 
 
-@dataclass
 class Cohort:
     """A cohort of candidates created in a single iteration.
     
@@ -20,9 +19,23 @@ class Cohort:
     and share the same iteration context. The iteration_id is stored
     in the candidates themselves as they're always from the same iteration.
     """
-    candidates: List['Candidate']
-    creation_timestamp: float = field(default_factory=time.time)
-    metadata: Dict[str, Any] = field(default_factory=dict)  # For cohort-specific info
+    
+    def __init__(self, *candidates: 'Candidate', creation_timestamp: Optional[float] = None, metadata: Optional[Dict[str, Any]] = None):
+        """Initialize cohort with candidates.
+        
+        Args:
+            *candidates: Variable number of candidate arguments, or a single list of candidates
+            creation_timestamp: When cohort was created (defaults to current time)
+            metadata: Optional metadata dict
+        """
+        # Handle both Cohort(candidate1, candidate2) and Cohort([candidate1, candidate2])
+        if len(candidates) == 1 and isinstance(candidates[0], list):
+            self.candidates: List['Candidate'] = candidates[0]
+        else:
+            self.candidates: List['Candidate'] = list(candidates)
+            
+        self.creation_timestamp: float = creation_timestamp or time.time()
+        self.metadata: Dict[str, Any] = metadata or {}
     
     @property
     def iteration_id(self) -> int:
@@ -54,8 +67,10 @@ class Cohort:
         self.add_candidate(candidate)
 
 
-@dataclass
 class FilteredCohort(Cohort):
     """Cohort after evaluation filtering with scores compiled."""
-    filtered_count: int = 0  # How many were filtered out
-    evaluation_summary: str = ""  # Summary of evaluation results
+    
+    def __init__(self, *candidates: 'Candidate', filtered_count: int = 0, evaluation_summary: str = "", **kwargs):
+        super().__init__(*candidates, **kwargs)
+        self.filtered_count = filtered_count
+        self.evaluation_summary = evaluation_summary

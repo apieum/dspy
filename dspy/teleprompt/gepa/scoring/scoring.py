@@ -3,6 +3,7 @@
 from abc import abstractmethod
 from typing import Callable, List, Protocol, TYPE_CHECKING
 import dspy
+from ..compilation_observer import CompilationObserver
 
 if TYPE_CHECKING:
     from ..data.candidate import Candidate
@@ -10,7 +11,7 @@ if TYPE_CHECKING:
     from ..data.score_matrix import ScoreMatrix
 
 
-class Scoring(Protocol):
+class Scoring(CompilationObserver):
     """Protocol for calculating candidate performance scores.
     
     This component owns the metric and is responsible for evaluating

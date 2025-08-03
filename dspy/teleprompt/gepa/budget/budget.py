@@ -2,9 +2,10 @@
 
 from abc import abstractmethod
 from typing import Protocol
+from ..compilation_observer import CompilationObserver
 
 
-class Budget(Protocol):
+class Budget(CompilationObserver):
     """Protocol for managing optimization budget (LLM calls, iterations, etc)."""
     
     @abstractmethod

@@ -30,17 +30,17 @@ class CandidatePool:
         # Integrated task-based scoring matrix
         self.score_matrix = ScoreMatrix()
     
-    def extend(self, cohort: Cohort) -> ScoreMatrix:
-        """Add a cohort to the pool and return score matrix.
+    def promote(self, cohort: Cohort) -> None:
+        """Promote a cohort to the pool and update score matrix.
         
         Candidates should already have their task_scores populated from evaluation.
         """
         for candidate in cohort.candidates:
             self.candidates.append(candidate)
             self.candidates_by_generation[cohort.iteration_id].append(candidate)
-            self.score_matrix.update_scores([candidate])
         
-        return self.score_matrix
+        # Update score matrix with the entire cohort at once
+        self.score_matrix.update_scores(cohort)
     
     def append(self, candidate: Candidate) -> ScoreMatrix:
         """Add a candidate to the pool.
@@ -55,7 +55,9 @@ class CandidatePool:
         self.candidates_by_generation[candidate.generation_number].append(candidate)
         
         # Update score matrix with this new candidate
-        self.score_matrix.update_scores([candidate])
+        from .cohort import Cohort
+        single_candidate_cohort = Cohort(candidate)
+        self.score_matrix.update_scores(single_candidate_cohort)
         
         return self.score_matrix
     
@@ -71,34 +73,47 @@ class CandidatePool:
     
     
     
-    def filter_scores(self, strategy) -> List[Candidate]:
-        """Apply filtering strategy to task scores.
+    
+    def filter_by_task_scores(self, selector) -> List[Candidate]:
+        """Filter candidates based on their task-by-task score performance.
         
-        The pool iterates over each task and passes task_id -> List[(candidate, score)] 
-        to the strategy for filtering.
+        Delegates to score_matrix because the matrix is updated each time
+        a candidate is added to the pool, maintaining score consistency.
+        
+        Args:
+            selector: Selection strategy that receives task score data
+            
+        Returns:
+            List of candidates selected based on task performance
         """
-        task_scores_data = {}
+        return self.score_matrix.filter_by_task(selector)
+    
+    def filter_best_scores(self, selector) -> List[Candidate]:
+        """Filter from candidates with the best scores (those who excel in at least one task).
         
-        # Collect scores for each task
-        for task_id in self.score_matrix.get_all_task_ids():
-            candidate_scores = []
-            for candidate in self.candidates:
-                score = candidate.task_score(task_id)
-                if score is not None:
-                    candidate_scores.append((candidate, score))
-            task_scores_data[task_id] = candidate_scores
+        Delegates to score_matrix because the matrix is updated each time
+        a candidate is added to the pool, maintaining the best performers list.
         
-        # Pass to strategy for filtering
-        selected_candidates = strategy.filter(task_scores_data)
-        
-        return selected_candidates
+        Args:
+            selector: Selection strategy that receives array of best candidates
+            
+        Returns:
+            List of candidates selected from the high performers
+        """
+        return self.score_matrix.filter_by_candidate(selector)
     
     def filter(self, selector) -> List[Candidate]:
-        """Apply selector for filtering candidates.
+        """Filter all candidates in the pool.
         
-        Selector encapsulates filtering logic and operates on the pool directly.
+        Direct filtering of all candidates without score considerations.
+        
+        Args:
+            selector: Selection strategy that receives array of all candidates
+            
+        Returns:
+            List of candidates selected from the entire pool
         """
-        return selector.select_from_pool(self)
+        return selector.filter(self.candidates)
     
     def select_one(self, selector) -> Candidate:
         """Select single candidate using selector."""

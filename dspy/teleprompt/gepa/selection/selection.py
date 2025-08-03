@@ -2,6 +2,7 @@
 
 from abc import abstractmethod
 from typing import List, Protocol, TYPE_CHECKING
+from ..compilation_observer import CompilationObserver
 
 if TYPE_CHECKING:
     from ..data.candidate import Candidate
@@ -9,7 +10,7 @@ if TYPE_CHECKING:
     from ..data.score_matrix import ScoreMatrix
 
 
-class Selection(Protocol):
+class Selection(CompilationObserver):
     """Protocol for filtering candidates based on performance scores.
     
     This component uses scores (not metric directly) to decide which
@@ -17,12 +18,15 @@ class Selection(Protocol):
     """
     
     @abstractmethod
-    def filter(self, candidate_pool: "CandidatePool", score_matrix: "ScoreMatrix") -> List["Candidate"]:
-        """Filter candidates based on performance scores.
+    def filter(self, task_score_data: dict) -> List["Candidate"]:
+        """Filter candidates based on task score data provided by ScoreMatrix.
+        
+        The ScoreMatrix decides what data to provide and calls this method.
+        Selector should NEVER access candidate_pool or score_matrix directly.
         
         Args:
-            candidate_pool: Pool containing all candidates and their scores
-            score_matrix: Matrix providing access to scoring data
+            task_score_data: Dict with task_id -> List[(candidate, score)] mappings
+                            prepared by ScoreMatrix for this selection strategy
             
         Returns:
             List of selected (surviving) candidates

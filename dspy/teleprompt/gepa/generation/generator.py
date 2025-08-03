@@ -3,13 +3,14 @@
 from abc import abstractmethod
 from typing import List, Protocol, TYPE_CHECKING
 import dspy
+from ..compilation_observer import CompilationObserver
 
 if TYPE_CHECKING:
     from ..data.candidate import Candidate
     from ..data.cohort import Cohort
 
 
-class Generator(Protocol):
+class Generator(CompilationObserver):
     """Protocol for generating new candidates from existing pool.
     
     This component implements the genetic operations (mutation, crossover, etc)
@@ -17,14 +18,11 @@ class Generator(Protocol):
     """
     
     @abstractmethod
-    def generate(self, parent_candidates: List["Candidate"],
-                feedback_data: List[dspy.Example], 
-                iteration: int) -> "Cohort":
+    def generate(self, parent_candidates: List["Candidate"], iteration: int) -> "Cohort":
         """Generate new candidates from parent candidates.
         
         Args:
             parent_candidates: Selected parent candidates for generation
-            feedback_data: Data for generating feedback/mutations
             iteration: Current iteration number
             
         Returns:
@@ -56,3 +54,4 @@ class Generator(Protocol):
             Empty cohort of the appropriate type
         """
         ...
+    

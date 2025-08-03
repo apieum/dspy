@@ -52,10 +52,10 @@ class MutationGenerator(Generator):
         self.feedback_collector = feedback_collector or EnhancedTraceCollector()
         self.mutation_rate = mutation_rate
         self.population_size = population_size
+        # This will be set during prepare_for_compilation()
+        self.feedback_data: List[dspy.Example] = []
         
-    def generate(self, parent_candidates: List[Candidate], 
-                feedback_data: List[dspy.Example], 
-                iteration: int) -> Cohort:
+    def generate(self, parent_candidates: List[Candidate], iteration: int) -> Cohort:
         """Generate new candidates through mutation of selected parents.
         
         Follows paper's approach:
@@ -66,8 +66,8 @@ class MutationGenerator(Generator):
         """
         new_candidates = []
         
-        if not parent_candidates or not feedback_data:
-            return Cohort(candidates=new_candidates)
+        if not parent_candidates or not self.feedback_data:
+            return Cohort(*new_candidates)
         
         for i in range(self.population_size):
             try:
@@ -79,7 +79,7 @@ class MutationGenerator(Generator):
                 
                 # Step 2: Collect feedback on parent's performance
                 feedback_result = self.feedback_collector.collect_feedback(
-                    parent_candidate.module, feedback_data, self._simple_metric
+                    parent_candidate.module, self.feedback_data, self._simple_metric
                 )
                 
                 # Step 3: Apply reflective prompt mutation
@@ -92,7 +92,7 @@ class MutationGenerator(Generator):
                 logger.warning(f"Mutation failed for candidate {i}: {e}")
                 continue
         
-        return Cohort(candidates=new_candidates)
+        return Cohort(*new_candidates)
 
     def _select_parent_candidate(self, parent_candidates: List[Candidate]) -> Optional[Candidate]:
         """Select parent candidate based on performance."""
@@ -180,10 +180,15 @@ class MutationGenerator(Generator):
         
         Used by ParetoFrontier.generate() method for dependency injection pattern.
         """
-        # Use empty feedback data - this interface is for when we don't have specific feedback
-        empty_feedback_data = []
-        return self.generate(parent_candidates, empty_feedback_data, iteration=0)
+        return self.generate(parent_candidates, iteration=0)
     
     def create_empty_cohort(self) -> Cohort:
         """Create an empty cohort of the type this generator produces."""
-        return Cohort(candidates=[])
+        return Cohort()
+    
+    def start_compilation(self, student: dspy.Module, training_data: List[dspy.Example]) -> None:
+        """Prepare generator with training dataset when compilation begins.
+        
+        Uses training data as feedback data for reflective mutation.
+        """
+        self.feedback_data = training_data
