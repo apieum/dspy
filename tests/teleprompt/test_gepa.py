@@ -12,14 +12,12 @@ from dspy.primitives.example import Example
 from dspy.primitives.module import Module
 from dspy.signatures.signature import make_signature
 from dspy.teleprompt.gepa import (
-    GEPA, 
+    GEPA,
     Candidate,
     Cohort,
     FilteredCohort,
-    ScoreMatrix,
     CandidatePool,
     Budget,
-    Scoring,
     Selection,
     Generator,
     Evaluator,
@@ -29,11 +27,11 @@ from dspy.utils.dummies import DummyLM
 
 class SimpleQA(Module):
     """Simple QA program for testing."""
-    
+
     def __init__(self):
         super().__init__()
         self.answer = dspy.Predict("question -> answer")
-        
+
     def forward(self, question):
         return self.answer(question=question)
 
@@ -57,12 +55,12 @@ def simple_trainset():
     ]
 
 
-@pytest.fixture 
+@pytest.fixture
 def dummy_lm():
     """DummyLM for predictable test responses."""
     return DummyLM([
         {"answer": "4"},
-        {"answer": "blue"}, 
+        {"answer": "blue"},
         {"answer": "Paris"},
         {"answer": "4"},
         {"answer": "Earth"},
@@ -72,15 +70,15 @@ def dummy_lm():
 
 class TestGEPABehavior:
     """Test GEPA core behavior and algorithm structure."""
-    
+
     def test_gepa_returns_compiled_program(self, simple_trainset, dummy_lm):
         """GEPA should return a compiled program when given valid inputs."""
         with dspy.context(lm=dummy_lm):
             student = SimpleQA()
             optimizer = GEPA.create_basic(simple_metric, max_calls=50)
-            
+
             result = optimizer.compile(student, simple_trainset)
-            
+
             assert isinstance(result, Module)
             assert result is not student  # Should return a compiled copy
             assert hasattr(result, '_compiled')
@@ -89,115 +87,106 @@ class TestGEPABehavior:
 
 class TestComponentInterfaces:
     """Test that strategy interfaces work correctly."""
-    
+
     def test_budget_interface(self):
         """Budget components should implement required interface."""
         from dspy.teleprompt.gepa.budget import LLMCallsBudget
-        
+
         budget = LLMCallsBudget(100)
-        
+
         # Interface methods
         assert hasattr(budget, 'can_afford')
         assert hasattr(budget, 'consume')
         assert hasattr(budget, 'is_empty')
-        
+
         # Behavior
         assert budget.can_afford(10, "test")
         budget.consume(50, "test")
         assert budget.can_afford(10, "test")
         budget.consume(50, "test")
         assert budget.is_empty()
-    
-    def test_scoring_interface(self):
-        """Scoring components should implement required interface."""
-        from dspy.teleprompt.gepa.scoring import ParetoScoring
-        
-        strategy = ParetoScoring(simple_metric)
-        
-        # Interface methods
-        assert hasattr(strategy, 'calculate_scores')
-        
+
     def test_generation_interface(self):
         """Generation components should implement required interface."""
         from dspy.teleprompt.gepa.generation import MutationGenerator
-        
+
         strategy = MutationGenerator(mutation_rate=0.5)
-        
+
         # Interface methods
         assert hasattr(strategy, 'generate')
-        
+
     def test_selection_interface(self):
         """Selection components should implement required interface."""
         from dspy.teleprompt.gepa.selection import ParetoSelection
-        
+
         strategy = ParetoSelection()
-        
+
         # Interface methods
         assert hasattr(strategy, 'filter')
-        
+
     def test_evaluation_interface(self):
         """Evaluation components should implement required interface."""
         from dspy.teleprompt.gepa.evaluation import PromotionEvaluator
-        
+
         strategy = PromotionEvaluator(simple_metric, promotion_threshold=0.6)
-        
+
         # Interface methods
         assert hasattr(strategy, 'evaluate')
 
 
 class TestGEPAAlgorithmStructure:
     """Test the GEPA algorithm follows the correct structure."""
-    
+
     def test_gepa_algorithm_phases(self, simple_trainset, dummy_lm):
         """GEPA should follow the defined algorithm phases."""
         with dspy.context(lm=dummy_lm):
             student = SimpleQA()
             optimizer = GEPA.create_basic(simple_metric, max_calls=20)
-            
+
             # Track the algorithm execution without mocking to avoid issues with reconfiguration
             result = optimizer.compile(student, simple_trainset)
-            
+
             # Verify that optimization completed successfully
             assert result is not None
             assert hasattr(result, '_compiled')
             assert result._compiled == True
-            
+
             # Verify that candidates were processed (shown by pool size in logs)
             assert optimizer.candidate_pool.size() > 0
 
 
 class TestDataStructures:
     """Test core data structures work correctly."""
-    
+
     def test_candidate_creation(self):
         """Candidates should be created with proper structure."""
         module = SimpleQA()
         candidate = Candidate(module=module, generation_number=1)
-        
+
         assert candidate.module is module
         assert candidate.generation_number == 1
         assert not hasattr(candidate, 'candidate_id')  # No longer using IDs
         assert isinstance(candidate.task_scores, list)
-        
+
     def test_cohort_creation(self):
         """Cohorts should manage candidates correctly."""
         candidates = [Candidate(SimpleQA(), generation_number=0)]
         cohort = Cohort(candidates)
-        
+
         assert cohort.size() == 1
         assert not cohort.is_empty()
         assert cohort.iteration_id == 0
-        
+
     def test_candidate_pool_operations(self):
         """CandidatePool should manage candidates correctly."""
         pool = CandidatePool()
         candidate = Candidate(SimpleQA(), generation_number=0)
-        
+
         # Add candidate
         pool.append(candidate)
-        
+
         assert pool.size() == 1
-        
+
         # Test that pool contains the candidate by checking size changes
         pool2 = CandidatePool()
         assert pool2.size() == 0
@@ -207,31 +196,30 @@ class TestDataStructures:
 
 class TestFactoryFunctions:
     """Test factory functions create valid GEPA instances."""
-    
+
     def test_create_basic_gepa(self):
         """GEPA.create_basic should return working GEPA instance."""
         optimizer = GEPA.create_basic(simple_metric, max_calls=100)
-        
+
         assert isinstance(optimizer, GEPA)
         assert hasattr(optimizer, 'budget')
         assert hasattr(optimizer, 'selector')
         assert hasattr(optimizer, 'generator')
         assert hasattr(optimizer, 'evaluator')
-        
+
 
 
 class TestGEPAIntegration:
     """Integration tests for complete GEPA workflows."""
-    
+
     def test_basic_optimization_workflow(self, simple_trainset, dummy_lm):
         """Test basic optimization workflow end-to-end."""
         with dspy.context(lm=dummy_lm):
             student = SimpleQA()
             optimizer = GEPA.create_basic(simple_metric, max_calls=30)
-            
+
             # Should complete without errors
             result = optimizer.compile(student, simple_trainset)
-            
+
             assert isinstance(result, Module)
             assert result._compiled is True
-            

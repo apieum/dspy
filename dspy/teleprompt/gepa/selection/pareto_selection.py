@@ -7,7 +7,6 @@ from typing import List
 
 from .selection import Selection
 from ..data.candidate import Candidate
-from ..data.score_matrix import ScoreMatrix
 from ..data.candidate_pool import CandidatePool
 
 logger = logging.getLogger(__name__)
@@ -19,22 +18,19 @@ class ParetoSelection(Selection):
     def __init__(self):
         self.selection_counts = defaultdict(int)
 
-    def filter(self, task_score_data: dict) -> List[Candidate]:
+    def filter(self, task_scores: dict) -> List[Candidate]:
         """Select candidates using Pareto-based illumination strategy (Algorithm 2).
 
         Implementation of Algorithm 2 from GEPA paper:
-        1. Get candidates that achieve best score on at least one training task (provided by ScoreMatrix)
+        1. Get candidates that achieve best score on at least one training task (provided by CandidatePool)
         2. Prune strictly dominated candidates  
         3. Return Pareto frontier candidates
         
         Args:
-            task_score_data: Dict with task_id -> List[(candidate, score)] provided by ScoreMatrix
+            task_scores: Dict with task_id -> candidate (best candidate for each task)
         """
         # Collect all unique candidates from the task winners
-        unique_candidates = set()
-        for task_id, candidate_scores in task_score_data.items():
-            for candidate, score in candidate_scores:
-                unique_candidates.add(candidate)
+        unique_candidates = set(task_scores.values())
         
         if not unique_candidates:
             return []

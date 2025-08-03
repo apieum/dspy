@@ -7,7 +7,6 @@ from ..compilation_observer import CompilationObserver
 if TYPE_CHECKING:
     from ..data.candidate import Candidate
     from ..data.candidate_pool import CandidatePool  
-    from ..data.score_matrix import ScoreMatrix
 
 
 class Selection(CompilationObserver):
@@ -19,14 +18,14 @@ class Selection(CompilationObserver):
     
     @abstractmethod
     def filter(self, task_score_data: dict) -> List["Candidate"]:
-        """Filter candidates based on task score data provided by ScoreMatrix.
+        """Filter candidates based on task score data provided by CandidatePool.
         
-        The ScoreMatrix decides what data to provide and calls this method.
-        Selector should NEVER access candidate_pool or score_matrix directly.
+        The CandidatePool decides what data to provide and calls this method.
+        Selector should NEVER access candidate_pool directly.
         
         Args:
-            task_score_data: Dict with task_id -> List[(candidate, score)] mappings
-                            prepared by ScoreMatrix for this selection strategy
+            task_score_data: Dict with task_id -> candidate mappings
+                            prepared by CandidatePool for this selection strategy
             
         Returns:
             List of selected (surviving) candidates

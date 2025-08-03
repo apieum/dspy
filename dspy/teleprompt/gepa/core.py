@@ -11,7 +11,6 @@ import dspy
 from dspy import Module
 
 from .budget import Budget
-from .scoring import Scoring
 from .selection import Selection
 from .generation import Generator
 from .evaluation import Evaluator
@@ -195,7 +194,7 @@ class GEPA:
         best_score = best_candidate.average_task_score()
 
         logger.info(f"Selected best candidate with score: {best_score:.4f}")
-        logger.info(f"Final pool size: {self.candidate_pool.size()} candidates across {self.candidate_pool.generation_count()} generations")
+        logger.info(f"Final pool size: {self.candidate_pool.size()} candidates")
 
         compiled_module = best_candidate.module
         compiled_module._compiled = True

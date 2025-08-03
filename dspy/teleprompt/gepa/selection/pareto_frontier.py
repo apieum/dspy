@@ -1,6 +1,6 @@
-"""Efficient Pareto Frontier selection using ScoreMatrix.
+"""Efficient Pareto Frontier selection using CandidatePool.
 
-This implements the GEPA Algorithm 2 efficiently by using the ScoreMatrix
+This implements the GEPA Algorithm 2 efficiently by using the CandidatePool
 which already maintains the best candidate per task.
 """
 
@@ -12,7 +12,7 @@ from ..data.candidate import Candidate
 
 
 class ParetoFrontier:
-    """Selector that efficiently computes Pareto frontier from ScoreMatrix.
+    """Selector that efficiently computes Pareto frontier from CandidatePool.
 
     Follows GEPA Algorithm 2 exactly:
     1. Get candidates that achieve best score on at least one task
@@ -37,10 +37,10 @@ class ParetoFrontier:
     def select_from_pool(self, candidate_pool) -> List[Candidate]:
         """Select Pareto frontier candidates from pool using accumulator pattern.
 
-        Uses ScoreMatrix which sends task winners via accumulator pattern.
+        Uses CandidatePool which sends task winners via accumulator pattern.
 
         Args:
-            candidate_pool: CandidatePool with ScoreMatrix
+            candidate_pool: CandidatePool with task scoring
 
         Returns:
             List of candidates forming the Pareto frontier
@@ -49,7 +49,7 @@ class ParetoFrontier:
         self.task_winners.clear()
         self.candidate_tasks.clear()
 
-        # Step 1: Accumulate task winners from ScoreMatrix
+        # Step 1: Accumulate task winners from CandidatePool
         candidate_pool.filter_top(self)
 
         if not self.task_winners:

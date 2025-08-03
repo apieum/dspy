@@ -1,7 +1,5 @@
-"""Enhanced CandidatePool for the GEPA strategy framework.
-
-Provides generation-aware candidate management with integrated ScoreMatrix
-for fast access to best candidates per task.
+"""CandidatePool for the GEPA optimizer.
+Maintains a pool of candidates with integrated task-based scoring.
 """
 
 from collections import defaultdict
@@ -9,75 +7,44 @@ from typing import Dict, List, Optional, Callable
 import weakref
 
 from .candidate import Candidate
-from .score_matrix import ScoreMatrix
 from .cohort import Cohort
 
 
 class CandidatePool:
     """Framework-aware candidate pool with integrated task-based scoring.
 
-    Manages candidates across generations with integrated ScoreMatrix
+    Manages candidates across generations with integrated task-based scoring
     for fast access to best candidates per task.
     """
 
     def __init__(self):
         # Primary storage - candidates directly
         self.candidates: List[Candidate] = []
-
-        # Generation indexing for efficient access
-        self.candidates_by_generation: Dict[int, List[Candidate]] = defaultdict(list)
-
-        # Integrated task-based scoring matrix
-        self.score_matrix = ScoreMatrix()
+        # Task-based scoring: task_id -> best candidate for that task
+        self.task_scores: Dict[int, Candidate] = {}
 
     def promote(self, cohort: Cohort) -> None:
-        """Promote a cohort to the pool and update score matrix.
+        """Promote a cohort to the pool and update task scores.
 
         Candidates should already have their task_scores populated from evaluation.
         """
         for candidate in cohort.candidates:
             self.candidates.append(candidate)
-            self.candidates_by_generation[cohort.iteration_id].append(candidate)
 
-        # Let cohort update the score matrix with best candidates per task
-        cohort.update_scores_in_matrix(self.score_matrix)
+        # Let cohort update the task scores with best candidates per task
+        cohort.update_scores(self)
 
-    def append(self, candidate: Candidate) -> ScoreMatrix:
+    def append(self, candidate: Candidate) -> None:
         """Add a candidate to the pool.
 
         The candidate should already have its task_scores populated from evaluation.
-
-        Returns:
-            The updated score matrix
         """
-        # Add candidate to pool
-        self.candidates.append(candidate)
-        self.candidates_by_generation[candidate.generation_number].append(candidate)
-
-        # Update score matrix with this new candidate
-        single_candidate_cohort = Cohort(candidate)
-        single_candidate_cohort.update_scores_in_matrix(self.score_matrix)
-
-        return self.score_matrix
-
-    def append_with_scores(self, candidate: Candidate, task_scores: Dict[int, float]) -> ScoreMatrix:
-        """Add a candidate to the pool with explicit task scores (for backward compatibility).
-
-        This method sets the scores in the candidate first, then adds it.
-        """
-        # Store scores in the candidate
-        candidate.set_task_scores(task_scores)
-        return self.append(candidate)
-
-
-
-
+        self.promote(Cohort(candidate))
 
     def filter_by_task_scores(self, selector) -> List[Candidate]:
         """Filter candidates based on their task-by-task score performance.
 
-        Delegates to score_matrix because the matrix is updated each time
-        a candidate is added to the pool, maintaining score consistency.
+        Delegates to selector.
 
         Args:
             selector: Selection strategy that receives task score data
@@ -85,13 +52,10 @@ class CandidatePool:
         Returns:
             List of candidates selected based on task performance
         """
-        return self.score_matrix.filter_by_task(selector)
+        return selector.filter(self.task_scores)
 
     def filter_best_scores(self, selector) -> List[Candidate]:
         """Filter from candidates with the best scores (those who excel in at least one task).
-
-        Delegates to score_matrix because the matrix is updated each time
-        a candidate is added to the pool, maintaining the best performers list.
 
         Args:
             selector: Selection strategy that receives array of best candidates
@@ -99,7 +63,8 @@ class CandidatePool:
         Returns:
             List of candidates selected from the high performers
         """
-        return self.score_matrix.filter_by_candidate(selector)
+        unique_candidates = set(self.task_scores.values())
+        return selector.filter(list(unique_candidates))
 
     def filter(self, selector) -> List[Candidate]:
         """Filter all candidates in the pool.
@@ -114,40 +79,30 @@ class CandidatePool:
         """
         return selector.filter(self.candidates)
 
-    def select_one(self, selector) -> Candidate:
-        """Select single candidate using selector."""
-        if hasattr(selector, 'select_one_stochastic'):
-            return selector.select_one_stochastic(self)
-        else:
-            candidates = selector.select_from_pool(self)
-            return candidates[0] if candidates else None
-
     def filter_top(self, accumulator) -> None:
         """Apply accumulator to the best candidate per task.
 
-        Delegates to score_matrix which iterates over top candidates per task.
+        Iterates over all tasks and adds best candidates to the accumulator cohort.
         """
-        self.score_matrix.filter_top(accumulator)
+        for task_id, best_candidate in self.task_scores.items():
+            accumulator.add_candidate(best_candidate)
+
+    def update_score(self, task_id: int, candidate: Candidate) -> None:
+        """Update the task scores with a single candidate for a specific task.
+
+        The cohort determines the best candidate per task and calls this method.
+
+        Args:
+            task_id: The task ID to update
+            candidate: The best candidate for this task
+        """
+        # Get the candidate's score for this specific task
+        score = candidate.task_score(task_id) or 0.0
+        if score <= 0.0:
+            return
+
+        self.task_scores[task_id] = candidate.best_for_task(task_id, self.task_scores.get(task_id, candidate))
 
     def size(self) -> int:
         """Total number of candidates in pool."""
         return len(self.candidates)
-
-    def generation_count(self) -> int:
-        """Number of generations in pool."""
-        return len(self.candidates_by_generation)
-
-    def select_best(self, metric, evaluation_data: List, n: int = 1) -> List[Candidate]:
-        """Select the best N candidates from the entire pool."""
-        if not self.candidates:
-            return []
-
-        # Evaluate all candidates and sort by performance
-        candidate_scores = []
-        for candidate in self.candidates:
-            score = candidate.evaluate_on_batch(evaluation_data, metric)
-            candidate_scores.append((candidate, score))
-
-        # Sort by score (descending) and return top N
-        candidate_scores.sort(key=lambda x: x[1], reverse=True)
-        return [candidate for candidate, _ in candidate_scores[:n]]
