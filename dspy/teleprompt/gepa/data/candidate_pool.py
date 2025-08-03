@@ -10,7 +10,7 @@ import weakref
 
 from .candidate import Candidate
 from .score_matrix import ScoreMatrix
-from ..generation.generation import Generation
+from .cohort import Cohort
 
 
 class CandidatePool:
@@ -21,35 +21,28 @@ class CandidatePool:
     """
     
     def __init__(self):
-        # Primary storage
-        self.candidates: Dict[int, Candidate] = {}
-        self.next_candidate_id = 0
+        # Primary storage - candidates directly
+        self.candidates: List[Candidate] = []
         
         # Generation indexing for efficient access
-        self.candidates_by_generation: Dict[int, List[int]] = defaultdict(list)
-        self.current_generation_id = 0
-        
-        # Lineage relationships (for research analysis)
-        self.children_by_parent: Dict[int, List[int]] = defaultdict(list)
-        self.parent_relationships: Dict[int, List[int]] = {}  # child_id -> parent_ids
+        self.candidates_by_generation: Dict[int, List[Candidate]] = defaultdict(list)
         
         # Integrated task-based scoring matrix
         self.score_matrix = ScoreMatrix()
     
-    def extend(self, generation: Generation) -> ScoreMatrix:
-        """Add a generation to the pool and return score matrix.
+    def extend(self, cohort: Cohort) -> ScoreMatrix:
+        """Add a cohort to the pool and return score matrix.
         
         Candidates should already have their task_scores populated from evaluation.
         """
-        for candidate in generation.candidates:
-            self._add_candidate_to_pool(candidate, generation.generation_id)
-        
-        # Update score matrix with the new candidates
-        self.score_matrix.update_scores(generation.candidates)
+        for candidate in cohort.candidates:
+            self.candidates.append(candidate)
+            self.candidates_by_generation[cohort.iteration_id].append(candidate)
+            self.score_matrix.update_scores([candidate])
         
         return self.score_matrix
     
-    def add_candidate(self, candidate: Candidate) -> ScoreMatrix:
+    def append(self, candidate: Candidate) -> ScoreMatrix:
         """Add a candidate to the pool.
         
         The candidate should already have its task_scores populated from evaluation.
@@ -58,66 +51,30 @@ class CandidatePool:
             The updated score matrix
         """
         # Add candidate to pool
-        generation_id = candidate.generation_number
-        candidate_id = self._add_candidate_to_pool(candidate, generation_id)
+        self.candidates.append(candidate)
+        self.candidates_by_generation[candidate.generation_number].append(candidate)
         
         # Update score matrix with this new candidate
         self.score_matrix.update_scores([candidate])
         
         return self.score_matrix
     
-    def add_candidate_with_scores(self, candidate: Candidate, task_scores: Dict[int, float]) -> ScoreMatrix:
+    def append_with_scores(self, candidate: Candidate, task_scores: Dict[int, float]) -> ScoreMatrix:
         """Add a candidate to the pool with explicit task scores (for backward compatibility).
         
         This method sets the scores in the candidate first, then adds it.
         """
         # Store scores in the candidate  
         candidate.set_task_scores(task_scores)
-        return self.add_candidate(candidate)
+        return self.append(candidate)
     
-    
-    def _add_candidate_to_pool(self, candidate: Candidate, generation_id: int) -> int:
-        """Internal method to add candidate with ID assignment and indexing."""
-        # Assign candidate ID if not already set
-        if candidate.candidate_id is None:
-            candidate.candidate_id = self.next_candidate_id
-            self.next_candidate_id += 1
-        
-        candidate_id = candidate.candidate_id
-        
-        # Store candidate
-        self.candidates[candidate_id] = candidate
-        
-        # Update generation index
-        self.candidates_by_generation[generation_id].append(candidate_id)
-        
-        # Update lineage tracking
-        if candidate.parent_ids:
-            self.parent_relationships[candidate_id] = candidate.parent_ids.copy()
-            for parent_id in candidate.parent_ids:
-                self.children_by_parent[parent_id].append(candidate_id)
-        
-        return candidate_id
-    
-    def get_candidate(self, candidate_id: int) -> Optional[Candidate]:
-        """Get candidate by ID."""
-        return self.candidates.get(candidate_id)
-    
-    def get_all_candidates(self) -> List[Candidate]:
-        """Get all candidates in the pool."""
-        return list(self.candidates.values())
-    
-    def get_generation_candidates(self, generation_id: int) -> List[Candidate]:
-        """Get all candidates from a specific generation."""
-        candidate_ids = self.candidates_by_generation[generation_id]
-        return [self.candidates[cid] for cid in candidate_ids if cid in self.candidates]
     
     
     
     def filter_scores(self, strategy) -> List[Candidate]:
         """Apply filtering strategy to task scores.
         
-        The pool iterates over each task and passes task_id -> List[scores] 
+        The pool iterates over each task and passes task_id -> List[(candidate, score)] 
         to the strategy for filtering.
         """
         task_scores_data = {}
@@ -125,58 +82,38 @@ class CandidatePool:
         # Collect scores for each task
         for task_id in self.score_matrix.get_all_task_ids():
             candidate_scores = []
-            for candidate in self.candidates.values():
-                score = candidate.get_task_score(task_id)
+            for candidate in self.candidates:
+                score = candidate.task_score(task_id)
                 if score is not None:
-                    candidate_scores.append((candidate.candidate_id, score))
+                    candidate_scores.append((candidate, score))
             task_scores_data[task_id] = candidate_scores
         
         # Pass to strategy for filtering
-        selected_candidate_ids = strategy.filter(task_scores_data)
+        selected_candidates = strategy.filter(task_scores_data)
         
-        # Return selected candidates
-        return [self.candidates[cid] for cid in selected_candidate_ids if cid in self.candidates]
+        return selected_candidates
     
-    def filter_best(self, strategy) -> List[Candidate]:
-        """Apply filtering strategy to best candidates.
+    def filter(self, selector) -> List[Candidate]:
+        """Apply selector for filtering candidates.
         
-        The pool iterates over best candidates and passes them to the strategy.
+        Selector encapsulates filtering logic and operates on the pool directly.
         """
-        best_candidates_data = {}
-        
-        for task_id in self.score_matrix.get_all_task_ids():
-            best_candidate = self.score_matrix.get_best_candidate_for_task(task_id)
-            if best_candidate is not None:
-                score = best_candidate.get_task_score(task_id)
-                best_candidates_data[task_id] = (best_candidate.candidate_id, score)
-        
-        # Pass to strategy for filtering  
-        selected_candidate_ids = strategy.filter(best_candidates_data)
-        
-        # Return selected candidates
-        return [self.candidates[cid] for cid in selected_candidate_ids if cid in self.candidates]
+        return selector.select_from_pool(self)
     
-    def filter_top(self, n: int, strategy) -> List[Candidate]:
-        """Apply filtering strategy to top N candidates.
+    def select_one(self, selector) -> Candidate:
+        """Select single candidate using selector."""
+        if hasattr(selector, 'select_one_stochastic'):
+            return selector.select_one_stochastic(self)
+        else:
+            candidates = selector.select_from_pool(self)
+            return candidates[0] if candidates else None
+    
+    def filter_top(self, accumulator) -> None:
+        """Apply accumulator to the best candidate per task.
         
-        The pool gets top candidates and passes them to the strategy for filtering.
+        Delegates to score_matrix which iterates over top candidates per task.
         """
-        # Get all candidates with their average scores
-        candidate_averages = []
-        for candidate in self.candidates.values():
-            if candidate.task_scores:
-                avg_score = candidate.get_average_task_score()
-                candidate_averages.append((candidate.candidate_id, avg_score))
-        
-        # Sort by average score and take top N
-        candidate_averages.sort(key=lambda x: x[1], reverse=True)
-        top_candidates_data = candidate_averages[:n]
-        
-        # Pass to strategy for filtering
-        selected_candidate_ids = strategy.filter(top_candidates_data)
-        
-        # Return selected candidates
-        return [self.candidates[cid] for cid in selected_candidate_ids if cid in self.candidates]
+        self.score_matrix.filter_top(accumulator)
     
     def size(self) -> int:
         """Total number of candidates in pool."""
@@ -193,7 +130,7 @@ class CandidatePool:
         
         # Evaluate all candidates and sort by performance
         candidate_scores = []
-        for candidate in self.candidates.values():
+        for candidate in self.candidates:
             score = candidate.evaluate_on_batch(evaluation_data, metric)
             candidate_scores.append((candidate, score))
         

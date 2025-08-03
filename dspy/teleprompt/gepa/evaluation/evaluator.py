@@ -5,7 +5,7 @@ from typing import Callable, List, Protocol, TYPE_CHECKING
 import dspy
 
 if TYPE_CHECKING:
-    from ..generation.generation import Generation
+    from ..data.cohort import Cohort, FilteredCohort
 
 
 class Evaluator(Protocol):
@@ -16,16 +16,16 @@ class Evaluator(Protocol):
     """
     
     @abstractmethod
-    def evaluate(self, generation: "Generation",
-                evaluation_data: List[dspy.Example]) -> "Generation":
+    def evaluate(self, cohort: "Cohort",
+                evaluation_data: List[dspy.Example]) -> "FilteredCohort":
         """Evaluate new candidates and filter based on promotion criteria.
         
         Args:
-            generation: Newly generated candidates to evaluate
+            cohort: Newly generated candidates to evaluate
             evaluation_data: Data for evaluation
             
         Returns:
-            Generation containing only promoted (worthy) candidates
+            FilteredCohort containing only promoted (worthy) candidates
         """
         ...
     

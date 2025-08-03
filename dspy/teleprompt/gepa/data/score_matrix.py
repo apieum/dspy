@@ -50,7 +50,7 @@ class ScoreMatrix:
                 self.best_candidates[task_id] = weakref.ref(candidate)
             else:
                 # Compare scores
-                current_score = current_best.get_task_score(task_id) or 0.0
+                current_score = current_best.task_score(task_id) or 0.0
                 
                 # Replace if new candidate has better score, or same score but more recent generation
                 if (score > current_score or 
@@ -69,3 +69,13 @@ class ScoreMatrix:
     def get_all_task_ids(self) -> List[int]:
         """Get all task IDs in the matrix."""
         return list(self.best_candidates.keys())
+    
+    def filter_top(self, accumulator) -> None:
+        """Apply accumulator to the best candidate for each task.
+        
+        Iterates over all tasks and calls accumulator.append(task_id, candidate) for each best candidate.
+        """
+        for task_id in self.get_all_task_ids():
+            best_candidate = self.get_best_candidate_for_task(task_id)
+            if best_candidate is not None:
+                accumulator.append(task_id, best_candidate)

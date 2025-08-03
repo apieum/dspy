@@ -14,7 +14,8 @@ from dspy.signatures.signature import make_signature
 from dspy.teleprompt.gepa import (
     GEPA, 
     Candidate,
-    Generation,
+    Cohort,
+    FilteredCohort,
     ScoreMatrix,
     CandidatePool,
     Budget,
@@ -125,11 +126,11 @@ class TestComponentInterfaces:
         # Interface methods
         assert hasattr(strategy, 'generate')
         
-    def test_filtering_interface(self):
-        """Filtering components should implement required interface."""
-        from dspy.teleprompt.gepa.selection import ElitistSelection
+    def test_selection_interface(self):
+        """Selection components should implement required interface."""
+        from dspy.teleprompt.gepa.selection import ParetoSelection
         
-        strategy = ElitistSelection(keep_top_n=5)
+        strategy = ParetoSelection()
         
         # Interface methods
         assert hasattr(strategy, 'filter')
@@ -178,16 +179,17 @@ class TestDataStructures:
         
         assert candidate.module is module
         assert candidate.generation_number == 1
-        assert candidate.candidate_id is None  # Assigned by pool
+        assert not hasattr(candidate, 'candidate_id')  # No longer using IDs
         assert isinstance(candidate.task_scores, list)
         
-    def test_generation_creation(self):
-        """Generations should manage candidates correctly."""
+    def test_cohort_creation(self):
+        """Cohorts should manage candidates correctly."""
         candidates = [Candidate(SimpleQA(), generation_number=0)]
-        generation = Generation(candidates, generation_id=0)
+        cohort = Cohort(candidates)
         
-        assert generation.size() == 1
-        assert not generation.is_empty()
+        assert cohort.size() == 1
+        assert not cohort.is_empty()
+        assert cohort.iteration_id == 0
         
     def test_candidate_pool_operations(self):
         """CandidatePool should manage candidates correctly."""
@@ -195,14 +197,15 @@ class TestDataStructures:
         candidate = Candidate(SimpleQA(), generation_number=0)
         
         # Add candidate
-        pool.add_candidate(candidate)
+        pool.append(candidate)
         
         assert pool.size() == 1
-        assert candidate.candidate_id is not None
         
-        # Retrieve candidate
-        retrieved = pool.get_candidate(candidate.candidate_id)
-        assert retrieved is candidate
+        # Test that pool contains the candidate by checking size changes
+        pool2 = CandidatePool()
+        assert pool2.size() == 0
+        pool2.append(candidate)
+        assert pool2.size() == 1
 
 
 class TestFactoryFunctions:
@@ -219,14 +222,6 @@ class TestFactoryFunctions:
         assert hasattr(optimizer, 'generator')
         assert hasattr(optimizer, 'evaluator')
         
-    def test_create_diversity_gepa(self):
-        """GEPA.create_diversity should return working GEPA instance."""
-        optimizer = GEPA.create_diversity(simple_metric, max_calls=100)
-        
-        assert isinstance(optimizer, GEPA)
-        # Should use diversity selection
-        from dspy.teleprompt.gepa.selection import DiversitySelection
-        assert isinstance(optimizer.selection, DiversitySelection)
 
 
 class TestGEPAIntegration:
@@ -244,14 +239,3 @@ class TestGEPAIntegration:
             assert isinstance(result, Module)
             assert result._compiled is True
             
-    def test_diversity_optimization_workflow(self, simple_trainset, dummy_lm):
-        """Test diversity-focused optimization workflow."""
-        with dspy.context(lm=dummy_lm):
-            student = SimpleQA()
-            optimizer = GEPA.create_diversity(simple_metric, max_calls=30)
-            
-            # Should complete without errors
-            result = optimizer.compile(student, simple_trainset[:3], simple_trainset[3:])
-            
-            assert isinstance(result, Module)
-            assert result._compiled is True

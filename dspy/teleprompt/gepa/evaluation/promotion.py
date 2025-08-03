@@ -3,7 +3,7 @@
 from typing import List, Callable
 import dspy
 from .evaluator import Evaluator
-from ..generation.generation import Generation
+from ..data.cohort import Cohort, FilteredCohort
 
 
 class PromotionEvaluator(Evaluator):
@@ -13,12 +13,12 @@ class PromotionEvaluator(Evaluator):
         self.metric = metric
         self.promotion_threshold = promotion_threshold
         
-    def evaluate(self, generation: Generation, 
-                evaluation_data: List[dspy.Example]) -> Generation:
+    def evaluate(self, cohort: Cohort, 
+                evaluation_data: List[dspy.Example]) -> FilteredCohort:
         
         promoted_candidates = []
         
-        for candidate in generation.candidates:
+        for candidate in cohort.candidates:
             # Evaluate candidate performance
             score = candidate.evaluate_on_batch(evaluation_data, self.metric)
             
@@ -26,10 +26,9 @@ class PromotionEvaluator(Evaluator):
             if score >= self.promotion_threshold:
                 promoted_candidates.append(candidate)
                 
-        return Generation(
+        return FilteredCohort(
             candidates=promoted_candidates,
-            generation_id=generation.generation_id,
-            iteration=generation.iteration
+            filtered_count=len(cohort.candidates) - len(promoted_candidates)
         )
         
     def get_metric(self) -> Callable:

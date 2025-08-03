@@ -16,29 +16,28 @@ class Candidate:
     all evolutionary operations to the optimization components.
     """
     module: Module  # Pure DSPy module - the actual program
-    candidate_id: Optional[int] = None  # Assigned by CandidatePool
-    parent_ids: List[int] = field(default_factory=list)  # Lineage tracking
+    parents: List['Candidate'] = field(default_factory=list)  # Direct parent references
     generation_number: int = 0  # Which generation this belongs to
     creation_timestamp: float = field(default_factory=time.time)
     fitness_history: List[float] = field(default_factory=list)  # Performance over time
     task_scores: List[float] = field(default_factory=list)  # task_scores[task_id] = score
     
     def __hash__(self) -> int:
-        """Make candidates hashable based on their ID."""
-        return hash(self.candidate_id) if self.candidate_id is not None else hash(id(self))
+        """Make candidates hashable based on object identity."""
+        return hash(id(self))
     
     def __eq__(self, other) -> bool:
-        """Compare candidates by ID."""
+        """Compare candidates by object identity."""
         if not isinstance(other, Candidate):
             return False
-        return self.candidate_id == other.candidate_id
+        return self is other
     
     def add_fitness_score(self, score: float) -> None:
         """Record a new fitness evaluation."""
         self.fitness_history.append(score)
     
-    def get_average_fitness(self) -> float:
-        """Get average fitness across all evaluations."""
+    def average_fitness(self) -> float:
+        """Calculate average fitness across all evaluations."""
         return sum(self.fitness_history) / len(self.fitness_history) if self.fitness_history else 0.0
     
     def set_task_score(self, task_id: int, score: float) -> None:
@@ -54,12 +53,12 @@ class Candidate:
         for task_id, score in task_scores.items():
             self.set_task_score(task_id, score)
     
-    def get_task_score(self, task_id: int) -> Optional[float]:
+    def task_score(self, task_id: int) -> Optional[float]:
         """Get score for a specific task."""
         return self.task_scores[task_id] if task_id < len(self.task_scores) else None
     
-    def get_average_task_score(self) -> float:
-        """Get average score across all tasks."""
+    def average_task_score(self) -> float:
+        """Calculate average score across all tasks."""
         return sum(self.task_scores) / len(self.task_scores) if self.task_scores else 0.0
     
     def evaluate_on_example(self, example: dspy.Example, metric: Callable) -> float:

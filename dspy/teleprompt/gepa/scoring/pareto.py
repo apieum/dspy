@@ -35,7 +35,7 @@ class ParetoScoring(Scoring):
                 candidate.add_fitness_score(avg_score)
             
             # Add candidate to pool - pool reads candidate's scores and updates matrix
-            candidate_pool.add_candidate(candidate)
+            candidate_pool.append(candidate)
         
         # Return the candidate pool's score matrix
         return candidate_pool.score_matrix

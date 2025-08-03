@@ -5,7 +5,7 @@ from typing import List
 import dspy
 from .generator import Generator
 from ..data.candidate import Candidate
-from .generation import Generation
+from ..data.cohort import Cohort
 
 
 class CrossoverGenerator(Generator):
@@ -17,7 +17,7 @@ class CrossoverGenerator(Generator):
         
     def generate(self, parent_candidates: List[Candidate],
                 feedback_data: List[dspy.Example],
-                iteration: int) -> Generation:
+                iteration: int) -> Cohort:
         
         new_candidates = []
         
@@ -32,13 +32,9 @@ class CrossoverGenerator(Generator):
                 
                 new_candidate = Candidate(
                     module=child_module,
-                    parent_ids=[parent1.candidate_id, parent2.candidate_id],
+                    parents=[parent1, parent2],
                     generation_number=iteration
                 )
                 new_candidates.append(new_candidate)
                 
-        return Generation(
-            candidates=new_candidates,
-            generation_id=iteration,
-            iteration=iteration
-        )
+        return Cohort(candidates=new_candidates)
