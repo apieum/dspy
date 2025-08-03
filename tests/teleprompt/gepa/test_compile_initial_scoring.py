@@ -43,7 +43,7 @@ def test_compile_scores_initial_candidate():
         
         # Capture pool state when next_generation is first called
         initial_pool_size = len(gepa.candidate_pool.candidates)
-        initial_score_matrix_tasks = gepa.candidate_pool.score_matrix.get_all_task_ids()
+        initial_score_matrix_tasks = list(gepa.candidate_pool.score_matrix.task_scores.keys())
         
         # Verify candidate is properly scored
         

@@ -65,6 +65,41 @@ class Cohort:
             candidate: The winning candidate for this task
         """
         self.add_candidate(candidate)
+    
+    def update_scores_in_matrix(self, score_matrix) -> None:
+        """Update the score matrix with the best candidate for each task in this cohort.
+        
+        The cohort analyzes its candidates, finds the best performer for each task,
+        and updates the score matrix with individual task updates.
+        
+        Args:
+            score_matrix: ScoreMatrix to update with best candidates per task
+        """
+        if not self.candidates:
+            return
+        
+        # Determine the number of tasks from the first candidate
+        if not self.candidates[0].task_scores:
+            return
+        
+        num_tasks = len(self.candidates[0].task_scores)
+        
+        # For each task, find the best candidate and update the matrix
+        for task_id in range(num_tasks):
+            best_candidate = None
+            best_score = 0.0
+            
+            # Find the candidate with the highest score for this task
+            for candidate in self.candidates:
+                if task_id < len(candidate.task_scores):
+                    score = candidate.task_scores[task_id]
+                    if score > best_score:
+                        best_score = score
+                        best_candidate = candidate
+            
+            # Update the matrix if we found a good candidate for this task
+            if best_candidate is not None and best_score > 0:
+                score_matrix.update_score(task_id, best_candidate)
 
 
 class FilteredCohort(Cohort):

@@ -54,9 +54,9 @@ def test_promote_updates_score_matrix():
     pool.promote(cohort)
     
     # Check that score matrix was updated
-    assert pool.score_matrix.get_best_candidate_for_task(0) == candidate1  # 0.8 > 0.5
-    assert pool.score_matrix.get_best_candidate_for_task(1) == candidate2  # 0.9 > 0.6
-    assert set(pool.score_matrix.get_all_task_ids()) == {0, 1}
+    assert pool.score_matrix.task_scores[0] == candidate1  # 0.8 > 0.5
+    assert pool.score_matrix.task_scores[1] == candidate2  # 0.9 > 0.6
+    assert set(pool.score_matrix.task_scores.keys()) == {0, 1}
 
 
 def test_promote_multiple_cohorts():
@@ -83,8 +83,8 @@ def test_promote_multiple_cohorts():
     assert len(pool.candidates_by_generation[1]) == 1
     
     # Check score matrix updates
-    assert pool.score_matrix.get_best_candidate_for_task(0) == candidate2  # Better score
-    assert pool.score_matrix.get_best_candidate_for_task(1) == candidate1  # Kept original
+    assert pool.score_matrix.task_scores[0] == candidate2  # Better score
+    assert pool.score_matrix.task_scores[1] == candidate1  # Kept original
 
 
 if __name__ == "__main__":

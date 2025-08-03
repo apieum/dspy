@@ -79,3 +79,28 @@ class Candidate:
         avg_score = total_score / len(examples)
         self.add_fitness_score(avg_score)
         return avg_score
+    
+    def best_for_task(self, task_id: int, other: 'Candidate') -> 'Candidate':
+        """Compare two candidates and return the best one for a specific task.
+        
+        Considers both score and generation number (newer wins on ties).
+        
+        Args:
+            task_id: The task to compare performance on
+            other: The other candidate to compare against
+            
+        Returns:
+            The better candidate for the task (self or other)
+        """
+        my_score = self.task_score(task_id) or 0.0
+        other_score = other.task_score(task_id) or 0.0
+        
+        # Better score wins
+        if my_score > other_score:
+            return self
+        
+        # Same score - newer generation wins
+        if my_score == other_score and self.generation_number > other.generation_number:
+            return self
+            
+        return other
