@@ -68,6 +68,18 @@ class Candidate:
             self.evaluate_on_example(example, task_id, metric)
         return self.task_scores
 
+    def best_overall(self, other: 'Candidate') -> 'Candidate':
+        my_avg_score = self.average_task_score()
+        other_avg_score = other.average_task_score()
+        if my_avg_score > other_avg_score:
+            return self
+        elif my_avg_score < other_avg_score:
+            return other
+        elif self.generation_number > other.generation_number:
+            return self
+        else:
+            return other
+
     def best_for_task(self, task_id: int, other: 'Candidate') -> 'Candidate':
         """Compare two candidates and return the best one for a specific task.
 

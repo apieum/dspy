@@ -103,7 +103,7 @@ class GEPA:
 
         # Evaluate initial candidate and promote to pool
         evaluated_gen_0 = self.evaluator.evaluate_for_promotion(gen_0, self.budget)
-        self.candidate_pool.promote(evaluated_gen_0, self.budget)
+        self.candidate_pool.promote(evaluated_gen_0)
         # Recursive optimization
         result = self.next_generation(gen_0)
         self.finish_compilation(result)
@@ -143,7 +143,7 @@ class GEPA:
 
         # Filter candidates based on performance
         logger.debug("Filtering candidates based on scores")
-        filtered_candidates = self.candidate_pool.filter_by_task_scores(self.selector, self.budget)
+        filtered_candidates = self.selector.filter(self.candidate_pool, self.budget)
 
         # Generate new candidates from filtered survivors
         logger.debug("Generating new candidates")
@@ -152,7 +152,7 @@ class GEPA:
         # Evaluate and promote new generation
         logger.debug(f"Evaluating {new_cohort.size()} new candidates")
         filtered_cohort = self.evaluator.evaluate(new_cohort, self.budget)
-        self.candidate_pool.promote(filtered_cohort, self.budget)
+        self.candidate_pool.promote(filtered_cohort)
 
         # Notify all components that iteration is finishing
         self.finish_iteration(filtered_cohort)
@@ -165,16 +165,7 @@ class GEPA:
         """Select and return the best candidate when optimization terminates."""
         logger.info("Selecting best candidate from optimization results")
 
-        # Get the best candidate per task using a cohort accumulator
-        from .data import Cohort
-        top_candidates_cohort = Cohort([])
-        self.candidate_pool.filter_top(top_candidates_cohort)
-
-        if not top_candidates_cohort.candidates:
-            raise RuntimeError("No candidates found in pool - optimization failed")
-
-        # Select the candidate with the highest average score from task winners
-        best_candidate = max(top_candidates_cohort.candidates, key=lambda c: c.average_task_score())
+        best_candidate = self.candidate_pool.filter_top(lambda c1, c2: c1.best_overall(c2))
         best_score = best_candidate.average_task_score()
 
         logger.info(f"Selected best candidate with score: {best_score:.4f}")

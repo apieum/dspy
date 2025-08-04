@@ -15,6 +15,10 @@ class TestSelectionInterface:
         
         # Interface methods
         assert hasattr(selector, 'filter')
+        assert hasattr(selector, 'filter_candidates')
+        assert hasattr(selector, 'filter_scores')
+        assert hasattr(selector, 'filter_generation')
+        assert hasattr(selector, 'filter_generation_history')
         assert hasattr(selector, 'start_compilation')
         assert hasattr(selector, 'finish_compilation')
         assert isinstance(selector, dspy.teleprompt.gepa.selection.Selection)
@@ -35,6 +39,33 @@ class TestSelectionInterface:
         selector.finish_compilation(student, None)
         selector.start_iteration(0, None, None)
         selector.finish_iteration(0, None, None)
+    
+    def test_filter_main_method(self):
+        """Test the main filter method that delegates to pool."""
+        selector = ParetoSelection()
+        pool = CandidatePool()
+        
+        # Create test candidates
+        module1 = dspy.Predict("input -> output")
+        candidate1 = Candidate(module1, generation_number=1)
+        candidate1.task_scores = {0: 0.9, 1: 0.5}
+        
+        module2 = dspy.Predict("input -> output")
+        candidate2 = Candidate(module2, generation_number=1)
+        candidate2.task_scores = {0: 0.6, 1: 0.8}
+        
+        # Add candidates to pool
+        from dspy.teleprompt.gepa.data.cohort import Cohort
+        cohort = Cohort(candidate1, candidate2)
+        pool.promote(cohort)
+        
+        # Test main filter method
+        selected = selector.filter(pool)
+        
+        # Should have selected both candidates (neither dominates the other)
+        assert len(selected) == 2
+        assert candidate1 in selected
+        assert candidate2 in selected
 
 
 class TestParetoSelection:
@@ -65,7 +96,7 @@ class TestParetoSelection:
         }
         
         # Filter using Pareto selection
-        selected = selector.filter(task_scores)
+        selected = selector.filter_scores(task_scores)
         
         # All candidates should be in Pareto frontier (none dominates others)
         assert len(selected) == 3
@@ -93,7 +124,7 @@ class TestParetoSelection:
         }
         
         # Filter using Pareto selection
-        selected = selector.filter(task_scores)
+        selected = selector.filter_scores(task_scores)
         
         # Only dominant candidate should survive
         assert len(selected) == 1
@@ -105,7 +136,7 @@ class TestParetoSelection:
         selector = ParetoSelection()
         
         empty_task_scores = {}
-        selected = selector.filter(empty_task_scores)
+        selected = selector.filter_scores(empty_task_scores)
         
         assert len(selected) == 0
     
@@ -118,7 +149,7 @@ class TestParetoSelection:
         candidate.task_scores = [0.8, 0.6, 0.9]
         
         task_scores = {0: candidate}
-        selected = selector.filter(task_scores)
+        selected = selector.filter_scores(task_scores)
         
         assert len(selected) == 1
         assert candidate in selected
@@ -171,7 +202,7 @@ class TestParetoSelection:
             2: candidate1,  # candidate1 also wins task 2
         }
         
-        selected = selector.filter(task_scores)
+        selected = selector.filter_scores(task_scores)
         
         # candidate1 and candidate2 should be in frontier (neither dominates)
         # candidate3 might be dominated depending on the scenario
@@ -227,7 +258,7 @@ class TestSelectionWithCandidatePool:
         initial_count = selector.selection_counts[candidate]
         
         # Perform selection
-        selected = selector.filter(task_scores)
+        selected = selector.filter_scores(task_scores)
         
         # Verify selection was tracked
         assert len(selected) == 1
@@ -258,7 +289,7 @@ class TestSelectionEdgeCases:
         }
         
         # Should handle gracefully
-        selected = selector.filter(task_scores)
+        selected = selector.filter_scores(task_scores)
         assert isinstance(selected, list)
         assert len(selected) >= 0
     
@@ -271,7 +302,7 @@ class TestSelectionEdgeCases:
         candidate.task_scores = {0: 0.0, 1: 0.0, 2: 0.0}
         
         task_scores = {0: candidate}
-        selected = selector.filter(task_scores)
+        selected = selector.filter_scores(task_scores)
         
         assert len(selected) == 1
         assert candidate in selected
@@ -297,7 +328,7 @@ class TestSelectionEdgeCases:
             1: fresh_candidate,   # fresh_candidate wins task 1
         }
         
-        selected = selector.filter(task_scores)
+        selected = selector.filter_scores(task_scores)
         
         # Only the fresh candidate should be selected
         assert len(selected) == 1
@@ -324,7 +355,7 @@ class TestSelectionEdgeCases:
             1: candidate2,
         }
         
-        selected = selector.filter(task_scores)
+        selected = selector.filter_scores(task_scores)
         
         # Should return empty list
         assert len(selected) == 0
