@@ -2,11 +2,10 @@
 
 from .candidate import Candidate
 from .candidate_pool import CandidatePool
-from .cohort import Cohort, FilteredCohort
+from .cohort import Cohort
 
 __all__ = [
     'Candidate',
     'CandidatePool',
     'Cohort',
-    'FilteredCohort',
 ]

@@ -6,7 +6,7 @@ import dspy
 from ..compilation_observer import CompilationObserver
 
 if TYPE_CHECKING:
-    from ..data.cohort import Cohort, FilteredCohort
+    from ..data.cohort import Cohort
     from ..data.candidate_pool import CandidatePool
 
 
@@ -18,14 +18,14 @@ class Evaluator(CompilationObserver):
     """
     
     @abstractmethod
-    def evaluate(self, cohort: "Cohort") -> "FilteredCohort":
+    def evaluate(self, cohort: "Cohort") -> "Cohort":
         """Evaluate new candidates and filter based on promotion criteria.
         
         Args:
             cohort: Newly generated candidates to evaluate
             
         Returns:
-            FilteredCohort containing only promoted (worthy) candidates
+            Cohort containing only promoted (worthy) candidates
         """
         ...
     

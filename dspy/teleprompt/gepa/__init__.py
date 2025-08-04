@@ -8,7 +8,7 @@ from "GEPA: Genetic-Pareto Optimization for Task-Specific Instruction Evolution"
 from .core import GEPA
 from .data.candidate import Candidate
 from .data.candidate_pool import CandidatePool
-from .data.cohort import Cohort, FilteredCohort
+from .data.cohort import Cohort
 
 # Protocol interfaces
 from .budget import Budget
@@ -34,7 +34,6 @@ __all__ = [
     'GEPA',
     'Candidate',
     'Cohort',
-    'FilteredCohort',
     'CandidatePool',
 
     # Protocol interfaces

@@ -16,7 +16,7 @@ from .generation import Generator
 from .evaluation import Evaluator
 from .data.candidate import Candidate
 from .data.candidate_pool import CandidatePool
-from .data.cohort import Cohort, FilteredCohort
+from .data.cohort import Cohort
 
 logger = logging.getLogger(__name__)
 

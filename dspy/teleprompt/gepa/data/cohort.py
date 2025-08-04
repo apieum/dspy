@@ -84,12 +84,3 @@ class Cohort:
                 best_candidate = candidate.best_for_task(task_id, best_candidate)
 
             pool.update_score(task_id, best_candidate)
-
-
-class FilteredCohort(Cohort):
-    """Cohort after evaluation filtering with scores compiled."""
-
-    def __init__(self, *candidates: 'Candidate', filtered_count: int = 0, evaluation_summary: str = "", **kwargs):
-        super().__init__(*candidates, **kwargs)
-        self.filtered_count = filtered_count
-        self.evaluation_summary = evaluation_summary

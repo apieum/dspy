@@ -3,7 +3,7 @@
 from typing import List, Callable, Optional, TYPE_CHECKING
 import dspy
 from .evaluator import Evaluator
-from ..data.cohort import Cohort, FilteredCohort
+from ..data.cohort import Cohort
 
 if TYPE_CHECKING:
     from ..data.candidate_pool import CandidatePool
@@ -20,20 +20,22 @@ class PromotionEvaluator(Evaluator):
         self.evaluation_data: List[dspy.Example] = []
         self.minibatch_data: List[dspy.Example] = []
 
-    def evaluate(self, cohort: Cohort) -> FilteredCohort:
+    def evaluate(self, cohort: Cohort) -> Cohort:
 
         promoted_candidates = []
 
         for candidate in cohort.candidates:
             # Evaluate candidate performance using internal evaluation data
-            score = candidate.evaluate_on_batch(self.evaluation_data, self.metric)
+            candidate.evaluate_on_batch(self.evaluation_data, self.metric)
+            
+            # Calculate average score from task scores
+            avg_score = candidate.average_task_score()
 
             # Promote if above threshold
-            if score >= self.promotion_threshold:
+            if avg_score >= self.promotion_threshold:
                 promoted_candidates.append(candidate)
 
-        filtered_cohort = FilteredCohort(*promoted_candidates)
-        filtered_cohort.filtered_count = len(cohort.candidates) - len(promoted_candidates)
+        filtered_cohort = Cohort(*promoted_candidates)
         return filtered_cohort
 
     def get_metric(self) -> Callable:
@@ -49,7 +51,7 @@ class PromotionEvaluator(Evaluator):
         minibatch_size = max(1, len(training_data) // 5)
         self.minibatch_data = training_data[:minibatch_size]
 
-    def evaluate_two_phase(self, cohort: Cohort) -> FilteredCohort:
+    def evaluate_two_phase(self, cohort: Cohort) -> Cohort:
         """Implement 2-phase evaluation as described in GEPA paper.
 
         Fast promotion filter: Quick minibatch evaluation to filter promising candidates
@@ -59,7 +61,7 @@ class PromotionEvaluator(Evaluator):
             cohort: New candidates to evaluate
 
         Returns:
-            FilteredCohort with promoted candidates (with task_scores populated)
+            Cohort with promoted candidates (with task_scores populated)
         """
 
         # Fast minibatch evaluation to filter promising candidates
@@ -73,39 +75,38 @@ class PromotionEvaluator(Evaluator):
 
         return fully_evaluated
 
-    def _fast_promotion_filter(self, cohort: Cohort, minibatch_data: List[dspy.Example]) -> FilteredCohort:
+    def _fast_promotion_filter(self, cohort: Cohort, minibatch_data: List[dspy.Example]) -> Cohort:
         """Fast filter using minibatch to identify promising candidates."""
         promoted_candidates = []
 
         for candidate in cohort.candidates:
             # Quick evaluation on minibatch
-            minibatch_score = candidate.evaluate_on_batch(minibatch_data, self.metric)
+            candidate.evaluate_on_batch(minibatch_data, self.metric)
+            
+            # Calculate average score from task scores
+            avg_score = candidate.average_task_score()
 
             # Promote if above threshold
-            if minibatch_score >= self.promotion_threshold:
+            if avg_score >= self.promotion_threshold:
                 promoted_candidates.append(candidate)
 
-        filtered_cohort = FilteredCohort(*promoted_candidates)
-        filtered_cohort.filtered_count = len(cohort.candidates) - len(promoted_candidates)
+        filtered_cohort = Cohort(*promoted_candidates)
         return filtered_cohort
 
-    def _full_task_evaluation(self, filtered_cohort: FilteredCohort, full_data: List[dspy.Example]) -> FilteredCohort:
+    def _full_task_evaluation(self, filtered_cohort: Cohort, full_data: List[dspy.Example]) -> Cohort:
         """Full evaluation on main performance data to populate task_scores."""
 
         for candidate in filtered_cohort.candidates:
             # Evaluate candidate on each task in full_data
-            task_scores = []
-            for example in full_data:
+            for task_id, example in enumerate(full_data):
                 # Get prediction from candidate's module
                 try:
-                    prediction = candidate.module(example.inputs())
+                    prediction = candidate.module(**example.inputs())
                     score = self.metric(example, prediction)
-                    task_scores.append(score)
+                    candidate.task_scores[task_id] = score
                 except Exception:
                     # If evaluation fails, assign zero score
-                    task_scores.append(0.0)
-
-            candidate.task_scores = task_scores
+                    candidate.task_scores[task_id] = 0.0
 
         return filtered_cohort
 
@@ -121,17 +122,13 @@ class PromotionEvaluator(Evaluator):
         """
         for candidate in cohort.candidates:
             # Evaluate candidate on each task in evaluation_data
-            task_scores = []
-            for example in self.evaluation_data:
+            for task_id, example in enumerate(self.evaluation_data):
                 try:
-                    prediction = candidate.module(example.inputs())
+                    prediction = candidate.module(**example.inputs())
                     score = self.metric(example, prediction)
-                    task_scores.append(score)
+                    candidate.task_scores[task_id] = score
                 except Exception:
                     # If evaluation fails, assign zero score
-                    task_scores.append(0.0)
-
-            # Populate candidate's task_scores
-            candidate.task_scores = task_scores
+                    candidate.task_scores[task_id] = 0.0
 
         return cohort

@@ -15,7 +15,6 @@ from dspy.teleprompt.gepa import (
     GEPA,
     Candidate,
     Cohort,
-    FilteredCohort,
     CandidatePool,
     Budget,
     Selection,
@@ -166,7 +165,7 @@ class TestDataStructures:
         assert candidate.module is module
         assert candidate.generation_number == 1
         assert not hasattr(candidate, 'candidate_id')  # No longer using IDs
-        assert isinstance(candidate.task_scores, list)
+        assert isinstance(candidate.task_scores, dict)
 
     def test_cohort_creation(self):
         """Cohorts should manage candidates correctly."""
