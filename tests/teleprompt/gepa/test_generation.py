@@ -157,7 +157,7 @@ class TestGenerationBudgetIntegration:
         # Create parent candidate
         parent_module = dspy.Predict("input -> output")
         parent_candidate = Candidate(parent_module, generation_number=1)
-        parent_candidate.task_scores = [0.8]  # Good score for selection
+        parent_candidate.task_scores = {0: 0.8}  # Good score for selection
         
         # Track budget usage
         budget = LLMCallsBudget(100)
@@ -261,10 +261,39 @@ class TestMutationSpecificBehavior:
         
         parent_module = dspy.Predict("input -> output")
         parent_candidate = Candidate(parent_module, generation_number=1)
-        parent_candidate.task_scores = [0.8]
+        parent_candidate.task_scores = {0: 0.8}
         
         budget = LLMCallsBudget(100)
         result = generator.generate([parent_candidate], iteration=1, budget=budget)
         
         # Should not exceed population size
         assert len(result.candidates) <= generator.population_size
+    
+    def test_marks_parents_as_having_children(self):
+        """Test that mutation generator marks parents as had_child=True."""
+        generator = MutationGenerator(
+            population_size=1  # Generate only one child for simplicity
+        )
+        
+        # Setup feedback data
+        feedback_data = [dspy.Example(input="test", answer="answer").with_inputs("input")]
+        student = dspy.Predict("input -> output")
+        generator.start_compilation(student, feedback_data)
+        
+        # Create parent candidate
+        parent_module = dspy.Predict("input -> output")
+        parent_candidate = Candidate(parent_module, generation_number=1)
+        parent_candidate.task_scores = {0: 0.8}
+        parent_candidate.had_child = False  # Initially no children
+        
+        # Generate children
+        result = generator.generate([parent_candidate], iteration=2)
+        
+        # Parent should now be marked as having children
+        assert parent_candidate.had_child == True
+        
+        # Child should have the parent in its lineage
+        if result.candidates:
+            child = result.candidates[0]
+            assert parent_candidate in child.parents
+            assert child.generation_number == 2

@@ -23,8 +23,9 @@ class ParetoSelection(Selection):
 
         Implementation of Algorithm 2 from GEPA paper:
         1. Get candidates that achieve best score on at least one training task (provided by CandidatePool)
-        2. Prune strictly dominated candidates  
-        3. Return Pareto frontier candidates
+        2. Exclude candidates that have already been used for generation (had_child = True)
+        3. Prune strictly dominated candidates  
+        4. Return Pareto frontier candidates
         
         Args:
             task_scores: Dict with task_id -> candidate (best candidate for each task)
@@ -35,8 +36,14 @@ class ParetoSelection(Selection):
         if not unique_candidates:
             return []
         
+        # Exclude candidates that have already been used for generation
+        eligible_candidates = [c for c in unique_candidates if not c.had_child]
+        
+        if not eligible_candidates:
+            return []
+        
         # Apply Pareto selection - remove dominated candidates
-        pareto_candidates = self._remove_dominated_candidates(list(unique_candidates))
+        pareto_candidates = self._remove_dominated_candidates(eligible_candidates)
         
         return pareto_candidates
     

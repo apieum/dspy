@@ -27,6 +27,10 @@ class CrossoverGenerator(Generator):
                 parent1 = random.choice(parent_candidates)
                 parent2 = random.choice(parent_candidates)
                 
+                # Mark both parents as having produced a child
+                parent1.had_child = True
+                parent2.had_child = True
+                
                 # Create crossover child (simplified - real implementation would merge modules)
                 child_module = parent1.module.deepcopy()  # Simplified crossover
                 

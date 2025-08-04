@@ -83,7 +83,7 @@ class MutationGenerator(Generator):
                 )
                 
                 # Step 3: Apply reflective prompt mutation
-                mutated_candidate = self._mutate_candidate(parent_candidate, feedback_result, iteration)
+                mutated_candidate = self._mutate_candidate(parent_candidate, feedback_result, iteration, budget)
                 
                 if mutated_candidate is not None:
                     new_candidates.append(mutated_candidate)
@@ -111,7 +111,7 @@ class MutationGenerator(Generator):
         
         return best_candidate or parent_candidates[0]
 
-    def _mutate_candidate(self, parent_candidate: Candidate, feedback_result: FeedbackResult, iteration: int) -> Optional[Candidate]:
+    def _mutate_candidate(self, parent_candidate: Candidate, feedback_result: FeedbackResult, iteration: int, budget=None) -> Optional[Candidate]:
         """Mutate candidate using reflective prompt mutation."""
         try:
             # Get predictors from parent module
@@ -145,6 +145,9 @@ class MutationGenerator(Generator):
             
             if module_idx < len(mutated_predictors):
                 set_signature(mutated_predictors[module_idx], new_signature)
+            
+            # Mark parent as having produced a child
+            parent_candidate.had_child = True
             
             # Create new candidate
             new_candidate = Candidate(

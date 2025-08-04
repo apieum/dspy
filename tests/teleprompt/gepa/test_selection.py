@@ -268,10 +268,63 @@ class TestSelectionEdgeCases:
         
         module = dspy.Predict("input -> output")
         candidate = Candidate(module, generation_number=1)
-        candidate.task_scores = [0.0, 0.0, 0.0]
+        candidate.task_scores = {0: 0.0, 1: 0.0, 2: 0.0}
         
         task_scores = {0: candidate}
         selected = selector.filter(task_scores)
         
         assert len(selected) == 1
         assert candidate in selected
+    
+    def test_excludes_candidates_with_children(self):
+        """Test that candidates with had_child=True are excluded from selection."""
+        selector = ParetoSelection()
+        
+        # Create candidates - one with children, one without
+        module1 = dspy.Predict("input -> output")
+        parent_candidate = Candidate(module1, generation_number=1)
+        parent_candidate.task_scores = {0: 0.9, 1: 0.8}
+        parent_candidate.had_child = True  # This candidate has produced children
+        
+        module2 = dspy.Predict("input -> output")
+        fresh_candidate = Candidate(module2, generation_number=1)
+        fresh_candidate.task_scores = {0: 0.7, 1: 0.6}
+        fresh_candidate.had_child = False  # This candidate is still eligible
+        
+        # Both are task winners but only fresh_candidate should be selected
+        task_scores = {
+            0: parent_candidate,  # parent_candidate wins task 0
+            1: fresh_candidate,   # fresh_candidate wins task 1
+        }
+        
+        selected = selector.filter(task_scores)
+        
+        # Only the fresh candidate should be selected
+        assert len(selected) == 1
+        assert fresh_candidate in selected
+        assert parent_candidate not in selected
+    
+    def test_returns_empty_when_all_candidates_have_children(self):
+        """Test returns empty list when all candidates have produced children."""
+        selector = ParetoSelection()
+        
+        # Create candidates that all have produced children
+        module1 = dspy.Predict("input -> output")
+        candidate1 = Candidate(module1, generation_number=1)
+        candidate1.task_scores = {0: 0.9, 1: 0.5}
+        candidate1.had_child = True
+        
+        module2 = dspy.Predict("input -> output")
+        candidate2 = Candidate(module2, generation_number=1)
+        candidate2.task_scores = {0: 0.6, 1: 0.8}
+        candidate2.had_child = True
+        
+        task_scores = {
+            0: candidate1,
+            1: candidate2,
+        }
+        
+        selected = selector.filter(task_scores)
+        
+        # Should return empty list
+        assert len(selected) == 0
