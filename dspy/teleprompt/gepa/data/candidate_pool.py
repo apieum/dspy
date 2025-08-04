@@ -23,10 +23,14 @@ class CandidatePool:
         # Task-based scoring: task_id -> best candidate for that task
         self.task_scores: Dict[int, Candidate] = {}
 
-    def promote(self, cohort: Cohort) -> None:
+    def promote(self, cohort: Cohort, budget=None) -> None:
         """Promote a cohort to the pool and update task scores.
 
         Candidates should already have their task_scores populated from evaluation.
+        
+        Args:
+            cohort: Cohort to promote to the pool
+            budget: Optional budget parameter for consistency with core.py calls
         """
         for candidate in cohort.candidates:
             self.candidates.append(candidate)
@@ -41,13 +45,14 @@ class CandidatePool:
         """
         self.promote(Cohort(candidate))
 
-    def filter_by_task_scores(self, selector) -> List[Candidate]:
+    def filter_by_task_scores(self, selector, budget=None) -> List[Candidate]:
         """Filter candidates based on their task-by-task score performance.
 
         Delegates to selector.
 
         Args:
             selector: Selection strategy that receives task score data
+            budget: Optional budget parameter for consistency with core.py calls
 
         Returns:
             List of candidates selected based on task performance

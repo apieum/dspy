@@ -55,7 +55,7 @@ class MutationGenerator(Generator):
         # This will be set during prepare_for_compilation()
         self.feedback_data: List[dspy.Example] = []
         
-    def generate(self, parent_candidates: List[Candidate], iteration: int) -> Cohort:
+    def generate(self, parent_candidates: List[Candidate], iteration: int, budget=None) -> Cohort:
         """Generate new candidates through mutation of selected parents.
         
         Follows paper's approach:
@@ -132,8 +132,12 @@ class MutationGenerator(Generator):
             # Get current signature
             current_signature = get_signature(predictor)
             
-            # Apply reflective mutation
+            # Apply reflective mutation (LLM call happens here)
             new_signature = self.prompt_mutator.mutate_signature(current_signature, feedback_result)
+            
+            # Track budget for generation
+            if budget is not None:
+                budget.spend_on_generation(parent_candidate.module, {"type": "mutation", "iteration": iteration})
             
             # Create mutated module
             mutated_module = parent_module.deepcopy()

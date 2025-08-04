@@ -18,12 +18,13 @@ class Generator(CompilationObserver):
     """
     
     @abstractmethod
-    def generate(self, parent_candidates: List["Candidate"], iteration: int) -> "Cohort":
+    def generate(self, parent_candidates: List["Candidate"], iteration: int, budget=None) -> "Cohort":
         """Generate new candidates from parent candidates.
         
         Args:
             parent_candidates: Selected parent candidates for generation
             iteration: Current iteration number
+            budget: Optional budget parameter for tracking generation costs
             
         Returns:
             Cohort containing newly generated candidates

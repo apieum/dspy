@@ -5,6 +5,7 @@ from dspy.teleprompt.gepa.data.candidate import Candidate
 from dspy.teleprompt.gepa.data.cohort import Cohort
 from dspy.teleprompt.gepa.data.candidate_pool import CandidatePool
 from dspy.teleprompt.gepa.evaluation.promotion import PromotionEvaluator
+from dspy.teleprompt.gepa.budget.llm_calls import LLMCallsBudget
 
 
 def simple_metric(example: dspy.Example, prediction, trace=None) -> float:
@@ -46,7 +47,8 @@ def test_evaluator_returns_cohorts_gepa_manages_pool():
     test_cohort = Cohort(candidate1, candidate2)
     
     # PHASE 1: Evaluator evaluates and returns cohort (no pool interaction)
-    evaluated_cohort = evaluator.evaluate_for_promotion(test_cohort)
+    budget = LLMCallsBudget(100)  # Mock budget for testing
+    evaluated_cohort = evaluator.evaluate_for_promotion(test_cohort, budget)
     
     # Verify evaluator populated task_scores but didn't touch pool
     assert len(evaluated_cohort.candidates) == 2
@@ -68,16 +70,11 @@ def test_evaluator_returns_cohorts_gepa_manages_pool():
         assert candidate in evaluated_cohort.candidates
 
 
-def test_two_phase_evaluation_separation():
-    """Test two-phase evaluation maintains clean separation."""
+def test_evaluation_separation():
+    """Test evaluation maintains clean separation."""
     
     # Setup data
-    minibatch_data = [
-        dspy.Example(input="test1", answer="answer1"),
-        dspy.Example(input="test2", answer="answer2")
-    ]
-    
-    full_evaluation_data = [
+    evaluation_data = [
         dspy.Example(input="test1", answer="answer1"),
         dspy.Example(input="test2", answer="answer2"),
         dspy.Example(input="test3", answer="answer3"),
@@ -91,7 +88,7 @@ def test_two_phase_evaluation_separation():
     )
     # Prepare evaluator with data
     student = dspy.Predict("input -> output")
-    evaluator.start_compilation(student, full_evaluation_data)
+    evaluator.start_compilation(student, evaluation_data)
     
     # Create candidate pool
     candidate_pool = CandidatePool()
@@ -105,26 +102,30 @@ def test_two_phase_evaluation_separation():
     
     new_cohort = Cohort(candidate1, candidate2)
     
-    # PHASE 1: Evaluator performs two-phase evaluation (no pool interaction)
-    filtered_cohort = evaluator.evaluate_two_phase(new_cohort)
+    # PHASE 1: Evaluator performs evaluation (no pool interaction)  
+    budget = LLMCallsBudget(100)  # Mock budget for testing
+    filtered_cohort = evaluator.evaluate(new_cohort, budget)
     
     # Verify evaluator did its job but didn't touch pool
     assert candidate_pool.size() == 0  # Pool should still be empty
     assert len(filtered_cohort.candidates) >= 0  # Some candidates might be filtered
     
-    # Verify task_scores are populated
-    for candidate in filtered_cohort.candidates:
-        assert hasattr(candidate, 'task_scores')
-        assert len(candidate.task_scores) == len(full_evaluation_data)
+    # PHASE 2: GEPA handles pool promotion using evaluate_for_promotion
+    evaluated_cohort = evaluator.evaluate_for_promotion(new_cohort, budget)
     
-    # PHASE 2: GEPA handles pool promotion
-    candidate_pool.promote(filtered_cohort)
+    # Verify task_scores are populated
+    for candidate in evaluated_cohort.candidates:
+        assert hasattr(candidate, 'task_scores')
+        assert len(candidate.task_scores) == len(evaluation_data)
+    
+    # PHASE 3: GEPA handles pool promotion
+    candidate_pool.promote(evaluated_cohort)
     
     # Verify GEPA successfully promoted candidates
-    assert candidate_pool.size() == len(filtered_cohort.candidates)
+    assert candidate_pool.size() == len(evaluated_cohort.candidates)
 
 
 if __name__ == "__main__":
     test_evaluator_returns_cohorts_gepa_manages_pool()
-    test_two_phase_evaluation_separation()
+    test_evaluation_separation()
     print("Clean separation tests passed!")

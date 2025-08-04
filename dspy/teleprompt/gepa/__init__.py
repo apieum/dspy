@@ -15,7 +15,6 @@ from .budget import Budget
 from .selection import Selection
 from .generation import Generator
 from .evaluation import Evaluator
-from .filtering import Filtering
 
 # Business step implementations
 from .budget import LLMCallsBudget, IterationBudget, AdaptiveBudget
@@ -25,7 +24,6 @@ from .generation.reflective_mutation import ReflectiveMutation
 from .evaluation import PromotionEvaluator
 from .evaluation.trace_collector import EnhancedTraceCollector
 from .evaluation.feedback import FeedbackResult, EvaluationTrace, ModuleFeedback
-from .filtering import ParetoFrontier, TopScores, BalancedTop, Threshold, Diversity
 
 # Factory functions are now static methods on GEPA class
 
@@ -41,7 +39,6 @@ __all__ = [
     'Selection',
     'Generator',
     'Evaluator',
-    'Filtering',
 
     # Business step implementations
     'LLMCallsBudget',
@@ -56,11 +53,4 @@ __all__ = [
     'FeedbackResult',
     'EvaluationTrace',
     'ModuleFeedback',
-
-    # Filtering implementations
-    'ParetoFrontier',
-    'TopScores',
-    'BalancedTop',
-    'Threshold',
-    'Diversity',
 ]

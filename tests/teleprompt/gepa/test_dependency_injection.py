@@ -4,6 +4,7 @@ import dspy
 from dspy.teleprompt.gepa.core import GEPA
 from dspy.teleprompt.gepa.evaluation.promotion import PromotionEvaluator
 from dspy.teleprompt.gepa.generation.mutation import MutationGenerator
+from dspy.teleprompt.gepa.budget.llm_calls import LLMCallsBudget
 
 
 def simple_metric(example: dspy.Example, prediction, trace=None) -> float:

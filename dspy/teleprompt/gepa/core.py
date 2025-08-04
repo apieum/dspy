@@ -102,8 +102,8 @@ class GEPA:
         gen_0 = Cohort(initial_candidate)
 
         # Evaluate initial candidate and promote to pool
-        evaluated_gen_0 = self.evaluator.evaluate_for_promotion(gen_0)
-        self.candidate_pool.promote(evaluated_gen_0)
+        evaluated_gen_0 = self.evaluator.evaluate_for_promotion(gen_0, self.budget)
+        self.candidate_pool.promote(evaluated_gen_0, self.budget)
         # Recursive optimization
         result = self.next_generation(gen_0)
         self.finish_compilation(result)
@@ -130,7 +130,7 @@ class GEPA:
         logger.info(f"Processing cohort {cohort.iteration_id}, iteration {self.current_iteration}")
 
         # Termination conditions
-        if self.budget.is_empty():
+        if self.budget <= 0:
             logger.info("Budget exhausted - terminating optimization")
             return self._show_results()
 
@@ -143,32 +143,16 @@ class GEPA:
 
         # Filter candidates based on performance
         logger.debug("Filtering candidates based on scores")
-        filtered_candidates = self.candidate_pool.filter_by_task_scores(self.selector)
+        filtered_candidates = self.candidate_pool.filter_by_task_scores(self.selector, self.budget)
 
         # Generate new candidates from filtered survivors
         logger.debug("Generating new candidates")
-        generation_cost = len(filtered_candidates) * 10  # Estimate
-        if not self.budget.can_afford(generation_cost, "generation"):
-            logger.warning("Insufficient budget for generation - terminating")
-            return self._show_results()
-
-        new_cohort = self.generator.generate(filtered_candidates, self.current_iteration)
-        self.budget.consume(generation_cost, "generation")
+        new_cohort = self.generator.generate(filtered_candidates, self.current_iteration, self.budget)
 
         # Evaluate and promote new generation
         logger.debug(f"Evaluating {new_cohort.size()} new candidates")
-        evaluation_cost = len(new_cohort.candidates) * 5  # Estimate
-        if not self.budget.can_afford(evaluation_cost, "evaluation"):
-            logger.warning("Insufficient budget for evaluation - using all candidates")
-            # Promote all candidates without evaluation
-            self.candidate_pool.promote(new_cohort)
-            filtered_cohort = new_cohort
-        else:
-            # Use two-phase evaluation to get promoted candidates
-            filtered_cohort = self.evaluator.evaluate_two_phase(new_cohort)
-            # GEPA handles candidate pool promotion
-            self.candidate_pool.promote(filtered_cohort)
-            self.budget.consume(evaluation_cost, "evaluation")
+        filtered_cohort = self.evaluator.evaluate(new_cohort, self.budget)
+        self.candidate_pool.promote(filtered_cohort, self.budget)
 
         # Notify all components that iteration is finishing
         self.finish_iteration(filtered_cohort)

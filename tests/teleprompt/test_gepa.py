@@ -88,22 +88,24 @@ class TestComponentInterfaces:
     """Test that strategy interfaces work correctly."""
 
     def test_budget_interface(self):
-        """Budget components should implement required interface."""
+        """Budget components should implement new interface."""
         from dspy.teleprompt.gepa.budget import LLMCallsBudget
 
         budget = LLMCallsBudget(100)
 
-        # Interface methods
-        assert hasattr(budget, 'can_afford')
-        assert hasattr(budget, 'consume')
-        assert hasattr(budget, 'is_empty')
+        # New interface methods
+        assert hasattr(budget, 'spend_on_evaluation')
+        assert hasattr(budget, 'spend_on_generation')
+        assert hasattr(budget, 'spend_on_selection')
+        assert hasattr(budget, 'get_remaining')
 
-        # Behavior
-        assert budget.can_afford(10, "test")
-        budget.consume(50, "test")
-        assert budget.can_afford(10, "test")
-        budget.consume(50, "test")
-        assert budget.is_empty()
+        # Magic comparison methods
+        assert hasattr(budget, '__gt__')
+        assert hasattr(budget, '__float__')
+
+        # Test magic methods work
+        assert budget > 0
+        assert float(budget) == 100.0
 
     def test_generation_interface(self):
         """Generation components should implement required interface."""

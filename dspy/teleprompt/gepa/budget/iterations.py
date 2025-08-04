@@ -1,5 +1,7 @@
 """Iterations budget implementation."""
 
+from typing import Dict, Any, Optional
+import dspy
 from .budget import Budget
 
 
@@ -10,15 +12,15 @@ class IterationBudget(Budget):
         self.max_iterations = max_iterations
         self.current_iteration = 0
         
-    def can_afford(self, cost: int, operation_type: str) -> bool:
-        return self.current_iteration < self.max_iterations
         
-    def consume(self, cost: int, operation_type: str) -> None:
-        if operation_type == "iteration":
-            self.current_iteration += 1
-            
-    def is_empty(self) -> bool:
-        return self.current_iteration >= self.max_iterations
-        
-    def get_remaining(self) -> int:
-        return max(0, self.max_iterations - self.current_iteration)
+    def get_remaining(self) -> dict:
+        remaining_iterations = max(0, self.max_iterations - self.current_iteration)
+        return {
+            "iterations": remaining_iterations,
+            "percentage": (remaining_iterations / self.max_iterations) * 100 if self.max_iterations > 0 else 0
+        }
+    
+    
+    def start_iteration(self, iteration: int, cohort, budget) -> None:
+        """Track iteration start - increment iteration counter."""
+        self.current_iteration = iteration

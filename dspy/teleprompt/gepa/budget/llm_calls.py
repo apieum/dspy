@@ -1,7 +1,7 @@
 """LLM calls budget implementation."""
 
 import logging
-from typing import List
+from typing import List, Dict, Any, Optional
 import dspy
 from .budget import Budget
 
@@ -16,17 +16,30 @@ class LLMCallsBudget(Budget):
         self.consumed_calls = 0
         self.iteration_costs = []
         
-    def can_afford(self, cost: int, operation_type: str) -> bool:
-        return self.consumed_calls + cost <= self.max_calls
         
-    def consume(self, cost: int, operation_type: str) -> None:
-        self.consumed_calls += cost
+    def spend_on_evaluation(self, module: dspy.Module, metadata: Optional[Dict[str, Any]] = None) -> None:
+        """Track cost of evaluating a candidate module by counting LLM calls from history."""
+        if hasattr(module, 'history') and module.history:
+            # Count new calls since last check (simplified approach)
+            new_calls = len(module.history)
+            self.consumed_calls += new_calls
+            if metadata:
+                logger.debug(f"Evaluation cost: {new_calls} calls - {metadata}")
         
-    def is_empty(self) -> bool:
-        return self.consumed_calls >= self.max_calls
+    def spend_on_generation(self, module: Optional[dspy.Module] = None, metadata: Optional[Dict[str, Any]] = None) -> None:
+        """Track cost of generating new candidates - typically 1 LLM call for reflection."""
+        generation_cost = 1  # Standard cost for one reflection/mutation LLM call
+        self.consumed_calls += generation_cost
+        if metadata:
+            logger.debug(f"Generation cost: {generation_cost} calls - {metadata}")
         
-    def get_remaining(self) -> int:
-        return max(0, self.max_calls - self.consumed_calls)
+    def get_remaining(self) -> dict:
+        remaining_calls = max(0, self.max_calls - self.consumed_calls)
+        return {
+            "calls": remaining_calls,
+            "percentage": (remaining_calls / self.max_calls) * 100 if self.max_calls > 0 else 0
+        }
+    
     
     # CompilationObserver lifecycle methods
     
