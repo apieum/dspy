@@ -74,6 +74,7 @@ class Cohort:
             return
 
         num_tasks = len(self.candidates[0].task_scores)
+        pool.start_new_generation(self.iteration_id)
 
         # For each task, find the best candidate and update the matrix
         for task_id in range(num_tasks):

@@ -22,12 +22,18 @@ class CandidatePool:
         self.candidates: List[Candidate] = []
         # Task-based scoring: task_id -> best candidate for that task
         self.task_scores: Dict[int, Candidate] = {}
+        self.scores_history: Dict[int, List[Dict[int, Candidate]]] = {}
+
+    def start_new_generation(self, iteration_id):
+        history = self.scores_history.get(iteration_id, [])
+        history.append(self.task_scores.copy())
+        self.scores_history[iteration_id] = history
 
     def promote(self, cohort: Cohort, budget=None) -> None:
         """Promote a cohort to the pool and update task scores.
 
         Candidates should already have their task_scores populated from evaluation.
-        
+
         Args:
             cohort: Cohort to promote to the pool
             budget: Optional budget parameter for consistency with core.py calls
