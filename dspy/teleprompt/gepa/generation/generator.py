@@ -18,11 +18,11 @@ class Generator(CompilationObserver):
     """
     
     @abstractmethod
-    def generate(self, parent_candidates: List["Candidate"], iteration: int, budget=None) -> "Cohort":
+    def generate(self, parent_candidates: "Cohort", iteration: int, budget=None) -> "Cohort":
         """Generate new candidates from parent candidates.
         
         Args:
-            parent_candidates: Selected parent candidates for generation
+            parent_candidates: Cohort of parent candidates for generation
             iteration: Current iteration number
             budget: Optional budget parameter for tracking generation costs
             
@@ -32,13 +32,13 @@ class Generator(CompilationObserver):
         ...
     
     @abstractmethod
-    def generate_from_parents(self, parent_candidates: List["Candidate"]) -> "Cohort":
+    def generate_from_parents(self, parent_candidates: "Cohort") -> "Cohort":
         """Generate new candidates from parent candidates (simplified interface).
         
         Used by ParetoFrontier.generate() method for dependency injection pattern.
         
         Args:
-            parent_candidates: Selected parent candidates for generation
+            parent_candidates: Cohort of parent candidates for generation
             
         Returns:
             Cohort containing newly generated candidates (created by this generator)

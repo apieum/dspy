@@ -53,6 +53,14 @@ class Cohort:
         """Number of candidates in this cohort."""
         return len(self.candidates)
 
+    def __iter__(self):
+        """Make cohort iterable over candidates."""
+        return iter(self.candidates)
+
+    def __len__(self):
+        """Return number of candidates."""
+        return len(self.candidates)
+
     def add_candidate(self, candidate: 'Candidate') -> None:
         """Add a candidate to this cohort."""
         self.candidates.append(candidate)

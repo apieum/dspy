@@ -55,7 +55,7 @@ class MutationGenerator(Generator):
         # This will be set during prepare_for_compilation()
         self.feedback_data: List[dspy.Example] = []
         
-    def generate(self, parent_candidates: List[Candidate], iteration: int, budget=None) -> Cohort:
+    def generate(self, parent_candidates: Cohort, iteration: int, budget=None) -> Cohort:
         """Generate new candidates through mutation of selected parents.
         
         Follows paper's approach:
@@ -65,14 +65,15 @@ class MutationGenerator(Generator):
         4. Return improved candidates
         """
         new_candidates = []
+        parent_list = list(parent_candidates)
         
-        if not parent_candidates or not self.feedback_data:
+        if not parent_list or not self.feedback_data:
             return Cohort(*new_candidates)
         
         for i in range(self.population_size):
             try:
                 # Step 1: Select parent candidate 
-                parent_candidate = self._select_parent_candidate(parent_candidates)
+                parent_candidate = self._select_parent_candidate(parent_list)
                 
                 if parent_candidate is None:
                     continue
@@ -182,7 +183,7 @@ class MutationGenerator(Generator):
         except Exception:
             return 0.0
     
-    def generate_from_parents(self, parent_candidates: List[Candidate]) -> Cohort:
+    def generate_from_parents(self, parent_candidates: Cohort) -> Cohort:
         """Generate new candidates from parent candidates (simplified interface).
         
         Used by ParetoFrontier.generate() method for dependency injection pattern.

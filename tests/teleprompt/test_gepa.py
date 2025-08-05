@@ -123,10 +123,7 @@ class TestComponentInterfaces:
         strategy = ParetoSelection()
 
         # Interface methods
-        assert hasattr(strategy, 'filter_candidates')
-        assert hasattr(strategy, 'filter_scores')
-        assert hasattr(strategy, 'filter_generation')
-        assert hasattr(strategy, 'filter_generation_history')
+        assert hasattr(strategy, 'filter')
 
     def test_evaluation_interface(self):
         """Evaluation components should implement required interface."""
