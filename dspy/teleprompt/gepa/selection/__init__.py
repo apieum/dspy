@@ -1,5 +1,5 @@
 """Selection step of GEPA optimization."""
 
-from .selection import Selection
-from .pareto_selection import ParetoSelection
-__all__ = ['Selection', 'ParetoSelection']
+from .selector import Selector
+from .pareto_frontier import ParetoFrontier
+__all__ = ['Selector', 'ParetoFrontier']

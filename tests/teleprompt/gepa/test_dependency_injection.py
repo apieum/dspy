@@ -76,7 +76,7 @@ def test_gepa_does_not_configure_components():
         assert gepa.generator.feedback_data == training_data
         
         # Return a compiled module to complete the test
-        compiled_module = cohort.candidates[0].module
+        compiled_module = cohort.first().module
         compiled_module._compiled = True
         return compiled_module
     
@@ -121,7 +121,7 @@ def test_single_training_dataset_design():
         assert gepa.generator.feedback_data == training_data
         
         # Return compiled module
-        compiled_module = cohort.candidates[0].module  
+        compiled_module = cohort.first().module  
         compiled_module._compiled = True
         return compiled_module
     

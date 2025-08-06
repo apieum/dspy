@@ -3,6 +3,7 @@
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Callable
+from typing_extensions import Any
 
 import dspy
 from dspy import Module
@@ -10,15 +11,12 @@ from dspy import Module
 
 @dataclass
 class Candidate:
-
-
     """A candidate solution that encapsulates a DSPy module.
     The candidate knows its lineage (parent relationships)
     """
     module: Module  # DSPy module - the actual program
     parents: List['Candidate'] = field(default_factory=list)  # Direct parent references
     generation_number: int = 0  # Which generation this belongs to
-    had_child: bool = False  # Whether this candidate has a child
     creation_metadata: Dict[str, str] = field(default_factory=dict)
     task_scores: Dict[int, float] = field(default_factory=dict)  # task_scores[task_id] = score
 
@@ -32,6 +30,18 @@ class Candidate:
             return False
         return self is other
 
+    def traverse_ancestors(self, callback: Callable[['Candidate', int, Dict[str, str]], bool]) -> None:
+        """Traverse ancestors of this candidate."""
+        for parent in self.parents:
+            if callback(parent, self.generation_number, self.creation_metadata):
+                parent.traverse_ancestors(callback)
+
+    def analyse_scores(self, callback: Callable[[int, float], Any], acc=[]) -> Any:
+        """Analyse scores of this candidate."""
+        for index, score in self.task_scores.items():
+            acc.append(callback(index, score))
+        return acc
+
     def set_task_score(self, task_id: int, score: float) -> None:
         """Set score for a specific task during evaluation."""
         self.task_scores[task_id] = score
@@ -41,7 +51,7 @@ class Candidate:
         for task_id, score in task_scores.items():
             self.set_task_score(task_id, score)
 
-    def task_score(self, task_id: int) -> Optional[float]:
+    def task_score(self, task_id: int) -> float:
         """Get score for a specific task."""
         return self.task_scores.get(task_id, 0.0)
 
@@ -104,3 +114,52 @@ class Candidate:
             return self
 
         return other
+    def best_on_task(self, task_id, candidates:List['Candidate']) -> 'Candidate':
+        """Compare a candidate with a list of candidates and return the best one for a specific task.
+
+        Considers both score and generation number (newer wins on ties).
+
+        Args:
+            task_id: The task to compare performance on
+            candidates: The list of candidates to compare against
+
+        Returns:
+            The better candidate for the task (self or other)
+        """
+        best_candidate = self
+        for candidate in candidates:
+            best_candidate = best_candidate.best_for_task(task_id, candidate)
+        return best_candidate
+
+    def better_than(self, other: 'Candidate') -> bool:
+        """Check if this candidate Pareto-dominates another candidate.
+
+        Returns True if this candidate performs at least as well on all tasks
+        and strictly better on at least one task (Pareto dominance).
+
+        Args:
+            other: The other candidate to compare against
+
+        Returns:
+            True if this candidate dominates the other
+        """
+        at_least_as_good_on_all = True
+        strictly_better_on_one = False
+
+        # Use the task_scores keys from either candidate (they should have the same tasks)
+        all_task_ids = set(self.task_scores.keys()) | set(other.task_scores.keys())
+
+        for task_id in all_task_ids:
+            my_score = self.task_score(task_id) or 0.0
+            other_score = other.task_score(task_id) or 0.0
+
+            if my_score < other_score:
+                # I'm worse on this task → no domination possible
+                at_least_as_good_on_all = False
+                break
+            elif my_score > other_score:
+                # I'm strictly better on this task
+                strictly_better_on_one = True
+            # else: equal scores → continue checking other tasks
+
+        return at_least_as_good_on_all and strictly_better_on_one

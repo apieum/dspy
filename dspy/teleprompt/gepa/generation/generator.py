@@ -1,58 +1,29 @@
 """Generator protocol for GEPA optimization."""
 
 from abc import abstractmethod
-from typing import List, Protocol, TYPE_CHECKING
-import dspy
+from typing import TYPE_CHECKING
 from ..compilation_observer import CompilationObserver
 
 if TYPE_CHECKING:
-    from ..data.candidate import Candidate
-    from ..data.cohort import Cohort
+    from ..data.cohort import Parents, NewBorns
 
 
 class Generator(CompilationObserver):
-    """Protocol for generating new candidates from existing pool.
-    
+    """Protocol for generating new candidates from parents.
+
     This component implements the genetic operations (mutation, crossover, etc)
     to create new candidate generations.
     """
-    
+
     @abstractmethod
-    def generate(self, parent_candidates: "Cohort", iteration: int, budget=None) -> "Cohort":
+    def generate(self, parents: "Parents", budget=None) -> "NewBorns":
         """Generate new candidates from parent candidates.
-        
+
         Args:
-            parent_candidates: Cohort of parent candidates for generation
-            iteration: Current iteration number
+            parents: Parents cohort of parent candidates for generation
             budget: Optional budget parameter for tracking generation costs
-            
+
         Returns:
-            Cohort containing newly generated candidates
+            NewBorns cohort containing newly generated candidates
         """
         ...
-    
-    @abstractmethod
-    def generate_from_parents(self, parent_candidates: "Cohort") -> "Cohort":
-        """Generate new candidates from parent candidates (simplified interface).
-        
-        Used by ParetoFrontier.generate() method for dependency injection pattern.
-        
-        Args:
-            parent_candidates: Cohort of parent candidates for generation
-            
-        Returns:
-            Cohort containing newly generated candidates (created by this generator)
-        """
-        ...
-    
-    @abstractmethod  
-    def create_empty_cohort(self) -> "Cohort":
-        """Create an empty cohort of the type this generator produces.
-        
-        Used when no parent candidates are available.
-        
-        Returns:
-            Empty cohort of the appropriate type
-        """
-        ...
-    

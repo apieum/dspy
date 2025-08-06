@@ -11,12 +11,11 @@ import dspy
 from dspy import Module
 
 from .budget import Budget
-from .selection import Selection
+from .selection import Selector
 from .generation import Generator
 from .evaluation import Evaluator
 from .data.candidate import Candidate
-from .data.candidate_pool import CandidatePool
-from .data.cohort import Cohort
+from .data.cohort import Cohort,NewBorns, Survivors, Parents
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,7 @@ class GEPA:
 
     def __init__(self,
                  budget: Budget,
-                 selector: Selection,
+                 selector: Selector,
                  generator: Generator,
                  evaluator: Evaluator):
         """Initialize GEPA optimization with algorithms for each step.
@@ -52,9 +51,6 @@ class GEPA:
         self.selector = selector
         self.generator = generator
         self.evaluator = evaluator
-
-        # Framework state
-        self.candidate_pool = CandidatePool()
         self.current_iteration = 0
 
     def start_compilation(self, student: Module, training_data: List[dspy.Example]):
@@ -66,10 +62,10 @@ class GEPA:
 
     def finish_compilation(self, result: Module):
         logger.info("Terminating GEPA framework compilation.")
-        self.budget.finish_compilation(result, self.candidate_pool)
-        self.selector.finish_compilation(result, self.candidate_pool)
-        self.generator.finish_compilation(result, self.candidate_pool)
-        self.evaluator.finish_compilation(result, self.candidate_pool)
+        self.budget.finish_compilation(result)
+        self.selector.finish_compilation(result)
+        self.generator.finish_compilation(result)
+        self.evaluator.finish_compilation(result)
 
     def start_iteration(self, cohort: Cohort) -> None:
         """Starts a new iteration of the GEPA framework."""
@@ -99,11 +95,11 @@ class GEPA:
         self.start_compilation(student, training_data)
         # Initialize first candidate generation
         initial_candidate = Candidate(student.deepcopy(), generation_number=0)
-        gen_0 = Cohort(initial_candidate)
+        gen_0 = NewBorns(initial_candidate, iteration=0)
 
-        # Evaluate initial candidate and promote to pool
+        # Evaluate initial candidate
         evaluated_gen_0 = self.evaluator.evaluate_for_promotion(gen_0, self.budget)
-        self.candidate_pool.promote(evaluated_gen_0)
+        gen_0 = self.selector.promote(evaluated_gen_0)
         # Recursive optimization
         result = self.next_generation(gen_0)
         self.finish_compilation(result)
@@ -127,7 +123,7 @@ class GEPA:
             Best optimized module when termination criteria met
         """
         self.current_iteration += 1
-        logger.info(f"Processing cohort {cohort.iteration_id}, iteration {self.current_iteration}")
+        logger.info(f"Processing cohort {cohort.iteration}, iteration {self.current_iteration}")
 
         # Termination conditions
         if self.budget <= 0:
@@ -143,33 +139,30 @@ class GEPA:
 
         # Filter candidates based on performance
         logger.debug("Filtering candidates based on scores")
-        filtered_candidates = self.selector.filter(self.candidate_pool, self.budget)
-
         # Generate new candidates from filtered survivors
         logger.debug("Generating new candidates")
-        new_cohort = self.generator.generate(filtered_candidates, self.current_iteration, self.budget)
+        new_cohort = self.generator.generate(cohort, self.budget)
 
         # Evaluate and promote new generation
         logger.debug(f"Evaluating {new_cohort.size()} new candidates")
-        filtered_cohort = self.evaluator.evaluate(new_cohort, self.budget)
-        self.candidate_pool.promote(filtered_cohort)
+        evaluated_cohort = self.evaluator.evaluate(new_cohort, self.budget)
+        parents = self.selector.promote(evaluated_cohort, self.budget)
 
         # Notify all components that iteration is finishing
-        self.finish_iteration(filtered_cohort)
+        self.finish_iteration(parents)
 
         # Prepare next cohort and recurse
-        logger.debug(f"Recursing with {filtered_cohort.size()} promoted candidates")
-        return self.next_generation(filtered_cohort)
+        logger.debug(f"Recursing with {parents.size()} promoted candidates")
+        return self.next_generation(parents)
 
     def _show_results(self) -> Module:
         """Select and return the best candidate when optimization terminates."""
         logger.info("Selecting best candidate from optimization results")
 
-        best_candidate = self.candidate_pool.filter_top(lambda c1, c2: c1.best_overall(c2))
+        best_candidate = self.selector.best_candidate()
         best_score = best_candidate.average_task_score()
 
         logger.info(f"Selected best candidate with score: {best_score:.4f}")
-        logger.info(f"Final pool size: {self.candidate_pool.size()} candidates")
 
         compiled_module = best_candidate.module
         compiled_module._compiled = True
@@ -194,13 +187,13 @@ class GEPA:
             Configured GEPA optimizer ready for compilation
         """
         from .budget import LLMCallsBudget
-        from .selection import ParetoSelection
+        from .selection import ParetoFrontier
         from .generation import MutationGenerator
         from .evaluation import PromotionEvaluator
 
         return GEPA(
             budget=LLMCallsBudget(max_calls),
-            selector=ParetoSelection(),
+            selector=ParetoFrontier(),
             generator=MutationGenerator(
                 mutation_rate=0.3,
                 population_size=population_size
@@ -228,13 +221,13 @@ class GEPA:
             Configured GEPA optimizer with iteration-based budget
         """
         from .budget import IterationBudget
-        from .selection import ParetoSelection
+        from .selection import ParetoFrontier
         from .generation import MutationGenerator
         from .evaluation import PromotionEvaluator
 
         return GEPA(
             budget=IterationBudget(max_iterations),
-            selector=ParetoSelection(),
+            selector=ParetoFrontier(),
             generator=MutationGenerator(
                 mutation_rate=0.4,
                 population_size=population_size
@@ -246,50 +239,11 @@ class GEPA:
         )
 
     @staticmethod
-    def create_adaptive(metric, total_budget: int = 2000, population_size: int = 12) -> "GEPA":
-        """Create an adaptive GEPA optimizer that adjusts based on progress.
+    def create_with_crossover(metric, max_calls: int = 1000, population_size: int = 12) -> "GEPA":
+        """Create GEPA optimizer with crossover generation for complex optimization.
 
-        Uses adaptive budget allocation that responds to performance improvements.
-        Good for long-running optimizations where you want intelligent resource use.
-
-        Args:
-            metric: Evaluation metric for candidate scoring
-            total_budget: Total budget for adaptive allocation
-            population_size: Number of candidates per generation
-
-        Returns:
-            Configured GEPA optimizer with adaptive strategies
-        """
-        from .budget import AdaptiveBudget
-        from .selection import DiversitySelection
-        from .generation import CrossoverGenerator
-        from .evaluation import PromotionEvaluator
-
-        return GEPA(
-            budget=AdaptiveBudget(
-                total_budget=total_budget,
-                adaptation_factor=1.3
-            ),
-            selector=DiversitySelection(
-                diversity_weight=0.35,
-                keep_top_n=6
-            ),
-            generator=CrossoverGenerator(
-                crossover_rate=0.6,
-                population_size=population_size
-            ),
-            evaluator=PromotionEvaluator(
-                metric=metric,
-                promotion_threshold=0.45
-            )
-        )
-
-    @staticmethod
-    def create_research(metric, max_calls: int = 3000, population_size: int = 20) -> "GEPA":
-        """Create a GEPA optimizer configured for research scenarios.
-
-        Uses larger populations and budgets for comprehensive exploration.
-        Balanced between exploitation and exploration.
+        Uses CrossoverGenerator for exploring combinations of successful candidates.
+        Good for tasks where combining features from different solutions is beneficial.
 
         Args:
             metric: Evaluation metric for candidate scoring
@@ -297,25 +251,22 @@ class GEPA:
             population_size: Number of candidates per generation
 
         Returns:
-            Configured GEPA optimizer for research use
+            Configured GEPA optimizer with crossover capabilities
         """
         from .budget import LLMCallsBudget
-        from .selection import DiversitySelection
+        from .selection import ParetoFrontier
         from .generation import CrossoverGenerator
         from .evaluation import PromotionEvaluator
 
         return GEPA(
             budget=LLMCallsBudget(max_calls),
-            selector=DiversitySelection(
-                diversity_weight=0.3,
-                keep_top_n=8
-            ),
+            selector=ParetoFrontier(),
             generator=CrossoverGenerator(
-                crossover_rate=0.7,
+                crossover_rate=0.6,
                 population_size=population_size
             ),
             evaluator=PromotionEvaluator(
                 metric=metric,
-                promotion_threshold=0.3  # More permissive for exploration
+                promotion_threshold=0.4
             )
         )

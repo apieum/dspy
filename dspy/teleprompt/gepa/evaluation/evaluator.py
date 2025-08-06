@@ -1,13 +1,11 @@
 """Evaluator protocol for GEPA optimization."""
 
 from abc import abstractmethod
-from typing import Callable, List, Protocol, TYPE_CHECKING
-import dspy
+from typing import Callable, TYPE_CHECKING
 from ..compilation_observer import CompilationObserver
 
 if TYPE_CHECKING:
-    from ..data.cohort import Cohort
-    from ..data.candidate_pool import CandidatePool
+    from ..data.cohort import Survivors, NewBorns
     from ..budget import Budget
 
 
@@ -19,7 +17,7 @@ class Evaluator(CompilationObserver):
     """
 
     @abstractmethod
-    def evaluate(self, cohort: "Cohort", budget: "Budget") -> "Cohort":
+    def evaluate(self, cohort: "NewBorns", budget: "Budget") -> "Survivors":
         """Evaluate new candidates and filter based on promotion criteria.
 
         Args:
@@ -32,7 +30,7 @@ class Evaluator(CompilationObserver):
         ...
 
     @abstractmethod
-    def evaluate_for_promotion(self, cohort: "Cohort", budget: "Budget") -> "Cohort":
+    def evaluate_for_promotion(self, cohort: "NewBorns", budget: "Budget") -> "Survivors":
         """Evaluate candidates for promotion with budget tracking.
 
         Args:

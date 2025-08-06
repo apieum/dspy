@@ -1,49 +1,51 @@
 """Cohort data structure for GEPA optimization."""
-
+import random
 import time
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Callable
-
-import dspy
+from typing import Dict, List, Set, Optional, Any
+from collections import defaultdict
 
 # Import Candidate with relative import to avoid circular imports
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..data.candidate import Candidate
-    from ..data.candidate_pool import CandidatePool
 
 
 class Cohort:
     """A cohort of candidates created in a single iteration.
 
     Represents a group of candidates that were generated together
-    and share the same iteration context. The iteration_id is stored
+    and share the same iteration context. The iteration is stored
     in the candidates themselves as they're always from the same iteration.
     """
 
-    def __init__(self, *candidates: 'Candidate', creation_timestamp: Optional[float] = None, metadata: Optional[Dict[str, Any]] = None):
+    def __init__(self, *candidates: 'Candidate', creation_timestamp: Optional[float] = None, metadata: Optional[Dict[str, Any]] = None, iteration: int = -1):
         """Initialize cohort with candidates.
 
         Args:
             *candidates: Variable number of candidate arguments, or a single list of candidates
             creation_timestamp: When cohort was created (defaults to current time)
             metadata: Optional metadata dict
+            iteration: Iteration number for this cohort (defaults to -1)
         """
         # Handle both Cohort(candidate1, candidate2) and Cohort([candidate1, candidate2])
-        if len(candidates) == 1 and isinstance(candidates[0], list):
-            self.candidates: List['Candidate'] = candidates[0]
+        if len(candidates) == 1 and isinstance(candidates[0], (list, set)):
+            self.candidates: Set['Candidate'] = set(candidates[0])
         else:
-            self.candidates: List['Candidate'] = list(candidates)
+            self.candidates: Set['Candidate'] = set(candidates)
 
         self.creation_timestamp: float = creation_timestamp or time.time()
         self.metadata: Dict[str, Any] = metadata or {}
+        self._iteration: int = iteration
 
     @property
-    def iteration_id(self) -> int:
-        """Get iteration ID from candidates (they're all from same iteration)."""
-        if not self.candidates:
-            return -1
-        return self.candidates[0].generation_number
+    def iteration(self) -> int:
+        """Get iteration number for this cohort."""
+        return self._iteration
+    
+    @iteration.setter
+    def iteration(self, value: int) -> None:
+        """Set iteration number for this cohort."""
+        self._iteration = value
 
     def is_empty(self) -> bool:
         """Check if cohort has no candidates."""
@@ -63,33 +65,163 @@ class Cohort:
 
     def add_candidate(self, candidate: 'Candidate') -> None:
         """Add a candidate to this cohort."""
-        self.candidates.append(candidate)
+        self.candidates.add(candidate)
 
-    def update_scores(self, pool:'CandidatePool') -> None:
-        """Update the candidate pool scores with the best candidate for each task in this cohort.
+    def first(self) -> 'Candidate':
+        """Get the first candidate from this cohort.
+        
+        Returns:
+            First candidate from the set
+            
+        Raises:
+            StopIteration: If cohort is empty
+        """
+        return next(iter(self.candidates))
 
-        The cohort analyzes its candidates, finds the best performer for each task,
-        and updates the score matrix with individual task updates.
+    def sample(self, size: int) -> List['Candidate']:
+        """Sample a subset of candidates from this cohort.
 
         Args:
-            pool: CandidatePool to update scores with best candidates per task
+            size: Number of candidates to sample
+
+        Returns:
+            List of sampled candidates
         """
-        if not self.candidates:
-            return
+        return random.sample(list(self.candidates), size)
 
-        # Determine the number of tasks from the first candidate
-        if not self.candidates[0].task_scores:
-            return
+    def filter(self, comparison_func) -> 'Cohort':
+        """Filter candidates using a comparison function.
 
-        num_tasks = len(self.candidates[0].task_scores)
-        pool.start_new_generation(self.iteration_id)
+        Args:
+            comparison_func: Function that takes (candidate1, candidate2) -> bool
+                           Returns True if candidate1 should exclude candidate2
 
-        # For each task, find the best candidate and update the matrix
-        for task_id in range(num_tasks):
-            best_candidate = self.candidates[0]
+        Returns:
+            New Cohort with filtered candidates
+        """
+        if self.is_empty():
+            return Cohort()
 
-            # Find the candidate with the highest score for this task
+        kept_candidates = []
+        candidates_copy = list(self.candidates)
+
+        while candidates_copy:
+            # Pop one candidate to test
+            candidate = candidates_copy.pop(0)
+
+            # Check if any remaining candidate excludes this one
+            is_excluded = any(comparison_func(other, candidate) for other in candidates_copy)
+
+            if not is_excluded:
+                kept_candidates.append(candidate)
+
+        return Cohort(*kept_candidates)
+
+
+
+class Survivors(Cohort):
+    """Cohort of candidates that survived Pareto selection.
+    
+    These candidates represent the Pareto frontier and are eligible
+    for selection as parents in the next generation.
+    """
+    
+    def __init__(self, *candidates: 'Candidate', **kwargs):
+        super().__init__(*candidates, **kwargs)
+
+
+class Parents(Cohort):
+    """Cohort of candidates selected for reproduction.
+    
+    These candidates have been chosen through stochastic selection
+    and will be used for mutation or crossover operations.
+    """
+    
+    def __init__(self, *candidates: 'Candidate', task_wins: Optional[Dict['Candidate', int]] = None, **kwargs):
+        """Initialize Parents cohort with optional task win counts.
+        
+        Args:
+            *candidates: Candidate objects to include
+            task_wins: Optional pre-computed mapping of candidate -> number of tasks won
+                      If provided, avoids recalculation in sample_stochastic()
+            **kwargs: Additional arguments passed to Cohort
+        """
+        super().__init__(*candidates, **kwargs)
+        self.task_wins = task_wins or {}
+    
+    def sample_stochastic(self, n: int = 1) -> 'Parents':
+        """Stochastic sampling based on task winning frequency (Algorithm 2 line 14).
+        
+        Implements Algorithm 2's stochastic selection: "Sample Φk from Ĉ with probability ∝ f[Φk]"
+        where f[Φk] is the number of tasks on which candidate Φk achieves the best score.
+        
+        Args:
+            n: Number of candidates to sample
+            
+        Returns:
+            Parents cohort with stochastically selected candidates
+        """
+        if self.is_empty():
+            return Parents()
+            
+        if len(self.candidates) <= n:
+            return Parents(*self.candidates)
+            
+        # Use pre-computed task_wins if available, otherwise calculate
+        if self.task_wins:
+            candidate_task_wins = self.task_wins
+        else:
+            # Fallback: calculate task wins from scratch
+            # Get all task IDs from all candidates
+            all_task_ids = set()
             for candidate in self.candidates:
-                best_candidate = candidate.best_for_task(task_id, best_candidate)
+                all_task_ids.update(candidate.task_scores.keys())
+                
+            if not all_task_ids:
+                # If no task scores, return random sample
+                return Parents(*random.sample(list(self.candidates), n))
+                
+            # Count how many tasks each candidate wins (achieves best score on)
+            candidate_task_wins = defaultdict(int)
+            
+            for task_id in all_task_ids:
+                # Find the best score for this task among all candidates
+                best_score = max(candidate.task_score(task_id) or 0.0 for candidate in self.candidates)
+                
+                # Count all candidates that achieve this best score
+                for candidate in self.candidates:
+                    if (candidate.task_score(task_id) or 0.0) == best_score:
+                        candidate_task_wins[candidate] += 1
+        
+        # Stochastic selection based on task winning frequency
+        selected_candidates = []
+        candidates_pool = list(self.candidates)
+        
+        for _ in range(n):
+            if not candidates_pool:
+                break
+                
+            # Create weights based on task wins (default to 0 if not in dict)
+            weights = [candidate_task_wins.get(candidate, 0) for candidate in candidates_pool]
+            
+            # Handle case where all weights are 0
+            if sum(weights) == 0:
+                weights = [1] * len(candidates_pool)
+            
+            # Sample one candidate based on weights
+            selected = random.choices(candidates_pool, weights=weights)[0]
+            selected_candidates.append(selected)
+            candidates_pool.remove(selected)
+            
+        return Parents(*selected_candidates)
 
-            pool.update_score(task_id, best_candidate)
+
+class NewBorns(Cohort):
+    """Cohort of newly generated candidates.
+    
+    These candidates have been created through mutation or crossover
+    and need to be evaluated before they can become survivors.
+    """
+    
+    def __init__(self, *candidates: 'Candidate', **kwargs):
+        super().__init__(*candidates, **kwargs)

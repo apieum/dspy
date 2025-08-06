@@ -26,7 +26,7 @@ class TestGEPACore:
         
         # Mock next_generation to terminate quickly
         def mock_next_generation(cohort):
-            compiled_module = cohort.candidates[0].module
+            compiled_module = cohort.first().module
             compiled_module._compiled = True
             return compiled_module
         
@@ -51,7 +51,7 @@ class TestGEPACore:
         
         def mock_next_generation(cohort):
             phases_executed.append("next_generation")
-            compiled_module = cohort.candidates[0].module
+            compiled_module = cohort.first().module
             compiled_module._compiled = True
             return compiled_module
         
@@ -85,7 +85,7 @@ class TestGEPACore:
         
         # Mock for quick termination
         def mock_next_generation(cohort):
-            compiled_module = cohort.candidates[0].module
+            compiled_module = cohort.first().module
             compiled_module._compiled = True
             return compiled_module
         

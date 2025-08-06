@@ -1,11 +1,12 @@
 """Data structures for GEPA optimization."""
 
 from .candidate import Candidate
-from .candidate_pool import CandidatePool
-from .cohort import Cohort
+from .cohort import Cohort, Survivors, Parents, NewBorns
 
 __all__ = [
     'Candidate',
-    'CandidatePool',
     'Cohort',
+    'Survivors',
+    'Parents', 
+    'NewBorns',
 ]

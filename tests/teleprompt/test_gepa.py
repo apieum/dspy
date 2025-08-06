@@ -15,9 +15,8 @@ from dspy.teleprompt.gepa import (
     GEPA,
     Candidate,
     Cohort,
-    CandidatePool,
     Budget,
-    Selection,
+    Selector,
     Generator,
     Evaluator,
 )
@@ -118,9 +117,9 @@ class TestComponentInterfaces:
 
     def test_selection_interface(self):
         """Selection components should implement required interface."""
-        from dspy.teleprompt.gepa.selection import ParetoSelection
+        from dspy.teleprompt.gepa.selection import ParetoFrontier
 
-        strategy = ParetoSelection()
+        strategy = ParetoFrontier()
 
         # Interface methods
         assert hasattr(strategy, 'filter')
@@ -152,8 +151,8 @@ class TestGEPAAlgorithmStructure:
             assert hasattr(result, '_compiled')
             assert result._compiled == True
 
-            # Verify that candidates were processed (shown by pool size in logs)
-            assert optimizer.candidate_pool.size() > 0
+            # Verify that candidates were processed (shown by selector having candidates)
+            assert optimizer.selector.size() > 0
 
 
 class TestDataStructures:
@@ -176,23 +175,31 @@ class TestDataStructures:
 
         assert cohort.size() == 1
         assert not cohort.is_empty()
-        assert cohort.iteration_id == 0
+        assert cohort.iteration == -1  # Default iteration value
 
     def test_candidate_pool_operations(self):
-        """CandidatePool should manage candidates correctly."""
-        pool = CandidatePool()
+        """Selector should manage candidates correctly."""
+        from dspy.teleprompt.gepa.selection import ParetoFrontier
+        from dspy.teleprompt.gepa.data.cohort import Survivors
+        selector = ParetoFrontier()
+        training_data = ["task0", "task1", "task2"]
+        selector.start_compilation(None, training_data)
         candidate = Candidate(SimpleQA(), generation_number=0)
+        candidate.set_task_scores({0: 0.8, 1: 0.6, 2: 0.7})
 
-        # Add candidate
-        pool.append(candidate)
+        # Add candidate via promote (selectors don't have append)
+        cohort = Survivors(candidate, iteration=0)
+        selector.promote(cohort)
 
-        assert pool.size() == 1
+        assert selector.size() == 1
 
-        # Test that pool contains the candidate by checking size changes
-        pool2 = CandidatePool()
-        assert pool2.size() == 0
-        pool2.append(candidate)
-        assert pool2.size() == 1
+        # Test that selector contains the candidate by checking size changes
+        selector2 = ParetoFrontier()
+        selector2.start_compilation(None, training_data)
+        assert selector2.size() == 0
+        cohort2 = Survivors(candidate, iteration=0)
+        selector2.promote(cohort2)
+        assert selector2.size() == 1
 
 
 class TestFactoryFunctions:

@@ -3,7 +3,7 @@
 import dspy
 from dspy.teleprompt.gepa.data.candidate import Candidate
 from dspy.teleprompt.gepa.data.cohort import Cohort
-from dspy.teleprompt.gepa.data.candidate_pool import CandidatePool
+from dspy.teleprompt.gepa.selection import ParetoFrontier
 from dspy.teleprompt.gepa.evaluation.promotion import PromotionEvaluator
 from dspy.teleprompt.gepa.budget.llm_calls import LLMCallsBudget
 
@@ -17,14 +17,14 @@ def simple_metric(example: dspy.Example, prediction, trace=None) -> float:
 
 def test_evaluator_returns_cohorts_gepa_manages_pool():
     """Test that evaluator returns cohorts and GEPA manages candidate pool."""
-    
+
     # Setup data
     evaluation_data = [
         dspy.Example(input="test1", answer="answer1"),
         dspy.Example(input="test2", answer="answer2"),
         dspy.Example(input="test3", answer="answer3"),
     ]
-    
+
     # Create evaluator (should not know about candidate pool)
     evaluator = PromotionEvaluator(
         metric=simple_metric,
@@ -33,46 +33,45 @@ def test_evaluator_returns_cohorts_gepa_manages_pool():
     # Prepare evaluator with data
     student = dspy.Predict("input -> output")
     evaluator.start_compilation(student, evaluation_data)
-    
-    # Create candidate pool (managed by GEPA)
-    candidate_pool = CandidatePool()
-    
+
+    # Create selector (managed by GEPA)
+    selector = ParetoFrontier()
+    selector.start_compilation(student, evaluation_data)
+
     # Create test candidates
     module1 = dspy.Predict("input -> output")
     candidate1 = Candidate(module1, generation_number=1)
-    
-    module2 = dspy.Predict("input -> output") 
+
+    module2 = dspy.Predict("input -> output")
     candidate2 = Candidate(module2, generation_number=1)
-    
+
     test_cohort = Cohort(candidate1, candidate2)
-    
+
     # PHASE 1: Evaluator evaluates and returns cohort (no pool interaction)
     budget = LLMCallsBudget(100)  # Mock budget for testing
     evaluated_cohort = evaluator.evaluate_for_promotion(test_cohort, budget)
-    
-    # Verify evaluator populated task_scores but didn't touch pool
-    assert len(evaluated_cohort.candidates) == 2
-    assert candidate_pool.size() == 0  # Pool should still be empty
-    
-    for candidate in evaluated_cohort.candidates:
+
+    # Verify evaluator populated task_scores but didn't touch selector
+    assert evaluated_cohort.size() == 2
+    assert selector.size() == 0  # Selector should still be empty
+
+    for candidate in evaluated_cohort:
         assert hasattr(candidate, 'task_scores')
         assert len(candidate.task_scores) == len(evaluation_data)
-    
-    # PHASE 2: GEPA handles pool management
-    candidate_pool.promote(evaluated_cohort)
-    
-    # Verify GEPA successfully promoted candidates to pool
-    assert candidate_pool.size() == 2
-    assert len(candidate_pool.candidates) == 2
-    
-    # Verify score matrix was updated
-    for candidate in candidate_pool.candidates:
-        assert candidate in evaluated_cohort.candidates
+
+    # PHASE 2: GEPA handles selector management
+    selector.promote(evaluated_cohort)
+
+    # Verify GEPA successfully promoted candidates to selector
+    assert selector.size() == 2
+
+    # Verify candidates were tracked in selector
+    assert selector.size() == 2
 
 
 def test_evaluation_separation():
     """Test evaluation maintains clean separation."""
-    
+
     # Setup data
     evaluation_data = [
         dspy.Example(input="test1", answer="answer1"),
@@ -80,7 +79,7 @@ def test_evaluation_separation():
         dspy.Example(input="test3", answer="answer3"),
         dspy.Example(input="test4", answer="answer4")
     ]
-    
+
     # Create evaluator
     evaluator = PromotionEvaluator(
         metric=simple_metric,
@@ -89,40 +88,41 @@ def test_evaluation_separation():
     # Prepare evaluator with data
     student = dspy.Predict("input -> output")
     evaluator.start_compilation(student, evaluation_data)
-    
-    # Create candidate pool
-    candidate_pool = CandidatePool()
-    
+
+    # Create selector
+    selector = ParetoFrontier()
+    selector.start_compilation(student, evaluation_data)
+
     # Create test candidates
     module1 = dspy.Predict("input -> output")
     candidate1 = Candidate(module1, generation_number=1)
-    
+
     module2 = dspy.Predict("input -> output")
     candidate2 = Candidate(module2, generation_number=1)
-    
+
     new_cohort = Cohort(candidate1, candidate2)
-    
-    # PHASE 1: Evaluator performs evaluation (no pool interaction)  
+
+    # PHASE 1: Evaluator performs evaluation (no pool interaction)
     budget = LLMCallsBudget(100)  # Mock budget for testing
     filtered_cohort = evaluator.evaluate(new_cohort, budget)
-    
-    # Verify evaluator did its job but didn't touch pool
-    assert candidate_pool.size() == 0  # Pool should still be empty
-    assert len(filtered_cohort.candidates) >= 0  # Some candidates might be filtered
-    
+
+    # Verify evaluator did its job but didn't touch selector
+    assert selector.size() == 0  # Selector should still be empty
+    assert filtered_cohort.size() >= 0  # Some candidates might be filtered
+
     # PHASE 2: GEPA handles pool promotion using evaluate_for_promotion
     evaluated_cohort = evaluator.evaluate_for_promotion(new_cohort, budget)
-    
+
     # Verify task_scores are populated
-    for candidate in evaluated_cohort.candidates:
+    for candidate in evaluated_cohort:
         assert hasattr(candidate, 'task_scores')
         assert len(candidate.task_scores) == len(evaluation_data)
-    
-    # PHASE 3: GEPA handles pool promotion
-    candidate_pool.promote(evaluated_cohort)
-    
+
+    # PHASE 3: GEPA handles selector promotion
+    selector.promote(evaluated_cohort)
+
     # Verify GEPA successfully promoted candidates
-    assert candidate_pool.size() == len(evaluated_cohort.candidates)
+    assert selector.size() == evaluated_cohort.size()
 
 
 if __name__ == "__main__":

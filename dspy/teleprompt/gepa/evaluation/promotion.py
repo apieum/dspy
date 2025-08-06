@@ -1,12 +1,9 @@
 """Promotion evaluation implementation."""
 
-from typing import List, Callable, Optional, TYPE_CHECKING
+from typing import List, Callable
 import dspy
 from .evaluator import Evaluator
 from ..data.cohort import Cohort
-
-if TYPE_CHECKING:
-    from ..data.candidate_pool import CandidatePool
 
 
 class PromotionEvaluator(Evaluator):
@@ -22,11 +19,11 @@ class PromotionEvaluator(Evaluator):
 
     def evaluate(self, cohort: Cohort, budget) -> Cohort:
         """Evaluate candidates and filter based on promotion threshold.
-        
+
         Args:
-            cohort: Candidates to evaluate  
+            cohort: Candidates to evaluate
             budget: Budget to track costs
-            
+
         Returns:
             Cohort containing only promoted candidates
         """
@@ -35,10 +32,10 @@ class PromotionEvaluator(Evaluator):
         for candidate in cohort.candidates:
             # Evaluate candidate performance using internal evaluation data
             candidate.evaluate_on_batch(self.evaluation_data, self.metric)
-            
+
             # Track budget for evaluation
             budget.spend_on_evaluation(candidate.module, {"phase": "evaluation", "examples": len(self.evaluation_data)})
-            
+
             # Calculate average score from task scores
             avg_score = candidate.average_task_score()
 
