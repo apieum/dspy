@@ -6,6 +6,11 @@ from typing import Any, List, Optional, Callable
 
 import dspy
 from dspy.signatures.signature import Signature
+from .generator import Generator
+from ..data.candidate import Candidate
+from ..data.cohort import Parents, NewBorns
+from ..evaluation.trace_collector import EnhancedTraceCollector
+from ..evaluation.feedback import FeedbackResult
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +48,96 @@ class InstructionImprovementSignature(dspy.Signature):
     key_changes: str = dspy.OutputField(desc="Summary of key changes made")
 
 
-class ReflectiveMutation(PromptMutator):
+class ReflectivePromptMutation(Generator):
     """Reflective prompt mutation using advanced DSPy Chain-of-Thought."""
 
     def __init__(self, prompt_model: Optional[Any] = None):
         self.prompt_model = prompt_model
         self.mutation_history = []
+        self.feedback_data = []  # Will be set by start_compilation
         
         # Advanced DSPy modules for reflection
         self.performance_analyzer = dspy.ChainOfThought(PerformanceAnalysisSignature)
         self.instruction_improver = dspy.ChainOfThought(InstructionImprovementSignature)
+
+    def generate(self, parents: Parents, budget=None) -> NewBorns:
+        """Generate new candidates through reflective prompt mutation.
+        
+        Follows GEPA Algorithm 1 approach:
+        1. Use stochastic selection to sample 1 parent candidate from parents
+        2. Collect feedback on parent using training data
+        3. Apply reflective prompt mutation using DSPy Chain-of-Thought
+        4. Return single improved candidate
+        """
+        if parents.is_empty() or not self.feedback_data:
+            return NewBorns()
+
+        try:
+            # Step 1: Stochastic selection of parent candidate
+            selected_parents = parents.sample_stochastic(1)
+            if selected_parents.is_empty():
+                return NewBorns()
+
+            parent = list(selected_parents)[0]
+            
+            # Step 2: Collect feedback on parent performance
+            feedback = self._collect_feedback(parent)
+            if not feedback:
+                return NewBorns()
+            
+            # Step 3: Get the signature to mutate (first predictor)
+            predictors = parent.module.predictors()
+            if not predictors:
+                return NewBorns()
+                
+            current_signature = predictors[0].signature
+            
+            # Step 4: Apply reflective prompt mutation
+            improved_signature = self.mutate_signature(current_signature, feedback)
+            
+            # Step 5: Create new candidate with improved signature
+            new_candidate = self._create_mutated_candidate(parent, improved_signature)
+            
+            return NewBorns(new_candidate, iteration=parents.iteration)
+
+        except Exception as e:
+            logger.warning(f"Reflective prompt mutation failed: {e}")
+            return NewBorns()
+
+    def start_compilation(self, student: dspy.Module, training_data: List[dspy.Example]) -> None:
+        """Prepare generator with training dataset when compilation begins."""
+        self.feedback_data = training_data
+
+    def _collect_feedback(self, candidate: Candidate) -> Optional[FeedbackResult]:
+        """Collect performance feedback for a candidate on training data."""
+        # This would normally use the EnhancedTraceCollector to gather traces and scores
+        # For now, create minimal feedback from candidate's existing task scores
+        if not hasattr(candidate, 'task_scores') or not candidate.task_scores:
+            return None
+            
+        scores = list(candidate.task_scores.values())
+        diagnostics = [f"Task {i} performance" for i in range(len(scores))]
+        traces = []  # Would be populated by trace collector
+        
+        return FeedbackResult(scores=scores, diagnostics=diagnostics, traces=traces)
+
+    def _create_mutated_candidate(self, parent: Candidate, improved_signature: Signature) -> Candidate:
+        """Create a new candidate with the improved signature."""
+        # Clone the parent module
+        new_module = parent.module.deepcopy()
+        
+        # Update the first predictor with improved signature
+        predictors = new_module.predictors()
+        if predictors:
+            from dspy.teleprompt.utils import set_signature
+            set_signature(predictors[0], improved_signature)
+        
+        # Create new candidate with incremented generation
+        return Candidate(
+            module=new_module,
+            generation_number=parent.generation_number + 1,
+            parents=[parent]
+        )
 
     def mutate_signature(self, current_signature: Signature, feedback: "FeedbackResult") -> Signature:
         """Mutate signature using advanced DSPy Chain-of-Thought reflection.

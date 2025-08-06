@@ -108,9 +108,9 @@ class TestComponentInterfaces:
 
     def test_generation_interface(self):
         """Generation components should implement required interface."""
-        from dspy.teleprompt.gepa.generation import MutationGenerator
+        from dspy.teleprompt.gepa.generation import ReflectivePromptMutation
 
-        strategy = MutationGenerator(mutation_rate=0.5)
+        strategy = ReflectivePromptMutation()
 
         # Interface methods
         assert hasattr(strategy, 'generate')

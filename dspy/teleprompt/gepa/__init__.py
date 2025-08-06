@@ -18,8 +18,7 @@ from .evaluation import Evaluator
 # Business step implementations
 from .budget import LLMCallsBudget, IterationBudget, AdaptiveBudget
 from .selection import ParetoFrontier
-from .generation import MutationGenerator, CrossoverGenerator
-from .generation.reflective_mutation import ReflectiveMutation
+from .generation import ReflectivePromptMutation, SystemAwareMerge
 from .evaluation import PromotionEvaluator
 from .evaluation.trace_collector import EnhancedTraceCollector
 from .evaluation.feedback import FeedbackResult, EvaluationTrace, ModuleFeedback
@@ -43,9 +42,8 @@ __all__ = [
     'IterationBudget',
     'AdaptiveBudget',
     'ParetoFrontier',
-    'MutationGenerator',
-    'CrossoverGenerator',
-    'ReflectiveMutation',
+    'ReflectivePromptMutation',
+    'SystemAwareMerge',
     'PromotionEvaluator',
     'EnhancedTraceCollector',
     'FeedbackResult',

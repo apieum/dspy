@@ -1,4 +1,4 @@
-"""System-Aware Merge crossover implementation from GEPA paper Appendix F."""
+"""System-Aware Merge implementation from GEPA paper Algorithm 4."""
 
 import logging
 from typing import List, Optional, Tuple
@@ -130,20 +130,20 @@ def desirable_generator(compare_func):
 desirable = desirable_generator(compare_strict)
 
 
-class SystemAwareMergeGenerator(Generator):
-    """System-Aware Merge crossover generator implementing Algorithm 4 from GEPA paper.
+class SystemAwareMerge(Generator):
+    """System-Aware Merge generator implementing Algorithm 4 from GEPA paper.
 
-    Implements sophisticated module-wise crossover that:
+    Implements sophisticated module-wise merging that:
     1. Checks for complementary evolution between parents using DESIRABLE function
     2. Uses ancestry-aware selection to avoid inbreeding
     3. Performs intelligent module-wise combination based on performance
     """
 
     def __init__(self,
-                 crossover_rate: float = 0.7,
+                 merge_rate: float = 0.7,
                  population_size: int = 10,
                  feedback_collector: Optional[EnhancedTraceCollector] = None):
-        self.crossover_rate = crossover_rate
+        self.merge_rate = merge_rate
         self.population_size = population_size
         self.feedback_collector = feedback_collector or EnhancedTraceCollector()
         # Training data will be set during compilation
@@ -152,7 +152,7 @@ class SystemAwareMergeGenerator(Generator):
         self.merge_history = MergeHistoryTracker()
 
     def generate(self, parents: Parents, budget=None) -> NewBorns:
-        """Generate new candidates using System-Aware Merge crossover (Algorithm 4)."""
+        """Generate new candidates using System-Aware Merge (Algorithm 4)."""
         if parents.size() < 2:
             return NewBorns()
 
@@ -161,7 +161,7 @@ class SystemAwareMergeGenerator(Generator):
             selected_parents = parents.sample_stochastic(2)
             if selected_parents.size() < 2:
                 return NewBorns()
-                
+
             parent_list = list(selected_parents)
             parent1, parent2 = parent_list[0], parent_list[1]
 
@@ -312,7 +312,3 @@ class SystemAwareMergeGenerator(Generator):
     def start_compilation(self, student: dspy.Module, training_data: List[dspy.Example]) -> None:
         """Prepare generator with training dataset when compilation begins."""
         self.feedback_data = training_data
-
-
-# Backward compatibility alias
-CrossoverGenerator = SystemAwareMergeGenerator

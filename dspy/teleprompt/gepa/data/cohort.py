@@ -134,7 +134,7 @@ class Parents(Cohort):
     """Cohort of candidates selected for reproduction.
     
     These candidates have been chosen through stochastic selection
-    and will be used for mutation or crossover operations.
+    and will be used for mutation or merge operations.
     """
     
     def __init__(self, *candidates: 'Candidate', task_wins: Optional[Dict['Candidate', int]] = None, **kwargs):
@@ -219,7 +219,7 @@ class Parents(Cohort):
 class NewBorns(Cohort):
     """Cohort of newly generated candidates.
     
-    These candidates have been created through mutation or crossover
+    These candidates have been created through mutation or merge
     and need to be evaluated before they can become survivors.
     """
     

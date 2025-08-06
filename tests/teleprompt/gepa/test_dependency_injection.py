@@ -3,7 +3,7 @@
 import dspy
 from dspy.teleprompt.gepa.core import GEPA
 from dspy.teleprompt.gepa.evaluation.promotion import PromotionEvaluator
-from dspy.teleprompt.gepa.generation.mutation import MutationGenerator
+from dspy.teleprompt.gepa.generation import ReflectivePromptMutation
 from dspy.teleprompt.gepa.budget.llm_calls import LLMCallsBudget
 
 
@@ -28,7 +28,7 @@ def test_components_configure_themselves():
     
     # Create components without any dataset knowledge
     evaluator = PromotionEvaluator(metric=simple_metric, promotion_threshold=0.3)
-    generator = MutationGenerator(mutation_rate=0.4, population_size=3)
+    generator = ReflectivePromptMutation()
     
     # Verify components start without dataset knowledge
     assert evaluator.evaluation_data == []

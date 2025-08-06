@@ -125,11 +125,11 @@ def test_components_can_opt_into_lifecycle_events():
     """Test that components can choose which lifecycle events to handle."""
 
     from dspy.teleprompt.gepa.evaluation.promotion import PromotionEvaluator
-    from dspy.teleprompt.gepa.generation.mutation import MutationGenerator
+    from dspy.teleprompt.gepa.generation import ReflectivePromptMutation
 
     # Create components
     evaluator = PromotionEvaluator(metric=simple_metric)
-    generator = MutationGenerator()
+    generator = ReflectivePromptMutation()
 
     # Test that they have lifecycle methods (inherited from CompilationObserver)
     assert hasattr(evaluator, 'start_compilation')

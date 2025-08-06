@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 class Generator(CompilationObserver):
     """Protocol for generating new candidates from parents.
 
-    This component implements the genetic operations (mutation, crossover, etc)
+    This component implements the genetic operations (mutation, merge, etc)
     to create new candidate generations.
     """
 

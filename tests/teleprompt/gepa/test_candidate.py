@@ -157,7 +157,7 @@ class TestCandidateLineage:
         assert gen2_candidate.generation_number == 2
 
     def test_multiple_parent_lineage(self):
-        """Test candidate with multiple parents (crossover)."""
+        """Test candidate with multiple parents (merge)."""
         # Two parent candidates
         parent1_module = dspy.Predict("input -> output")
         parent1 = Candidate(parent1_module, generation_number=1)
@@ -165,7 +165,7 @@ class TestCandidateLineage:
         parent2_module = dspy.Predict("input -> output")
         parent2 = Candidate(parent2_module, generation_number=1)
 
-        # Child from crossover
+        # Child from merge
         child_module = dspy.Predict("input -> output")
         child = Candidate(child_module, parents=[parent1, parent2], generation_number=2)
 

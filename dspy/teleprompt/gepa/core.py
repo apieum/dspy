@@ -188,16 +188,13 @@ class GEPA:
         """
         from .budget import LLMCallsBudget
         from .selection import ParetoFrontier
-        from .generation import MutationGenerator
+        from .generation import ReflectivePromptMutation
         from .evaluation import PromotionEvaluator
 
         return GEPA(
             budget=LLMCallsBudget(max_calls),
             selector=ParetoFrontier(),
-            generator=MutationGenerator(
-                mutation_rate=0.3,
-                population_size=population_size
-            ),
+            generator=ReflectivePromptMutation(),
             evaluator=PromotionEvaluator(
                 metric=metric,
                 promotion_threshold=0.5
@@ -222,16 +219,13 @@ class GEPA:
         """
         from .budget import IterationBudget
         from .selection import ParetoFrontier
-        from .generation import MutationGenerator
+        from .generation import ReflectivePromptMutation
         from .evaluation import PromotionEvaluator
 
         return GEPA(
             budget=IterationBudget(max_iterations),
             selector=ParetoFrontier(),
-            generator=MutationGenerator(
-                mutation_rate=0.4,
-                population_size=population_size
-            ),
+            generator=ReflectivePromptMutation(),
             evaluator=PromotionEvaluator(
                 metric=metric,
                 promotion_threshold=0.6
@@ -239,10 +233,10 @@ class GEPA:
         )
 
     @staticmethod
-    def create_with_crossover(metric, max_calls: int = 1000, population_size: int = 12) -> "GEPA":
-        """Create GEPA optimizer with crossover generation for complex optimization.
+    def create_with_merge(metric, max_calls: int = 1000, population_size: int = 12) -> "GEPA":
+        """Create GEPA optimizer with System-Aware Merge for complex optimization.
 
-        Uses CrossoverGenerator for exploring combinations of successful candidates.
+        Uses System-Aware Merge for exploring combinations of successful candidates.
         Good for tasks where combining features from different solutions is beneficial.
 
         Args:
@@ -251,18 +245,18 @@ class GEPA:
             population_size: Number of candidates per generation
 
         Returns:
-            Configured GEPA optimizer with crossover capabilities
+            Configured GEPA optimizer with merge capabilities
         """
         from .budget import LLMCallsBudget
         from .selection import ParetoFrontier
-        from .generation import CrossoverGenerator
+        from .generation import SystemAwareMerge
         from .evaluation import PromotionEvaluator
 
         return GEPA(
             budget=LLMCallsBudget(max_calls),
             selector=ParetoFrontier(),
-            generator=CrossoverGenerator(
-                crossover_rate=0.6,
+            generator=SystemAwareMerge(
+                merge_rate=0.6,
                 population_size=population_size
             ),
             evaluator=PromotionEvaluator(
