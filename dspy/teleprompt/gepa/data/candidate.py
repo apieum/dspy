@@ -163,3 +163,28 @@ class Candidate:
             # else: equal scores → continue checking other tasks
 
         return at_least_as_good_on_all and strictly_better_on_one
+
+    def _get_all_ancestors(self) -> set['Candidate']:
+        """
+        Private helper to recursively get all unique ancestors.
+        This is an internal implementation detail.
+        """
+        ancestors = set()
+        # Use a stack for iterative depth-first traversal to avoid recursion limits
+        to_visit = list(self.parents)
+        while to_visit:
+            parent = to_visit.pop()
+            if parent not in ancestors:
+                ancestors.add(parent)
+                to_visit.extend(parent.parents)
+        return ancestors
+
+    def is_ancestor_of(self, other: 'Candidate') -> bool:
+        """Check if this candidate is an ancestor of another candidate."""
+        return self in other._get_all_ancestors()
+
+    def find_common_ancestors(self, other: 'Candidate') -> set['Candidate']:
+        """Find all common ancestors shared with another candidate."""
+        my_ancestors = self._get_all_ancestors()
+        other_ancestors = other._get_all_ancestors()
+        return my_ancestors.intersection(other_ancestors)

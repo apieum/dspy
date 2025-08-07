@@ -1,317 +1,215 @@
-"""System-Aware Merge implementation from GEPA paper Algorithm 4."""
+"""System-Aware Merge generator implementing Algorithm 4 from the GEPA paper.
+
+This is a self-contained implementation that integrates all necessary logic
+for ancestry, desirability checks, and history tracking, simplifying the
+overall architecture and removing the need for a separate utils directory.
+"""
 
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Set
+
 import dspy
 from dspy.teleprompt.utils import get_signature, set_signature
 from .generator import Generator
 from ..data.candidate import Candidate
 from ..data.cohort import Parents, NewBorns
-from ..evaluation.trace_collector import EnhancedTraceCollector
-from ..utils.ancestry_traversal import find_common_ancestors, is_ancestor_of
-from ..utils.signature_complexity import is_signature_more_complex
-from ..utils.merge_history import MergeHistoryTracker
 
 logger = logging.getLogger(__name__)
 
 
-def compare_strict(sig_a, sig_i, sig_j, parent1, parent2):
-    """Strict comparison function implementing the GEPA paper's DESIRABLE logic.
-
-    Args:
-        sig_a: Ancestor signature
-        sig_i: First parent signature
-        sig_j: Second parent signature
-        parent1: First parent candidate (for performance comparison)
-        parent2: Second parent candidate (for performance comparison)
-
-    Returns:
-        Selected signature if desirable divergence exists, None otherwise
-    """
-    # Get the string prompt representations (e.g., "input1, input2 -> output1, output2")
-    π_a = sig_a.signature
-    π_i = sig_i.signature
-    π_j = sig_j.signature
-
-    # Check the DESIRABLE conditions from the paper and return the beneficial signature
-    # Condition 1: (πa = πi and πj ≠ πi) → use parent2's innovation
-    if π_a == π_i and π_j != π_i:
-        return sig_j
-
-    # Condition 2: (πa = πj and πi ≠ πj) → use parent1's innovation
-    if π_a == π_j and π_i != π_j:
-        return sig_i
-
-    # If all three are different → pick from best performer
-    if π_i != π_j and π_i != π_a and π_j != π_a:
-        best_parent = parent1 if parent1.average_task_score() > parent2.average_task_score() else parent2
-        return sig_i if best_parent == parent1 else sig_j
-
-    return None  # No beneficial divergence
-
-
-def desirable_generator(compare_func):
-    """Generator that creates a desirable function with custom comparison logic.
-
-    Args:
-        compare_func: Function that takes (sig_a, sig_i, sig_j, parent1, parent2) and returns signature or None
-
-    Returns:
-        A desirable function that returns list of selected signatures per module
-    """
-    def parametric_desirable(ancestor: "Candidate", parent1: "Candidate", parent2: "Candidate"):
-        """Parametric DESIRABLE function from the GEPA paper.
-
-        Implements the algorithm:
-        for module m = 1 to |M| do
-            selected_sig = compare_func(sig_a, sig_i, sig_j, parent1, parent2)
-            if selected_sig is not None:
-                collect selected_sig for module m
-            end if
-        end for
-        return list of selected signatures (empty if no desirable patterns)
-
-        Args:
-            ancestor: Common ancestor candidate to use as merge base
-            parent1: First parent candidate
-            parent2: Second parent candidate
-
-        Returns:
-            List of (module_index, selected_signature) tuples for modules with desirable patterns
-        """
-        try:
-            from dspy.teleprompt.utils import get_signature
-
-            # Get predictors for all three candidates
-            ancestor_predictors = ancestor.module.predictors()
-            parent1_predictors = parent1.module.predictors()
-            parent2_predictors = parent2.module.predictors()
-
-            if not ancestor_predictors:
-                return []  # No predictors to compare
-
-            selected_signatures = []
-
-            # Check each module (predictor) for desirable patterns
-            max_modules = max(len(ancestor_predictors), len(parent1_predictors), len(parent2_predictors))
-
-            for m in range(max_modules):
-                # Get signatures for module m
-                sig_a = get_signature(ancestor_predictors[m]) if m < len(ancestor_predictors) else None
-                sig_i = get_signature(parent1_predictors[m]) if m < len(parent1_predictors) else None
-                sig_j = get_signature(parent2_predictors[m]) if m < len(parent2_predictors) else None
-
-                # Skip if any signature is missing
-                if sig_a is None or sig_i is None or sig_j is None:
-                    continue
-
-                # Use the provided comparison function
-                selected_sig = compare_func(sig_a, sig_i, sig_j, parent1, parent2)
-                if selected_sig is not None:
-                    selected_signatures.append((m, selected_sig))
-                    logger.debug(f"DESIRABLE: Module {m} shows desirable pattern")
-
-            # Return selected signatures
-            if selected_signatures:
-                logger.debug(f"DESIRABLE: Found {len(selected_signatures)} desirable modules")
-            else:
-                logger.debug("DESIRABLE: No divergence patterns found")
-
-            return selected_signatures
-
-        except Exception as e:
-            logger.warning(f"DESIRABLE function failed: {e}")
-            return []  # Default to no merge on error
-
-    return parametric_desirable
-
-
-# Default desirable function using strict comparison
-desirable = desirable_generator(compare_strict)
-
-
 class SystemAwareMerge(Generator):
-    """System-Aware Merge generator implementing Algorithm 4 from GEPA paper.
+    """
+    System-Aware Merge generator implementing Algorithm 4 from the GEPA paper.
 
-    Implements sophisticated module-wise merging that:
-    1. Checks for complementary evolution between parents using DESIRABLE function
-    2. Uses ancestry-aware selection to avoid inbreeding
-    3. Performs intelligent module-wise combination based on performance
+    This is a self-contained implementation that integrates all necessary logic
+    for ancestry, desirability checks, and history tracking, simplifying the
+    overall architecture and removing the need for a separate utils directory.
     """
 
-    def __init__(self,
-                 merge_rate: float = 0.7,
-                 population_size: int = 10,
-                 feedback_collector: Optional[EnhancedTraceCollector] = None):
+    def __init__(self, merge_rate: float = 0.7, population_size: int = 10):
         self.merge_rate = merge_rate
         self.population_size = population_size
-        self.feedback_collector = feedback_collector or EnhancedTraceCollector()
-        # Training data will be set during compilation
+
+        # For interface compatibility (not used in Algorithm 4)
         self.feedback_data: List[dspy.Example] = []
-        # Merge history tracking as per Algorithm 4
-        self.merge_history = MergeHistoryTracker()
+
+        # Integrated merge history tracking (replaces MergeHistoryTracker)
+        self.attempted_merges: Set[Tuple[int, int, int]] = set()
+        self.merge_stats = {"success": 0, "failure_not_desirable": 0, "failure_ancestry": 0}
 
     def generate(self, parents: Parents, budget=None) -> NewBorns:
-        """Generate new candidates using System-Aware Merge (Algorithm 4)."""
+        """Generate a new candidate using System-Aware Merge (Algorithm 4)."""
         if parents.size() < 2:
             return NewBorns()
 
         try:
-            # Step 1: Stochastic selection of two parent candidates (Algorithm 2 line 14)
+            # Step 1: Stochastic selection of two parent candidates
             selected_parents = parents.sample_stochastic(2)
             if selected_parents.size() < 2:
                 return NewBorns()
 
-            parent_list = list(selected_parents)
-            parent1, parent2 = parent_list[0], parent_list[1]
+            parent1, parent2 = list(selected_parents)
 
-            # Step 2: Get ancestors Ai ← GET_ANCESTORS(i, A), Aj ← GET_ANCESTORS(j, A)
-            # Step 4: For each common ancestor a ∈ Ai ∩ Aj do
-            common_ancestors = find_common_ancestors(parent1, parent2)
-
-            # Step 3: Skip direct ancestry: if i ∈ Aj or j ∈ Ai then continue
-            if is_ancestor_of(parent1, parent2) or is_ancestor_of(parent2, parent1):
+            # Step 2: Check for direct ancestry
+            # This is much cleaner and respects encapsulation.
+            if parent1.is_ancestor_of(parent2) or parent2.is_ancestor_of(parent1):
+                self.merge_stats["failure_ancestry"] += 1
                 return NewBorns()
 
-            # Try each common ancestor until one merge succeeds
-            for ancestor in common_ancestors:
-                # Step 5: Check merge history: if (i, j, a) tried before then continue
-                if self.merge_history.has_been_attempted(parent1, parent2, ancestor):
+            # Step 3: Find common ancestors
+            common_ancestors = parent1.find_common_ancestors(parent2)
+            if not common_ancestors:
+                return NewBorns()
+
+            # Step 4: Iterate through common ancestors to find a valid merge
+            # Sort by generation number (most recent first) for better results
+            for ancestor in sorted(list(common_ancestors), key=lambda c: c.generation_number, reverse=True):
+
+                # Check merge history (integrated logic)
+                merge_key = tuple(sorted((id(parent1), id(parent2)))) + (id(ancestor),)
+                if merge_key in self.attempted_merges:
+                    continue
+                self.attempted_merges.add(merge_key)
+
+                # Step 5: Check for desirable divergence (integrated as a private method)
+                desirable_signatures = self._find_desirable_signatures(ancestor, parent1, parent2)
+                if not desirable_signatures:
+                    self.merge_stats["failure_not_desirable"] += 1
                     continue
 
-                # Step 6: Check signature complexity: if S[a] > min(S[i], S[j]) then continue
-                if self._ancestor_too_complex(ancestor, parent1, parent2):
-                    self.merge_history.record_attempt(parent1, parent2, ancestor, parents.iteration,
-                                                    successful=False, failure_reason="ancestor_too_complex")
-                    continue
+                # Step 6: Create the merged candidate
+                child_candidate = self._create_merged_candidate(
+                    ancestor, parent1, parent2, parents.iteration, desirable_signatures
+                )
 
-                # Step 7: Check desirability: if not DESIRABLE(a, i, j, P) then continue
-                selected_signatures = desirable(ancestor, parent1, parent2)
-                if not selected_signatures:
-                    self.merge_history.record_attempt(parent1, parent2, ancestor, parents.iteration,
-                                                    successful=False, failure_reason="not_desirable")
-                    continue
-
-                # Step 8-11: Create merged candidate with pre-selected signatures
-                child_candidate = self._create_merged_candidate(ancestor, parent1, parent2, parents.iteration, selected_signatures)
-
-                if child_candidate is not None:
-                    # Record successful merge
-                    self.merge_history.record_attempt(parent1, parent2, ancestor, parents.iteration, successful=True)
-                    return NewBorns(child_candidate)
-                else:
-                    self.merge_history.record_attempt(parent1, parent2, ancestor, parents.iteration,
-                                                    successful=False, failure_reason="merge_failed")
+                self.merge_stats["success"] += 1
+                return NewBorns(child_candidate, iteration=parents.iteration)
 
             logger.debug(f"No successful merge found for parents despite {len(common_ancestors)} common ancestors")
 
         except Exception as e:
             logger.warning(f"System-Aware Merge failed: {e}")
 
-        return NewBorns()
+        return NewBorns()  # No successful merge found
 
-
-    def _ancestor_too_complex(self, ancestor: Candidate, parent1: Candidate, parent2: Candidate) -> bool:
-        """Check if ancestor signature is too complex compared to parents.
-
-        Implements: S[a] > min(S[i], S[j]) from Algorithm 4
-
-        Args:
-            ancestor: Ancestor candidate
-            parent1: First parent candidate
-            parent2: Second parent candidate
-
-        Returns:
-            True if ancestor is too complex (should be skipped)
+    def _find_desirable_signatures(self, ancestor: Candidate, p1: Candidate, p2: Candidate) -> List[Tuple[int, any]]:
         """
+        Private method to check for desirable signature patterns.
+        This encapsulates the logic from the 'desirable' function.
+
+        Implements the DESIRABLE function from Algorithm 4:
+        - Condition 1: p1 innovated, p2 did not (πa = πj and πi ≠ πj) → use p1's innovation
+        - Condition 2: p2 innovated, p1 did not (πa = πi and πj ≠ πi) → use p2's innovation
+        - Condition 3: Both innovated differently → pick from better-performing parent
+        """
+        selected_signatures = []
+
         try:
-            # Get signatures for all three candidates
             ancestor_predictors = ancestor.module.predictors()
-            parent1_predictors = parent1.module.predictors()
-            parent2_predictors = parent2.module.predictors()
+            p1_predictors = p1.module.predictors()
+            p2_predictors = p2.module.predictors()
 
             if not ancestor_predictors:
-                return False  # No predictors to compare
+                return []
 
-            # Check complexity for each predictor position
-            max_predictors = max(len(ancestor_predictors), len(parent1_predictors), len(parent2_predictors))
+            # Iterate through modules, assuming lists are of the same length
+            max_modules = max(len(ancestor_predictors), len(p1_predictors), len(p2_predictors))
 
-            for i in range(max_predictors):
-                # Get signatures (use None if predictor doesn't exist at this position)
-                ancestor_sig = get_signature(ancestor_predictors[i]) if i < len(ancestor_predictors) else None
-                parent1_sig = get_signature(parent1_predictors[i]) if i < len(parent1_predictors) else None
-                parent2_sig = get_signature(parent2_predictors[i]) if i < len(parent2_predictors) else None
-
-                # Skip if any signature is missing
-                if not all([ancestor_sig, parent1_sig, parent2_sig]):
+            for i in range(max_modules):
+                # Get signatures (skip if any is missing)
+                if (i >= len(ancestor_predictors) or
+                    i >= len(p1_predictors) or
+                    i >= len(p2_predictors)):
                     continue
 
-                # Check if ancestor signature is more complex than both parents
-                if is_signature_more_complex(ancestor_sig, parent1_sig, parent2_sig):
-                    return True
+                pred_a, pred_p1, pred_p2 = ancestor_predictors[i], p1_predictors[i], p2_predictors[i]
+                sig_a, sig_p1, sig_p2 = get_signature(pred_a), get_signature(pred_p1), get_signature(pred_p2)
 
-            return False
+                # Get signature strings for comparison
+                π_a = sig_a.signature if hasattr(sig_a, 'signature') else str(sig_a)
+                π_p1 = sig_p1.signature if hasattr(sig_p1, 'signature') else str(sig_p1)
+                π_p2 = sig_p2.signature if hasattr(sig_p2, 'signature') else str(sig_p2)
+
+                # Condition 1: p1 innovated, p2 did not (πa = πp2 and πp1 ≠ πp2)
+                if π_a == π_p2 and π_a != π_p1:
+                    selected_signatures.append((i, sig_p1))
+                    logger.debug(f"DESIRABLE: Module {i} - p1 innovated, using p1's signature")
+
+                # Condition 2: p2 innovated, p1 did not (πa = πp1 and πp2 ≠ πp1)
+                elif π_a == π_p1 and π_a != π_p2:
+                    selected_signatures.append((i, sig_p2))
+                    logger.debug(f"DESIRABLE: Module {i} - p2 innovated, using p2's signature")
+
+                # Condition 3: Both innovated differently, pick from the better-performing parent
+                elif π_a != π_p1 and π_a != π_p2 and π_p1 != π_p2:
+                    best_parent = p1 if p1.average_task_score() > p2.average_task_score() else p2
+                    selected_signature = sig_p1 if best_parent == p1 else sig_p2
+                    selected_signatures.append((i, selected_signature))
+                    logger.debug(f"DESIRABLE: Module {i} - both innovated, using {'p1' if best_parent == p1 else 'p2'}'s signature")
 
         except Exception as e:
-            logger.warning(f"Error checking ancestor complexity: {e}")
-            return False  # Default to allowing ancestor
+            logger.warning(f"Error finding desirable signatures: {e}")
+            return []
 
-    def _create_merged_candidate(self, ancestor: Candidate, parent1: Candidate, parent2: Candidate, iteration: int, selected_signatures: List[Tuple[int, any]]) -> Optional[Candidate]:
-        """Create merged candidate using Algorithm 4 steps 8-11.
+        return selected_signatures
 
-        Args:
-            ancestor: Common ancestor to use as base
-            parent1: First parent candidate
-            parent2: Second parent candidate
-            iteration: Current iteration number
-            selected_signatures: List of (module_index, signature) tuples from desirable function
-
-        Returns:
-            New merged candidate or None if merge failed
-        """
+    def _create_merged_candidate(self, ancestor: Candidate, p1: Candidate, p2: Candidate,
+                               iteration: int, signatures_to_apply: List[Tuple[int, any]]) -> Candidate:
+        """Creates a new candidate by merging parent innovations onto an ancestor."""
         try:
-            # Step 8: Create merged candidate Φ' ← copy of P[a]
             child_module = ancestor.module.deepcopy()
             child_predictors = child_module.predictors()
 
-            # Step 9-10: Apply pre-selected signatures from desirable function
-            for module_idx, selected_signature in selected_signatures:
-                try:
-                    if module_idx < len(child_predictors):
-                        set_signature(child_predictors[module_idx], selected_signature)
-                        logger.debug(f"Applied selected signature to module {module_idx}")
-                except Exception as e:
-                    logger.warning(f"Failed to apply signature to module {module_idx}: {e}")
-                    continue
+            for module_idx, new_signature in signatures_to_apply:
+                if module_idx < len(child_predictors):
+                    set_signature(child_predictors[module_idx], new_signature)
+                    logger.debug(f"Applied selected signature to module {module_idx}")
 
-            # Step 11: Create new candidate with 3-way lineage tracking
-            child_candidate = Candidate(
+            return Candidate(
                 module=child_module,
-                parents=[parent1, parent2, ancestor],  # 3-way lineage as per paper
-                generation_number=iteration
+                parents=[p1, p2, ancestor],  # 3-way lineage
+                generation_number=iteration,
+                creation_metadata={
+                    "merge_type": "system_aware",
+                    "ancestor_generation": ancestor.generation_number,
+                    "parent1_generation": p1.generation_number,
+                    "parent2_generation": p2.generation_number,
+                    "modules_merged": len(signatures_to_apply)
+                }
             )
 
-            return child_candidate
-
         except Exception as e:
-            logger.warning(f"Merged candidate creation failed: {e}")
+            logger.warning(f"Error creating merged candidate: {e}")
             return None
 
-    def get_merge_statistics(self) -> dict:
-        """Get statistics about merge attempts for debugging/monitoring.
+    def start_compilation(self, student: dspy.Module,
+                         d_feedback: List[dspy.Example],
+                         d_pareto: List[dspy.Example]) -> None:
+        """Resets merge history for a new compilation run."""
+        # Store feedback data for interface compatibility
+        # (Algorithm 4 doesn't use it, unlike ReflectivePromptMutation)
+        self.feedback_data = d_feedback
 
-        Returns:
-            Dictionary with merge attempt statistics
-        """
-        return self.merge_history.get_merge_statistics()
+        self.attempted_merges.clear()
+        self.merge_stats = {"success": 0, "failure_not_desirable": 0, "failure_ancestry": 0}
+        logger.debug("Reset SystemAwareMerge for new compilation")
+
+    def get_merge_statistics(self) -> dict:
+        """Get statistics about merge attempts for debugging/monitoring."""
+        total_attempts = sum(self.merge_stats.values())
+        success_rate = self.merge_stats["success"] / total_attempts if total_attempts > 0 else 0.0
+
+        return {
+            "total_attempts": total_attempts,
+            "successful_merges": self.merge_stats["success"],
+            "failed_not_desirable": self.merge_stats["failure_not_desirable"],
+            "failed_ancestry": self.merge_stats["failure_ancestry"],
+            "success_rate": success_rate,
+            "unique_combinations_attempted": len(self.attempted_merges)
+        }
 
     def clear_merge_history(self) -> None:
         """Clear merge history (useful for testing or reset)."""
-        self.merge_history.clear_history()
-
-    def start_compilation(self, student: dspy.Module, 
-                         d_feedback: List[dspy.Example], 
-                         d_pareto: List[dspy.Example]) -> None:
-        """Prepare generator with feedback dataset for crossover operations (GEPA Algorithm 1)."""
-        # Generator uses D_feedback for minibatch sampling (not D_pareto)
-        self.feedback_data = d_feedback
+        self.attempted_merges.clear()
+        self.merge_stats = {"success": 0, "failure_not_desirable": 0, "failure_ancestry": 0}
+        logger.debug("Cleared SystemAwareMerge history")
