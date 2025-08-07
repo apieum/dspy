@@ -250,7 +250,7 @@ class TestSimplifiedSystemAwareMerge:
             
             # Verify successful merge
             assert not result.is_empty()
-            assert len(result.candidates) == 1
+            assert result.size() == 1
             assert self.generator.merge_stats["success"] == 1
 
     def test_start_compilation(self):

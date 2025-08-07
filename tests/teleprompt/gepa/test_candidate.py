@@ -92,7 +92,7 @@ class TestCohort:
         cohort = Cohort()
 
         assert cohort.size() == 0
-        assert cohort.candidates == set()
+        assert cohort.is_empty()
 
     def test_cohort_iteration(self):
         """Test cohort candidate access."""

@@ -8,6 +8,7 @@ import dspy
 from dspy.teleprompt.gepa.data.candidate import Candidate
 from dspy.teleprompt.gepa.data.cohort import Survivors, Parents
 from dspy.teleprompt.gepa.selection.pareto_frontier import ParetoFrontier
+from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
 
 
 class TestParetoFrontier:
@@ -17,9 +18,14 @@ class TestParetoFrontier:
         """Setup fresh selector for each test."""
         self.selector = ParetoFrontier()
         # Create mock training data with 3 tasks
-        d_feedback = ["task0", "task1", "task2"]
-        d_pareto = ["task0", "task1", "task2"]
-        self.selector.start_compilation(None, d_feedback, d_pareto)
+        d_feedback = [dspy.Example(task=f"task{i}") for i in range(3)]
+        d_pareto = [dspy.Example(task=f"task{i}") for i in range(3)]
+        
+        # Combine training data and create DatasetManager
+        combined_training_data = d_feedback + d_pareto
+        dataset_manager = DefaultDatasetManager(combined_training_data, pareto_split_ratio=0.5)
+        
+        self.selector.start_compilation(None, dataset_manager)
 
     def create_candidate(self, scores_dict, generation=0, parents=None):
         """Helper to create candidates with specific scores."""
@@ -327,10 +333,9 @@ class TestParetoFrontier:
     def test_generation_eligibility_filtering(self):
         """Test that only candidates from correct generation are eligible."""
         # Override with 2-task setup
-        training_data = ["task0", "task1"]
-        d_feedback = training_data
-        d_pareto = training_data
-        self.selector.start_compilation(None, d_feedback, d_pareto)
+        training_data = [dspy.Example(task=f"task{i}") for i in range(2)]
+        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.5)
+        self.selector.start_compilation(None, dataset_manager)
 
         # Create candidates from different generations
         gen0_candidate = self.create_candidate({0: 0.8, 1: 0.6}, generation=0)
@@ -403,10 +408,9 @@ class TestParetoFrontier:
     def test_stochastic_sampling(self):
         """Test stochastic sampling functionality."""
         # Override with 2-task setup
-        training_data = ["task0", "task1"]
-        d_feedback = training_data
-        d_pareto = training_data
-        self.selector.start_compilation(None, d_feedback, d_pareto)
+        training_data = [dspy.Example(task=f"task{i}") for i in range(2)]
+        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.5)
+        self.selector.start_compilation(None, dataset_manager)
 
         # Create multiple good candidates
         candidates = [
@@ -431,11 +435,10 @@ class TestParetoFrontier:
 
     def test_complex_multi_task_scenario(self):
         """Test complex scenario with 5 tasks and 8 candidates."""
-        # Override with 5-task setup
-        training_data = ["task0", "task1", "task2", "task3", "task4"]
-        d_feedback = training_data
-        d_pareto = training_data
-        self.selector.start_compilation(None, d_feedback, d_pareto)
+        # Override with 5-task setup - create enough data to ensure 5 pareto tasks
+        training_data = [dspy.Example(task=f"task{i}") for i in range(10)]  # 10 examples
+        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.6)  # 6 pareto tasks, but we'll only use first 5
+        self.selector.start_compilation(None, dataset_manager)
 
         # Create diverse candidates with different specializations
         candidates = [
@@ -470,10 +473,9 @@ class TestParetoFrontier:
     def test_performance_with_large_candidate_set(self):
         """Test performance and correctness with larger candidate sets."""
         # Override with 4-task setup
-        training_data = ["task0", "task1", "task2", "task3"]
-        d_feedback = training_data
-        d_pareto = training_data
-        self.selector.start_compilation(None, d_feedback, d_pareto)
+        training_data = [dspy.Example(task=f"task{i}") for i in range(4)]
+        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.5)
+        self.selector.start_compilation(None, dataset_manager)
 
         # Create 20 candidates with random-ish but controlled performance
         candidates = []

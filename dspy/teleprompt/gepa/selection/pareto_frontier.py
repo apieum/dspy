@@ -14,13 +14,16 @@ Key Features:
 
 import random
 import logging
-from typing import List, Set, Optional, Dict, Callable
+from typing import List, Set, Optional, Dict, Callable, TYPE_CHECKING
 from collections import defaultdict
 
 from .selector import Selector
 from ..data.candidate import Candidate
 from ..data.cohort import Cohort, Survivors, Parents
 from ..budget import Budget
+
+if TYPE_CHECKING:
+    from ..dataset_manager import DatasetManager
 
 logger = logging.getLogger(__name__)
 
@@ -55,20 +58,15 @@ class ParetoFrontier(Selector):
         self.task_scores: Dict[int, float] = {}  # task_id -> score for that task
         self.task_best_candidates: Dict[int, List[Candidate]] = {}  # task_id -> all tied winners
         self.task_wins: Dict[Candidate, int] = defaultdict(int)  # candidate -> number of tasks won
-        self.num_tasks = 0  # Will be set in start_compilation
+        self.dataset_manager: Optional["DatasetManager"] = None
 
-    def start_compilation(self, student, d_feedback: List, d_pareto: List) -> None:
-        """Called when compilation begins. Store the number of tasks (GEPA Algorithm 1)."""
-        # Selector uses D_pareto for task counting (evaluation dataset size)
-        self.num_tasks = len(d_pareto)
+    def start_compilation(self, student, dataset_manager: "DatasetManager") -> None:
+        """Called when compilation begins. Initialize task tracking structures."""
+        self.dataset_manager = dataset_manager
+        num_tasks = self.dataset_manager.num_pareto_tasks
+        
         # Initialize task_best_candidates and task_scores for all tasks
-        # d_pareto can be either a list (indexed 0, 1, 2...) or dict with keys
-        if hasattr(d_pareto, 'keys'):
-            task_ids = d_pareto.keys()
-        else:
-            task_ids = range(len(d_pareto))
-            
-        for task_id in task_ids:
+        for task_id in range(num_tasks):
             self.task_best_candidates[task_id] = []
             self.task_scores[task_id] = 0.0
 
@@ -96,36 +94,43 @@ class ParetoFrontier(Selector):
 
         return Survivors(*pareto_frontier)
 
-    def promote(self, survivors: Survivors, budget: Optional[Budget] = None) -> Parents:
-        """Promote survivors to parents with Pareto frontier filtering.
-
+    def promote(self, new_survivors: Survivors, budget: Optional[Budget] = None) -> Parents:
+        """
+        Paper-compliant promotion: Combines new survivors with existing internal population,
+        filters for Pareto frontier, and returns the complete parent population.
+        
         Args:
-            survivors: Survivors cohort to promote to parents
+            new_survivors: New candidates that have been fully evaluated
             budget: Optional budget constraints
 
         Returns:
-            Parents cohort with incremented iteration for next generation
+            Parents cohort containing the Pareto frontier from the union of old and new
         """
-        # Update all task scores for all survivors in batch
-        # Note: task_wins are already calculated in update_score() method
-        self.update_scores_batch(survivors)
-
-        # Apply Pareto frontier filtering to remove dominated candidates
-        pareto_filtered = self._remove_dominated_candidates(list(survivors.candidates))
+        # 1. Update scores for new survivors (adds them to internal tracking)
+        self.update_scores_batch(new_survivors)
         
-        # Extract task_wins for just the Pareto-filtered candidates being promoted
+        # 2. Get all candidates currently tracked (includes both old and new)
+        all_tracked_candidates = set()
+        for task_winners in self.task_best_candidates.values():
+            all_tracked_candidates.update(task_winners)
+        
+        logger.debug(f"Promoting: {len(all_tracked_candidates)} total tracked candidates for Pareto filtering")
+
+        # 3. Filter the combined pool to find the true Pareto frontier
+        pareto_frontier = self._remove_dominated_candidates(list(all_tracked_candidates))
+        logger.debug(f"Pareto frontier contains {len(pareto_frontier)} candidates after filtering")
+
+        # 4. Extract task_wins for the Pareto-filtered candidates
         relevant_task_wins = {
             candidate: self.task_wins[candidate]
-            for candidate in pareto_filtered
+            for candidate in pareto_frontier
         }
 
-        # Create new parents cohort with incremented iteration and task_wins data
-        promoted_cohort = Parents(
-            *pareto_filtered,
-            iteration=survivors.iteration + 1,
+        return Parents(
+            *pareto_frontier,
+            iteration=new_survivors.iteration + 1,
             task_wins=relevant_task_wins
         )
-        return promoted_cohort
 
     def best_candidate(self) -> Candidate:
         """Return the best candidate from the pool."""

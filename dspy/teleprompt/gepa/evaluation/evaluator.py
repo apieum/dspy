@@ -13,32 +13,24 @@ class Evaluator(CompilationObserver):
     """Protocol for evaluating and filtering new candidates.
 
     This component owns a metric and decides which newly generated
-    candidates should be promoted (kept) vs discarded.
+    candidates should be promoted (kept) vs discarded. It encapsulates
+    the two-phase evaluation logic from the GEPA paper.
     """
 
     @abstractmethod
     def evaluate(self, cohort: "NewBorns", budget: "Budget") -> "Survivors":
-        """Evaluate new candidates and filter based on promotion criteria.
-
-        Args:
-            cohort: Newly generated candidates to evaluate
-            budget: Budget to track costs
-
-        Returns:
-            Cohort containing only promoted (worthy) candidates
         """
-        ...
-
-    @abstractmethod
-    def evaluate_for_promotion(self, cohort: "NewBorns", budget: "Budget") -> "Survivors":
-        """Evaluate candidates for promotion with budget tracking.
+        Evaluates new candidates. If a candidate has parents, it undergoes
+        two-phase validation. If it has no parents (the initial candidate),
+        it is automatically promoted to full evaluation.
 
         Args:
-            cohort: Candidates to evaluate
-            budget: Budget to track costs
+            cohort: The cohort of newly generated candidates to evaluate.
+            budget: The budget manager to track evaluation costs.
 
         Returns:
-            Cohort with evaluated candidates (task_scores populated)
+            A Survivors cohort containing only the candidates that were
+            successfully promoted after passing evaluation.
         """
         ...
 

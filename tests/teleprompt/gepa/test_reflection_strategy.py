@@ -1,175 +1,128 @@
-"""Test configurable reflection strategies for ReflectivePromptMutation."""
+"""Test simplified ReflectivePromptMutation generator."""
 
 import dspy
-from dspy.teleprompt.gepa.generation import (
-    ReflectivePromptMutation,
-    FeedbackProvider,
-    ReflectionStrategy,
-    GEPAReflection,
-    SimpleReflection,
-    PrefixReflection
-)
+from dspy.teleprompt.gepa.generation.reflective_mutation_native import ReflectivePromptMutation
+from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
 from dspy.teleprompt.gepa.data.candidate import Candidate
-from dspy.teleprompt.gepa.data.cohort import Parents
+from dspy.teleprompt.gepa.data.cohort import Parents, NewBorns
+from dspy.teleprompt.gepa.budget.llm_calls import LLMCallsBudget
+from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
+from unittest.mock import Mock
 
 
-class MockReflectionStrategy(ReflectionStrategy):
-    """Mock reflection strategy for testing."""
+class TestSimplifiedReflectivePromptMutation:
+    """Test simplified ReflectivePromptMutation implementation."""
     
-    def reflect(self, current_instruction, formatted_examples, prompt_model=None):
-        return f"MOCK: {current_instruction}"
-
-
-class TestReflectionStrategies:
-    """Test different reflection strategies for ReflectivePromptMutation."""
-    
-    def test_default_strategy_is_gepa_reflection(self):
-        """Test that default strategy is GEPAReflection."""
-        def dummy_metric(example, prediction, trace=None):
-            return 1.0
-        
-        generator = ReflectivePromptMutation(
-            feedback_provider=FeedbackProvider(metric=dummy_metric)
-        )
-        
-        assert isinstance(generator.reflection_strategy, GEPAReflection)
-    
-    def test_custom_strategy_injection(self):
-        """Test that custom strategies can be injected."""
-        def dummy_metric(example, prediction, trace=None):
-            return 1.0
-        
-        # Test with SimpleReflection
-        generator = ReflectivePromptMutation(
-            feedback_provider=FeedbackProvider(metric=dummy_metric),
-            reflection_strategy=SimpleReflection()
-        )
-        assert isinstance(generator.reflection_strategy, SimpleReflection)
-        
-        # Test with PrefixReflection
-        generator = ReflectivePromptMutation(
-            feedback_provider=FeedbackProvider(metric=dummy_metric),
-            reflection_strategy=PrefixReflection()
-        )
-        assert isinstance(generator.reflection_strategy, PrefixReflection)
-        
-        # Test with MockReflectionStrategy
-        generator = ReflectivePromptMutation(
-            feedback_provider=FeedbackProvider(metric=dummy_metric),
-            reflection_strategy=MockReflectionStrategy()
-        )
-        assert isinstance(generator.reflection_strategy, MockReflectionStrategy)
-    
-    def test_prefix_reflection_logic(self):
-        """Test PrefixReflection adds appropriate prefixes."""
-        strategy = PrefixReflection()
-        
-        # Test with many failures (failure_count > success_count * 2)
-        examples_with_failures = """
-        Example 1: Needs improvement (score: 0.2)
-        Example 2: Needs improvement (score: 0.3)
-        Example 3: Needs improvement (score: 0.1)
-        """
-        result = strategy.reflect("Solve the problem", examples_with_failures)
-        assert "Think carefully" in result
-        
-        # Test with moderate performance (failure_count > success_count)
-        examples_moderate = """
-        Example 1: Good response (score: 0.7)
-        Example 2: Needs improvement (score: 0.4)
-        Example 3: Needs improvement (score: 0.3)
-        """
-        result = strategy.reflect("Solve the problem", examples_moderate)
-        assert "step by step" in result
-        
-        # Test with good performance (success_count >= failure_count)
-        examples_good = """
-        Example 1: Good response (score: 0.9)
-        Example 2: Good response (score: 0.8)
-        """
-        result = strategy.reflect("Solve the problem", examples_good)
-        assert "precise and thorough" in result
-    
-    def test_reflection_strategy_interface(self):
-        """Test that all strategies implement the ReflectionStrategy interface."""
-        strategies = [
-            GEPAReflection(),
-            SimpleReflection(),
-            PrefixReflection(),
-            MockReflectionStrategy()
-        ]
-        
-        for strategy in strategies:
-            # Check it has the reflect method
-            assert hasattr(strategy, 'reflect')
-            assert callable(strategy.reflect)
-            
-            # Check it returns a string
-            result = strategy.reflect(
-                current_instruction="Test instruction",
-                formatted_examples="Test examples",
-                prompt_model=None
-            )
-            assert isinstance(result, str)
-    
-    def test_generator_with_empty_parents(self):
-        """Test that generator handles empty parents with different strategies."""
-        def dummy_metric(example, prediction, trace=None):
+    def test_generator_basic_functionality(self):
+        """Test basic generator functionality."""
+        def simple_metric(example, prediction, trace=None):
             return 0.5
         
-        strategies = [
-            GEPAReflection(),
-            SimpleReflection(),
-            PrefixReflection()
-        ]
+        feedback_provider = FeedbackProvider(metric=simple_metric)
+        generator = ReflectivePromptMutation(feedback_provider)
         
-        for strategy in strategies:
-            generator = ReflectivePromptMutation(
-                feedback_provider=FeedbackProvider(metric=dummy_metric),
-                reflection_strategy=strategy
-            )
-            
-            empty_parents = Parents(iteration=0)
-            result = generator.generate(empty_parents)
-            
-            assert result.is_empty()  # Should return empty NewBorns
+        # Test interface
+        assert hasattr(generator, 'generate')
+        assert hasattr(generator, 'start_compilation')
+        assert hasattr(generator, 'feedback_provider')
+        assert hasattr(generator, 'reflection_strategy')
     
-    def test_strategy_receives_correct_inputs(self):
-        """Test that reflection strategy receives properly formatted inputs."""
-        class TrackedReflection(ReflectionStrategy):
-            def __init__(self):
-                self.last_instruction = None
-                self.last_examples = None
-                self.last_model = None
-            
-            def reflect(self, current_instruction, formatted_examples, prompt_model=None):
-                self.last_instruction = current_instruction
-                self.last_examples = formatted_examples
-                self.last_model = prompt_model
-                return f"Improved: {current_instruction}"
+    def test_generator_with_empty_parents(self):
+        """Test generator handles empty parents gracefully."""
+        def simple_metric(example, prediction, trace=None):
+            return 0.5
         
-        tracked = TrackedReflection()
-        generator = ReflectivePromptMutation(
-            feedback_provider=FeedbackProvider(metric=lambda e, p, t=None: 1.0),
-            reflection_strategy=tracked
-        )
+        feedback_provider = FeedbackProvider(metric=simple_metric)
+        generator = ReflectivePromptMutation(feedback_provider)
+        budget = LLMCallsBudget(100)
+        
+        empty_parents = Parents(iteration=0)
+        result = generator.generate(empty_parents, budget)
+        
+        assert isinstance(result, NewBorns)
+        assert result.is_empty()
+    
+    def test_generator_start_compilation(self):
+        """Test generator start_compilation with correct signature."""
+        def simple_metric(example, prediction, trace=None):
+            return 0.5
+        
+        feedback_provider = FeedbackProvider(metric=simple_metric)
+        generator = ReflectivePromptMutation(feedback_provider)
         
         # Set up training data
         training_data = [
-            dspy.Example(input="test1", answer="answer1"),
-            dspy.Example(input="test2", answer="answer2"),
+            dspy.Example(input="test1", answer="answer1").with_inputs("input"),
+            dspy.Example(input="test2", answer="answer2").with_inputs("input"),
         ]
-        d_feedback = training_data
-        d_pareto = training_data
-        generator.start_compilation(dspy.Predict("input -> answer"), d_feedback, d_pareto)
         
-        # Create a parent candidate
-        candidate = Candidate(dspy.Predict("input -> answer"))
+        # Use correct signature with DatasetManager: start_compilation(student, dataset_manager)
+        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.5)
+        generator.start_compilation(dspy.Predict("input -> answer"), dataset_manager)
+        
+        # Verify setup
+        assert generator.dataset_manager is dataset_manager
+        minibatch = generator.dataset_manager.get_feedback_minibatch(1)
+        assert len(minibatch) > 0
+    
+    def test_generator_with_parents(self):
+        """Test generator behavior with parent candidates."""
+        def simple_metric(example, prediction, trace=None):
+            return 0.5
+        
+        feedback_provider = FeedbackProvider(metric=simple_metric)
+        generator = ReflectivePromptMutation(feedback_provider)
+        budget = LLMCallsBudget(100)
+        
+        # Set up feedback data
+        training_data = [
+            dspy.Example(input="test1", answer="answer1").with_inputs("input")
+        ]
+        generator.start_compilation(dspy.Predict("input -> answer"), training_data)
+        
+        # Create parent candidate with predictors
+        parent_module = Mock()
+        parent_module.predictors.return_value = [Mock()]  # Has predictors
+        candidate = Candidate(parent_module, generation_number=0)
         parents = Parents(candidate, iteration=0)
         
-        # Generate (will fail but strategy should be called)
-        result = generator.generate(parents)
+        initial_calls = budget.consumed_calls
+        result = generator.generate(parents, budget)
         
-        # Check that strategy received inputs (might be None if generation failed early)
-        # The important thing is that the strategy is wired correctly
-        assert tracked.last_instruction is not None or result.is_empty()
+        # Should consume budget (generation may succeed or fail, but budget should be used)
+        assert budget.consumed_calls > initial_calls
+        assert isinstance(result, NewBorns)
+    
+    def test_generator_without_feedback_data(self):
+        """Test generator behavior without feedback data."""
+        def simple_metric(example, prediction, trace=None):
+            return 0.5
+        
+        feedback_provider = FeedbackProvider(metric=simple_metric)
+        generator = ReflectivePromptMutation(feedback_provider)
+        budget = LLMCallsBudget(100)
+        
+        # No feedback data set
+        generator.feedback_data = []
+        
+        # Create mock parent
+        parent_candidate = Candidate(Mock(), generation_number=0)
+        parents = Parents(parent_candidate, iteration=0)
+        
+        initial_calls = budget.consumed_calls
+        result = generator.generate(parents, budget)
+        
+        # Should consume budget and return empty
+        assert budget.consumed_calls > initial_calls
+        assert isinstance(result, NewBorns)
+        assert result.is_empty()
+
+
+if __name__ == "__main__":
+    test = TestSimplifiedReflectivePromptMutation()
+    test.test_generator_basic_functionality()
+    test.test_generator_with_empty_parents()
+    test.test_generator_start_compilation()
+    test.test_generator_with_parents()
+    test.test_generator_without_feedback_data()
+    print("All simplified reflection tests passed!")

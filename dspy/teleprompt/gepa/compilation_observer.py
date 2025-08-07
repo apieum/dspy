@@ -6,6 +6,7 @@ import dspy
 if TYPE_CHECKING:
     from .data.cohort import Cohort
     from .budget import Budget
+    from .dataset_manager import DatasetManager
 
 
 class CompilationObserver(Protocol):
@@ -15,17 +16,12 @@ class CompilationObserver(Protocol):
     only the lifecycle events they care about.
     """
 
-    def start_compilation(self, student: dspy.Module, 
-                         d_feedback: List[dspy.Example], 
-                         d_pareto: List[dspy.Example]) -> None:
+    def start_compilation(self, student: dspy.Module, dataset_manager: "DatasetManager") -> None:
         """Called when compilation begins. Components can prepare resources.
         
-        GEPA Algorithm 1 compliant: Uses split datasets for different purposes.
-
         Args:
             student: The initial program being optimized
-            d_feedback: Feedback dataset for mutation minibatches (Generator uses this)
-            d_pareto: Pareto dataset for candidate evaluation (Evaluator uses this)
+            dataset_manager: Centralized manager for all dataset operations
         """
         pass
 

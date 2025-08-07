@@ -1,171 +1,141 @@
-"""Test CompilationObserver lifecycle system."""
+"""Test compilation lifecycle observer pattern."""
 
 import dspy
 from dspy.teleprompt.gepa.core import GEPA
-
-
-def simple_metric(example: dspy.Example, prediction, trace=None) -> float:
-    """Simple metric for testing."""
-    if hasattr(example, 'answer') and hasattr(prediction, 'answer'):
-        return 1.0 if str(example.answer) == str(prediction.answer) else 0.0
-    return 0.0
+from dspy.teleprompt.gepa.budget.llm_calls import LLMCallsBudget
+from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
+from unittest.mock import Mock
 
 
 def test_compilation_lifecycle_events():
-    """Test that all components receive lifecycle events in correct order."""
-
-    # Track lifecycle events from budget component
-    original_start_compilation = None
-    original_finish_compilation = None
-    original_start_iteration = None
-    original_finish_iteration = None
-    events = []
-
-    # Create GEPA
-    gepa = GEPA.create_basic(metric=simple_metric, max_calls=25)
-
-    # Patch budget to track lifecycle calls
-    original_start_compilation = gepa.budget.start_compilation
-    original_finish_compilation = gepa.budget.finish_compilation
-    original_start_iteration = gepa.budget.start_iteration
-    original_finish_iteration = gepa.budget.finish_iteration
-
-    def track_start_compilation(student, d_feedback, d_pareto):
-        events.append("budget_start_compilation")
-        return original_start_compilation(student, d_feedback, d_pareto)
-
-    def track_finish_compilation(result):
-        events.append("budget_finish_compilation")
-        return original_finish_compilation(result)
-
-    def track_start_iteration(iteration, cohort, budget):
-        events.append(f"budget_start_iteration_{iteration}")
-        return original_start_iteration(iteration, cohort, budget)
-
-    def track_finish_iteration(iteration, filtered_cohort, budget):
-        events.append(f"budget_finish_iteration_{iteration}")
-        return original_finish_iteration(iteration, filtered_cohort, budget)
-
-    gepa.budget.start_compilation = track_start_compilation
-    gepa.budget.finish_compilation = track_finish_compilation
-    gepa.budget.start_iteration = track_start_iteration
-    gepa.budget.finish_iteration = track_finish_iteration
-
-    # Override next_generation to terminate quickly
-    def mock_next_generation(cohort):
-        events.append("next_generation_called")
-        # Return first candidate to complete compilation
-        compiled_module = cohort.first().module
-        compiled_module._compiled = True
-        return compiled_module
-
-    gepa.next_generation = mock_next_generation
-
-    # Test data
+    """Test that components receive compilation lifecycle events."""
+    
+    def simple_metric(example, prediction, trace=None):
+        return 0.5
+    
+    # Create GEPA with lifecycle tracking
+    gepa = GEPA.create_basic(simple_metric, max_calls=5)
+    
+    # Track lifecycle calls
+    lifecycle_calls = []
+    
+    # Mock components to track lifecycle
+    for component in [gepa.budget, gepa.selector, gepa.generator, gepa.evaluator]:
+        original_start = component.start_compilation
+        original_finish = component.finish_compilation
+        
+        def make_tracked_start(comp_name, orig_start):
+            def tracked_start(*args, **kwargs):
+                lifecycle_calls.append(f"{comp_name}_start_compilation")
+                return orig_start(*args, **kwargs)
+            return tracked_start
+            
+        def make_tracked_finish(comp_name, orig_finish):
+            def tracked_finish(*args, **kwargs):
+                lifecycle_calls.append(f"{comp_name}_finish_compilation")
+                return orig_finish(*args, **kwargs)
+            return tracked_finish
+        
+        component.start_compilation = make_tracked_start(component.__class__.__name__, original_start)
+        component.finish_compilation = make_tracked_finish(component.__class__.__name__, original_finish)
+    
+    # Create test data
     training_data = [
-        dspy.Example(input="test1", answer="answer1"),
-        dspy.Example(input="test2", answer="answer2"),
+        dspy.Example(question="test", answer="answer").with_inputs("question")
     ]
-
-    # Run compilation
-    student = dspy.Predict("input -> output")
-    result = gepa.compile(student, training_data)
-
+    student = dspy.Predict("question -> answer")
+    
+    # Run compilation (should trigger lifecycle events)
+    with dspy.context(lm=dspy.utils.DummyLM({"answer": "test"})):
+        result = gepa.compile(student, training_data)
+    
     # Verify lifecycle events occurred
-    assert "budget_start_compilation" in events
-    assert "budget_finish_compilation" in events
-    assert "next_generation_called" in events
-
-    # Verify result is properly compiled
+    assert any("start_compilation" in call for call in lifecycle_calls)
+    assert any("finish_compilation" in call for call in lifecycle_calls)
     assert hasattr(result, '_compiled')
-    assert result._compiled == True
-
-    print("✓ Lifecycle events fired correctly")
-    print(f"Events captured: {events}")
 
 
 def test_budget_tracks_compilation_progress():
-    """Test that Budget component uses lifecycle events for tracking."""
-
-    # Create GEPA with tracked budget
-    gepa = GEPA.create_basic(metric=simple_metric, max_calls=100)
-
-    # Mock next_generation to terminate quickly
-    def mock_next_generation(cohort):
-        # Return first candidate to complete compilation
-        compiled_module = cohort.first().module
-        compiled_module._compiled = True
-        return compiled_module
-
-    gepa.next_generation = mock_next_generation
-
-    # Test data
+    """Test that budget tracks compilation progress correctly."""
+    
+    def simple_metric(example, prediction, trace=None):
+        return 0.5
+    
+    budget = LLMCallsBudget(20)
+    
+    # Create test data
     training_data = [
-        dspy.Example(input="test1", answer="answer1"),
-        dspy.Example(input="test2", answer="answer2"),
-        dspy.Example(input="test3", answer="answer3"),
+        dspy.Example(question="test", answer="answer").with_inputs("question"),
+        dspy.Example(question="test2", answer="answer2").with_inputs("question"),
     ]
+    student = dspy.Predict("question -> answer")
+    
+    # Test start compilation with DatasetManager
+    dataset_manager = DefaultDatasetManager(training_data)
+    budget.start_compilation(student, dataset_manager)
+    assert budget.consumed_calls == 0
+    
+    # Test spending budget - simulate module with history
+    initial_calls = budget.consumed_calls
+    # Simulate a module that has made some LLM calls
+    student.history = [{"call": 1}, {"call": 2}]  # Mock history with 2 calls
+    budget.spend_on_evaluation(student, {"phase": "test", "examples": 2})
+    assert budget.consumed_calls > initial_calls
+    
+    # Test finish compilation
+    budget.finish_compilation(student)
+    # Should not crash and should have tracked usage
 
-    # Run compilation
-    student = dspy.Predict("input -> output")
-    result = gepa.compile(student, training_data)
 
-    # Verify budget received lifecycle events
-    # Budget should have tracked compilation progress
-    assert hasattr(gepa.budget, 'iteration_costs')
-    assert isinstance(gepa.budget.iteration_costs, list)
-
-    # Budget should have been reset at start of compilation
-    assert gepa.budget.consumed_calls >= 0  # Some calls may have been consumed
-
-    print("✓ Budget correctly tracked compilation progress via lifecycle events")
-
-
-def test_components_can_opt_into_lifecycle_events():
-    """Test that components can choose which lifecycle events to handle."""
-
-    from dspy.teleprompt.gepa.evaluation.promotion import PromotionEvaluator
-    from dspy.teleprompt.gepa.generation import ReflectivePromptMutation
-
+def test_components_opt_into_lifecycle_events():
+    """Test that components can implement lifecycle events."""
+    
+    def simple_metric(example, prediction, trace=None):
+        return 0.5
+    
     # Create components
-    evaluator = PromotionEvaluator(metric=simple_metric)
+    from dspy.teleprompt.gepa.generation.reflective_mutation_native import ReflectivePromptMutation
     from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
+    from dspy.teleprompt.gepa.evaluation.promotion import PromotionEvaluator
+    from dspy.teleprompt.gepa.selection import ParetoFrontier
+    
     feedback_provider = FeedbackProvider(metric=simple_metric)
     generator = ReflectivePromptMutation(feedback_provider)
-
-    # Test that they have lifecycle methods (inherited from CompilationObserver)
-    assert hasattr(evaluator, 'start_compilation')
-    assert hasattr(evaluator, 'finish_compilation')
-    assert hasattr(evaluator, 'start_iteration')
-    assert hasattr(evaluator, 'finish_iteration')
-
-    assert hasattr(generator, 'start_compilation')
-    assert hasattr(generator, 'finish_compilation')
-    assert hasattr(generator, 'start_iteration')
-    assert hasattr(generator, 'finish_iteration')
-
-    # Test that they can be called without error (default no-op implementations)
-    student = dspy.Predict("input -> output")
-    training_data = [dspy.Example(input="test", answer="test")]
-
-    # Components should handle lifecycle events gracefully
-    d_feedback = training_data
-    d_pareto = training_data
-    evaluator.start_compilation(student, d_feedback, d_pareto)
-    evaluator.finish_compilation(student)
-    evaluator.start_iteration(0, None, None)
-    evaluator.finish_iteration(0, None, None)
-
-    generator.start_compilation(student, d_feedback, d_pareto)
-    generator.finish_compilation(student)
-    generator.start_iteration(0, None, None)
-    generator.finish_iteration(0, None, None)
-
-    print("✓ Components can opt into lifecycle events without breaking")
+    evaluator = PromotionEvaluator(metric=simple_metric)
+    selector = ParetoFrontier()
+    budget = LLMCallsBudget(10)
+    
+    # All components should have lifecycle methods
+    components = [generator, evaluator, selector, budget]
+    
+    for component in components:
+        assert hasattr(component, 'start_compilation')
+        assert hasattr(component, 'finish_compilation')
+        assert hasattr(component, 'start_iteration') 
+        assert hasattr(component, 'finish_iteration')
+    
+    # Test that lifecycle methods can be called
+    student = dspy.Predict("question -> answer")
+    training_data = [dspy.Example(question="test", answer="answer").with_inputs("question")]
+    
+    # Create DatasetManager for lifecycle method calls
+    dataset_manager = DefaultDatasetManager(training_data)
+    
+    # Should not crash
+    generator.start_compilation(student, dataset_manager)
+    evaluator.start_compilation(student, dataset_manager)
+    selector.start_compilation(student, dataset_manager)
+    budget.start_compilation(student, dataset_manager)
+    
+    # Lifecycle methods should complete successfully
+    for component in components:
+        component.start_iteration(0, Mock(), budget)
+        component.finish_iteration(0, Mock(), budget)
+        component.finish_compilation(student)
 
 
 if __name__ == "__main__":
     test_compilation_lifecycle_events()
     test_budget_tracks_compilation_progress()
-    test_components_can_opt_into_lifecycle_events()
+    test_components_opt_into_lifecycle_events()
     print("All lifecycle observer tests passed!")

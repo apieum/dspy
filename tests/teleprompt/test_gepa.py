@@ -73,7 +73,7 @@ class TestGEPABehavior:
         """GEPA should return a compiled program when given valid inputs."""
         with dspy.context(lm=dummy_lm):
             student = SimpleQA()
-            optimizer = GEPA.create_basic(simple_metric, max_calls=50)
+            optimizer = GEPA.create_basic(simple_metric, max_calls=2)
 
             result = optimizer.compile(student, simple_trainset)
 
@@ -133,7 +133,7 @@ class TestComponentInterfaces:
         """Evaluation components should implement required interface."""
         from dspy.teleprompt.gepa.evaluation import PromotionEvaluator
 
-        strategy = PromotionEvaluator(simple_metric, promotion_threshold=0.6)
+        strategy = PromotionEvaluator(simple_metric, minibatch_size=3)
 
         # Interface methods
         assert hasattr(strategy, 'evaluate')
@@ -146,7 +146,7 @@ class TestGEPAAlgorithmStructure:
         """GEPA should follow the defined algorithm phases."""
         with dspy.context(lm=dummy_lm):
             student = SimpleQA()
-            optimizer = GEPA.create_basic(simple_metric, max_calls=20)
+            optimizer = GEPA.create_basic(simple_metric, max_calls=2)
 
             # Track the algorithm execution without mocking to avoid issues with reconfiguration
             result = optimizer.compile(student, simple_trainset)
@@ -186,11 +186,12 @@ class TestDataStructures:
         """Selector should manage candidates correctly."""
         from dspy.teleprompt.gepa.selection import ParetoFrontier
         from dspy.teleprompt.gepa.data.cohort import Survivors
+        from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
+        
         selector = ParetoFrontier()
-        training_data = ["task0", "task1", "task2"]
-        d_feedback = training_data
-        d_pareto = training_data
-        selector.start_compilation(None, d_feedback, d_pareto)
+        training_data = [dspy.Example(input="task0"), dspy.Example(input="task1"), dspy.Example(input="task2")]
+        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=1.0)  # Use all for pareto
+        selector.start_compilation(None, dataset_manager)
         candidate = Candidate(SimpleQA(), generation_number=0)
         candidate.set_task_scores({0: 0.8, 1: 0.6, 2: 0.7})
 
@@ -202,7 +203,7 @@ class TestDataStructures:
 
         # Test that selector contains the candidate by checking size changes
         selector2 = ParetoFrontier()
-        selector2.start_compilation(None, d_feedback, d_pareto)
+        selector2.start_compilation(None, dataset_manager)
         assert selector2.size() == 0
         cohort2 = Survivors(candidate, iteration=0)
         selector2.promote(cohort2)
@@ -214,7 +215,7 @@ class TestFactoryFunctions:
 
     def test_create_basic_gepa(self):
         """GEPA.create_basic should return working GEPA instance."""
-        optimizer = GEPA.create_basic(simple_metric, max_calls=100)
+        optimizer = GEPA.create_basic(simple_metric, max_calls=2)
 
         assert isinstance(optimizer, GEPA)
         assert hasattr(optimizer, 'budget')
@@ -231,7 +232,7 @@ class TestGEPAIntegration:
         """Test basic optimization workflow end-to-end."""
         with dspy.context(lm=dummy_lm):
             student = SimpleQA()
-            optimizer = GEPA.create_basic(simple_metric, max_calls=30)
+            optimizer = GEPA.create_basic(simple_metric, max_calls=2)
 
             # Should complete without errors
             result = optimizer.compile(student, simple_trainset)

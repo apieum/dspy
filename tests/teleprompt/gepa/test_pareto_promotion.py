@@ -3,6 +3,8 @@
 import pytest
 from unittest.mock import Mock
 
+import dspy
+from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
 from dspy.teleprompt.gepa.selection.pareto_frontier import ParetoFrontier
 from dspy.teleprompt.gepa.data.candidate import Candidate
 from dspy.teleprompt.gepa.data.cohort import Survivors
@@ -43,9 +45,9 @@ class TestParetoPromotion:
         candidate_c.better_than = Mock(return_value=False)
         
         # Initialize selector with 2 tasks
-        d_feedback = ["task1", "task2"]
-        d_pareto = ["task1", "task2"] 
-        selector.start_compilation(Mock(), d_feedback, d_pareto)
+        training_data = [dspy.Example(task_id=f"task{i}", input="dummy", output="dummy") for i in [1, 2, 3]]
+        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.67)
+        selector.start_compilation(Mock(), dataset_manager)
         
         # Create survivors cohort
         survivors = Survivors(candidate_a, candidate_b, candidate_c, iteration=1)
@@ -54,9 +56,9 @@ class TestParetoPromotion:
         parents = selector.promote(survivors)
         
         # Should only promote A and B (C is dominated)
-        promoted_candidates = list(parents.candidates)
-        assert len(promoted_candidates) == 2
-        assert candidate_a in promoted_candidates
+        promoted_candidates = parents.to_list()
+        assert parents.size() == 2
+        assert parents.contains(candidate_a)
         assert candidate_b in promoted_candidates
         assert candidate_c not in promoted_candidates
 
@@ -86,9 +88,9 @@ class TestParetoPromotion:
         candidate_c.better_than = Mock(return_value=False)
         
         # Initialize selector with 3 tasks
-        d_feedback = ["task1", "task2", "task3"]
-        d_pareto = ["task1", "task2", "task3"]
-        selector.start_compilation(Mock(), d_feedback, d_pareto)
+        training_data = [dspy.Example(task_id=f"task{i}", input="dummy", output="dummy") for i in [1, 2, 3, 4]]
+        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.75)
+        selector.start_compilation(Mock(), dataset_manager)
         
         # Create survivors cohort
         survivors = Survivors(candidate_a, candidate_b, candidate_c, iteration=1)
@@ -97,7 +99,7 @@ class TestParetoPromotion:
         parents = selector.promote(survivors)
         
         # Should promote all candidates (none are dominated)
-        promoted_candidates = list(parents.candidates)
+        promoted_candidates = parents.to_list()
         assert len(promoted_candidates) == 3
         assert candidate_a in promoted_candidates
         assert candidate_b in promoted_candidates
@@ -124,9 +126,9 @@ class TestParetoPromotion:
         candidate_b.better_than = Mock(return_value=False)
         
         # Initialize selector 
-        d_feedback = ["task1", "task2"]
-        d_pareto = ["task1", "task2"] 
-        selector.start_compilation(Mock(), d_feedback, d_pareto)
+        training_data = [dspy.Example(task_id=f"task{i}", input="dummy", output="dummy") for i in [1, 2, 3]]
+        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.67)
+        selector.start_compilation(Mock(), dataset_manager)
         
         # Create survivors cohort
         survivors = Survivors(candidate_a, candidate_b, iteration=1)
@@ -135,7 +137,7 @@ class TestParetoPromotion:
         parents = selector.promote(survivors)
         
         # Should only promote A (B is strictly dominated)
-        promoted_candidates = list(parents.candidates)
+        promoted_candidates = parents.to_list()
         assert len(promoted_candidates) == 1
         assert candidate_a in promoted_candidates
         assert candidate_b not in promoted_candidates
@@ -160,9 +162,9 @@ class TestParetoPromotion:
         candidate_b.better_than = Mock(return_value=False)
         
         # Initialize selector with 2 tasks
-        d_feedback = ["task1", "task2"]
-        d_pareto = ["task1", "task2"] 
-        selector.start_compilation(Mock(), d_feedback, d_pareto)
+        training_data = [dspy.Example(task_id=f"task{i}", input="dummy", output="dummy") for i in [1, 2, 3]]
+        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.67)
+        selector.start_compilation(Mock(), dataset_manager)
         
         # Create survivors cohort
         survivors = Survivors(candidate_a, candidate_b, iteration=1)
@@ -186,9 +188,9 @@ class TestParetoPromotion:
         candidate_a.better_than = Mock(return_value=False)
         candidate_a.generation_number = 1
         
-        d_feedback = ["task1"]
-        d_pareto = ["task1"]
-        selector.start_compilation(Mock(), d_feedback, d_pareto)
+        training_data = [dspy.Example(task_id="task1", input="dummy", output="dummy")]
+        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=1.0)
+        selector.start_compilation(Mock(), dataset_manager)
         
         # Create survivors with iteration 5
         survivors = Survivors(candidate_a, iteration=5)

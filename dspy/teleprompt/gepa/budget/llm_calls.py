@@ -1,9 +1,12 @@
 """LLM calls budget implementation."""
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 import dspy
 from .budget import Budget
+
+if TYPE_CHECKING:
+    from ..dataset_manager import DatasetManager
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +46,12 @@ class LLMCallsBudget(Budget):
 
     # CompilationObserver lifecycle methods
 
-    def start_compilation(self, student: dspy.Module, 
-                         d_feedback: List[dspy.Example], 
-                         d_pareto: List[dspy.Example]) -> None:
-        """Initialize budget tracking when compilation begins (GEPA Algorithm 1)."""
+    def start_compilation(self, student: dspy.Module, dataset_manager: "DatasetManager") -> None:
+        """Initialize budget tracking when compilation begins."""
         logger.info(f"Starting compilation with budget of {self.max_calls} LLM calls")
-        logger.info(f"Dataset split: {len(d_feedback)} feedback examples, {len(d_pareto)} pareto examples")
+        feedback_size = dataset_manager.num_feedback_examples
+        pareto_size = dataset_manager.num_pareto_tasks
+        logger.info(f"Dataset split: {feedback_size} feedback examples, {pareto_size} pareto examples")
         self.consumed_calls = 0
         self.iteration_costs = []
 

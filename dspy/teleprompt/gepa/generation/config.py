@@ -30,7 +30,6 @@ class ReflectiveMutationConfig:
         config = ReflectiveMutationConfig(
             minibatch_size=3,
             module_selection_strategy=ModuleSelectionStrategy.WORST_PERFORMING,
-            requires_improvement=True,
             max_retries=2
         )
         generator = ReflectivePromptMutation(config=config)
@@ -43,8 +42,6 @@ class ReflectiveMutationConfig:
     module_selection_strategy: ModuleSelectionStrategy = ModuleSelectionStrategy.WORST_PERFORMING
     """Strategy for selecting which predictors to mutate."""
     
-    requires_improvement: bool = True
-    """Whether mutations must improve performance to be accepted."""
     
     max_retries: int = 3
     """Maximum attempts to generate improved instructions."""
@@ -59,13 +56,6 @@ class ReflectiveMutationConfig:
     
     enhanced_feedback_function: Optional[Callable] = None
     """Enhanced μf function for rich diagnostic feedback."""
-    
-    # Performance thresholds
-    minimum_score_threshold: float = 0.0
-    """Minimum acceptable score for mutations."""
-    
-    improvement_threshold: float = 0.01
-    """Minimum improvement required when requires_improvement=True."""
     
     # Module selection parameters
     selection_temperature: float = 1.0
@@ -89,12 +79,6 @@ class ReflectiveMutationConfig:
         if self.max_retries < 0:
             raise ValueError("max_retries must be non-negative")
         
-        if not 0.0 <= self.minimum_score_threshold <= 1.0:
-            raise ValueError("minimum_score_threshold must be between 0.0 and 1.0")
-        
-        if self.improvement_threshold < 0.0:
-            raise ValueError("improvement_threshold must be non-negative")
-        
         if self.selection_temperature <= 0.0:
             raise ValueError("selection_temperature must be positive")
         
@@ -108,7 +92,6 @@ class ReflectiveMutationConfig:
         defaults = {
             'minibatch_size': 3,
             'max_retries': 1,
-            'requires_improvement': False,  # Accept any mutation for speed
             'module_selection_strategy': ModuleSelectionStrategy.RANDOM,
         }
         defaults.update(overrides)
@@ -120,10 +103,7 @@ class ReflectiveMutationConfig:
         defaults = {
             'minibatch_size': 8,
             'max_retries': 5,
-            'requires_improvement': True,
             'module_selection_strategy': ModuleSelectionStrategy.WORST_PERFORMING,
-            'improvement_threshold': 0.05,  # Require meaningful improvement
-            'minimum_score_threshold': 0.1,
         }
         defaults.update(overrides)
         return cls(**defaults)

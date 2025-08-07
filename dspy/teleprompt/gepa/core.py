@@ -5,7 +5,7 @@ dependency injection and the strategy pattern for research flexibility.
 """
 
 import logging
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 
 import dspy
 from dspy import Module
@@ -16,6 +16,9 @@ from .generation import Generator
 from .evaluation import Evaluator
 from .data.candidate import Candidate
 from .data.cohort import Cohort,NewBorns, Survivors, Parents
+
+if TYPE_CHECKING:
+    from .dataset_manager import DatasetManagerFactory, DatasetManager
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +41,8 @@ class GEPA:
                  budget: Budget,
                  selector: Selector,
                  generator: Generator,
-                 evaluator: Evaluator):
+                 evaluator: Evaluator,
+                 dataset_manager_factory: "DatasetManagerFactory"):
         """Initialize GEPA optimization with algorithms for each step.
 
         Args:
@@ -46,21 +50,22 @@ class GEPA:
             selector: Selects surviving candidates based on scores
             generator: Creates new candidates via genetic operations
             evaluator: Promotes worthy new candidates (owns metric)
+            dataset_manager_factory: Factory for creating dataset managers at compile time
         """
         self.budget = budget
         self.selector = selector
         self.generator = generator
         self.evaluator = evaluator
+        self.dataset_manager_factory = dataset_manager_factory
         self.current_iteration = 0
 
-    def start_compilation(self, student: Module, 
-                         d_feedback: List[dspy.Example], 
-                         d_pareto: List[dspy.Example]):
+    def start_compilation(self, student: Module, dataset_manager: "DatasetManager"):
         logger.info("Starting GEPA framework compilation...")
-        self.budget.start_compilation(student, d_feedback, d_pareto)
-        self.selector.start_compilation(student, d_feedback, d_pareto)
-        self.generator.start_compilation(student, d_feedback, d_pareto)
-        self.evaluator.start_compilation(student, d_feedback, d_pareto)
+        # Pass the dataset manager to all components
+        self.generator.start_compilation(student, dataset_manager)
+        self.evaluator.start_compilation(student, dataset_manager)
+        self.selector.start_compilation(student, dataset_manager)
+        self.budget.start_compilation(student, dataset_manager)
 
     def finish_compilation(self, result: Module):
         logger.info("Terminating GEPA framework compilation.")
@@ -71,7 +76,6 @@ class GEPA:
 
     def start_iteration(self, cohort: Cohort) -> None:
         """Starts a new iteration of the GEPA framework."""
-
         self.budget.start_iteration(self.current_iteration, cohort, self.budget)
         self.selector.start_iteration(self.current_iteration, cohort, self.budget)
         self.generator.start_iteration(self.current_iteration, cohort, self.budget)
@@ -83,100 +87,62 @@ class GEPA:
         self.generator.finish_iteration(self.current_iteration, cohort, self.budget)
         self.evaluator.finish_iteration(self.current_iteration, cohort, self.budget)
 
-    def compile(self, student: Module,
-               training_data: List[dspy.Example],
-               pareto_split_ratio: float = 0.25) -> Module:
-        """Main compilation method - entry point for optimization.
+    def compile(self, student: Module, training_data: List[dspy.Example]) -> Module:
+        """Main compilation method - entry point for optimization."""
+        # Create dataset manager from factory with user's training data
+        dataset_manager = self.dataset_manager_factory.create(training_data)
+        self.start_compilation(student, dataset_manager)
 
-        Implements GEPA Algorithm 1, Line 1: Split training data into D_feedback and D_pareto.
-        
-        Args:
-            student: Initial program to optimize
-            training_data: Training dataset for optimization
-            pareto_split_ratio: Fraction of data to use for Pareto evaluation (default: 0.25)
-
-        Returns:
-            Optimized program module
-        """
-        # GEPA Algorithm 1, Line 1: Split D_train into D_feedback, D_pareto
-        import random
-        shuffled_data = training_data.copy()
-        random.shuffle(shuffled_data)  # Ensure random split
-        
-        n_pareto = max(1, int(len(training_data) * pareto_split_ratio))
-        d_pareto = shuffled_data[:n_pareto]      # For candidate evaluation (Evaluator)
-        d_feedback = shuffled_data[n_pareto:]    # For mutation minibatches (Generator)
-        
-        logger.info(f"Dataset split: {len(d_feedback)} examples for feedback, {len(d_pareto)} examples for Pareto evaluation")
-        
-        self.start_compilation(student, d_feedback, d_pareto)
-        # Initialize first candidate generation
+        # Bootstrap: Create the first candidate (Gen 0).
         initial_candidate = Candidate(student.deepcopy(), generation_number=0)
-        gen_0 = NewBorns(initial_candidate, iteration=0)
+        initial_newborns = NewBorns(initial_candidate, iteration=0)
 
-        # Evaluate initial candidate
-        evaluated_gen_0 = self.evaluator.evaluate_for_promotion(gen_0, self.budget)
-        gen_0 = self.selector.promote(evaluated_gen_0)
-        # Recursive optimization
-        result = self.next_generation(gen_0)
-        self.finish_compilation(result)
-        return result
+        # The evaluator set scores on the parentless newborn.
+        initial_survivors = self.evaluator.evaluate(initial_newborns, self.budget)
 
+        # The selector promotes it to be the first parent pool.
+        initial_parents = self.selector.promote(initial_survivors)
 
-    def next_generation(self, cohort: Cohort) -> Module:
-        """Recursive optimization step implementing the core algorithm.
+        # Start the main evolutionary loop.
+        final_parents = self.next_generation(initial_parents)
 
-        This method expresses the GEPA algorithm structure clearly:
-        1. Check termination conditions
-        2. Filter candidates based on scores
-        3. Generate new candidates from survivors
-        4. Evaluate and promote new candidates
-        5. Recurse to next generation
+        # Return the best candidate from the final population.
+        best_module = self.selector.best_candidate().module
+        best_module._compiled = True
+        self.finish_compilation(best_module)
+        return best_module
 
-        Args:
-            cohort: Current cohort to process
-
-        Returns:
-            Best optimized module when termination criteria met
-        """
+    def next_generation(self, parents: Parents) -> Parents:
+        """Recursive optimization step implementing the core algorithm."""
         self.current_iteration += 1
-        logger.info(f"Processing cohort {cohort.iteration}, iteration {self.current_iteration}")
+        logger.info(f"Processing generation {self.current_iteration} with {parents.size()} parents.")
 
-        # Termination conditions
+        # Termination condition
         if self.budget <= 0:
-            logger.info("Budget exhausted - terminating optimization")
-            return self._show_results()
+            logger.info("Budget exhausted - terminating optimization.")
+            return parents
 
-        if cohort.is_empty():
-            logger.info("Empty generation - terminating optimization")
-            return self._show_results()
+        self.start_iteration(parents)
 
-        # Notify all components that iteration is starting
-        self.start_iteration(cohort)
+        # 1. Generator creates new candidates.
+        new_borns = self.generator.generate(parents, self.budget)
 
-        # Filter candidates based on performance
-        logger.debug("Filtering candidates based on scores")
-        survivors = self.selector.filter(cohort, self.budget)
-        
-        # Generate new candidates from filtered survivors
-        logger.debug("Generating new candidates")
-        new_cohort = self.generator.generate(survivors, self.budget)
+        if new_borns.is_empty():
+            self.finish_iteration(parents)
+            return self.next_generation(parents)
 
-        # Evaluate and promote new generation
-        logger.debug(f"Evaluating {new_cohort.size()} new candidates")
-        evaluated_cohort = self.evaluator.evaluate(new_cohort, self.budget)
-        parents = self.selector.promote(evaluated_cohort, self.budget)
+        # 2. Evaluator handles the two-phase evaluation for the new children.
+        new_survivors = self.evaluator.evaluate(new_borns, self.budget)
 
-        # Notify all components that iteration is finishing
-        self.finish_iteration(parents)
+        # 3. Selector adds the successful survivors to the pool and returns the new frontier.
+        next_gen_parents = self.selector.promote(new_survivors)
 
-        # Prepare next cohort and recurse
-        logger.debug(f"Recursing with {parents.size()} promoted candidates")
-        return self.next_generation(parents)
+        self.finish_iteration(next_gen_parents)
+        return self.next_generation(next_gen_parents)
 
     def _show_results(self) -> Module:
         """Select and return the best candidate when optimization terminates."""
-        logger.info("Selecting best candidate from optimization results")
+        logger.info("Selecting best candidate from final optimization results")
 
         best_candidate = self.selector.best_candidate()
         best_score = best_candidate.average_task_score()
@@ -189,27 +155,13 @@ class GEPA:
 
     @staticmethod
     def create_basic(metric, max_calls: int = 1000, population_size: int = 10) -> "GEPA":
-        """Create a basic GEPA optimizer with standard settings.
-
-        Uses:
-        - LLM calls budget tracking
-        - Pareto selection
-        - Mutation-based generation
-        - Promotion-based evaluation
-
-        Args:
-            metric: Evaluation metric for candidate scoring
-            max_calls: Maximum LLM API calls budget
-            population_size: Number of candidates per generation
-
-        Returns:
-            Configured GEPA optimizer ready for compilation
-        """
+        """Create a basic GEPA optimizer with standard settings."""
         from .budget import LLMCallsBudget
         from .selection import ParetoFrontier
         from .generation import ReflectivePromptMutation
         from .generation.feedback import FeedbackProvider
         from .evaluation import PromotionEvaluator
+        from .dataset_manager import DefaultDatasetManagerFactory
 
         return GEPA(
             budget=LLMCallsBudget(max_calls),
@@ -219,31 +171,20 @@ class GEPA:
             ),
             evaluator=PromotionEvaluator(
                 metric=metric,
-                promotion_threshold=0.5
-            )
+            ),
+            dataset_manager_factory=DefaultDatasetManagerFactory()
         )
 
 
     @staticmethod
     def create_iteration_limited(metric, max_iterations: int = 20, population_size: int = 8) -> "GEPA":
-        """Create a GEPA optimizer limited by iterations rather than LLM calls.
-
-        Useful for research scenarios where you want consistent iteration counts
-        regardless of population size or evaluation complexity.
-
-        Args:
-            metric: Evaluation metric for candidate scoring
-            max_iterations: Maximum number of optimization iterations
-            population_size: Number of candidates per generation
-
-        Returns:
-            Configured GEPA optimizer with iteration-based budget
-        """
+        """Create a GEPA optimizer limited by iterations rather than LLM calls."""
         from .budget import IterationBudget
         from .selection import ParetoFrontier
         from .generation import ReflectivePromptMutation
         from .generation.feedback import FeedbackProvider
         from .evaluation import PromotionEvaluator
+        from .dataset_manager import DefaultDatasetManagerFactory
 
         return GEPA(
             budget=IterationBudget(max_iterations),
@@ -253,29 +194,18 @@ class GEPA:
             ),
             evaluator=PromotionEvaluator(
                 metric=metric,
-                promotion_threshold=0.6
-            )
+            ),
+            dataset_manager_factory=DefaultDatasetManagerFactory()
         )
 
     @staticmethod
     def create_with_merge(metric, max_calls: int = 1000, population_size: int = 12) -> "GEPA":
-        """Create GEPA optimizer with System-Aware Merge for complex optimization.
-
-        Uses System-Aware Merge for exploring combinations of successful candidates.
-        Good for tasks where combining features from different solutions is beneficial.
-
-        Args:
-            metric: Evaluation metric for candidate scoring
-            max_calls: Maximum LLM API calls budget
-            population_size: Number of candidates per generation
-
-        Returns:
-            Configured GEPA optimizer with merge capabilities
-        """
+        """Create GEPA optimizer with System-Aware Merge for complex optimization."""
         from .budget import LLMCallsBudget
         from .selection import ParetoFrontier
         from .generation import SystemAwareMerge
         from .evaluation import PromotionEvaluator
+        from .dataset_manager import DefaultDatasetManagerFactory
 
         return GEPA(
             budget=LLMCallsBudget(max_calls),
@@ -286,6 +216,6 @@ class GEPA:
             ),
             evaluator=PromotionEvaluator(
                 metric=metric,
-                promotion_threshold=0.4
-            )
+            ),
+            dataset_manager_factory=DefaultDatasetManagerFactory()
         )

@@ -66,6 +66,14 @@ class Cohort:
     def add_candidate(self, candidate: 'Candidate') -> None:
         """Add a candidate to this cohort."""
         self.candidates.add(candidate)
+    
+    def contains(self, candidate: 'Candidate') -> bool:
+        """Check if cohort contains a specific candidate."""
+        return candidate in self.candidates
+    
+    def to_list(self) -> List['Candidate']:
+        """Get all candidates as a list (for cases where order doesn't matter)."""
+        return list(self.candidates)
 
     def first(self) -> 'Candidate':
         """Get the first candidate from this cohort.
