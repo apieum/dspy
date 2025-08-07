@@ -28,7 +28,9 @@ def test_components_configure_themselves():
     
     # Create components without any dataset knowledge
     evaluator = PromotionEvaluator(metric=simple_metric, promotion_threshold=0.3)
-    generator = ReflectivePromptMutation()
+    from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
+    feedback_provider = FeedbackProvider(metric=simple_metric)
+    generator = ReflectivePromptMutation(feedback_provider)
     
     # Verify components start without dataset knowledge
     assert evaluator.evaluation_data == []
@@ -37,8 +39,10 @@ def test_components_configure_themselves():
     
     # Components configure themselves when given training data
     student = dspy.Predict("input -> output")
-    evaluator.start_compilation(student, training_data)
-    generator.start_compilation(student, training_data)
+    d_feedback = training_data
+    d_pareto = training_data
+    evaluator.start_compilation(student, d_feedback, d_pareto)
+    generator.start_compilation(student, d_feedback, d_pareto)
     
     # Verify components now have dataset knowledge
     assert evaluator.evaluation_data == training_data
@@ -71,9 +75,11 @@ def test_gepa_does_not_configure_components():
     
     # Mock next_generation to verify preparation happened before optimization
     def mock_next_generation(cohort):
-        # When next_generation is called, components should be configured
-        assert gepa.evaluator.evaluation_data == training_data
-        assert gepa.generator.feedback_data == training_data
+        # When next_generation is called, components should be configured with split datasets
+        # With default 25% split: evaluator gets d_pareto, generator gets d_feedback
+        assert len(gepa.evaluator.evaluation_data) == 1  # ~25% of 3 = 0.75 → 1
+        assert len(gepa.generator.feedback_data) == 2   # ~75% of 3 = 2.25 → 2
+        assert len(gepa.evaluator.evaluation_data) + len(gepa.generator.feedback_data) == len(training_data)
         
         # Return a compiled module to complete the test
         compiled_module = cohort.first().module
@@ -92,8 +98,8 @@ def test_gepa_does_not_configure_components():
     print("✓ GEPA successfully delegated configuration to components")
 
 
-def test_single_training_dataset_design():
-    """Test that GEPA uses single training dataset (no artificial splits)."""
+def test_dataset_split_design():
+    """Test that GEPA uses paper-compliant dataset split (GEPA Algorithm 1)."""
     
     training_data = [
         dspy.Example(input="test1", answer="answer1"),
@@ -106,19 +112,19 @@ def test_single_training_dataset_design():
     gepa = GEPA.create_basic(metric=simple_metric, max_calls=30)
     student = dspy.Predict("input -> output")
     
-    # Mock next_generation to verify single dataset usage
+    # Mock next_generation to verify dataset split usage (GEPA Algorithm 1)
     def mock_next_generation(cohort):
-        # Both evaluator and generator should use the same training data
-        assert gepa.evaluator.evaluation_data == training_data
-        assert gepa.generator.feedback_data == training_data
+        # GEPA Algorithm 1: evaluator uses d_pareto, generator uses d_feedback
+        # With 25% split: 1 example for pareto, 3 examples for feedback
+        assert len(gepa.evaluator.evaluation_data) == 1  # d_pareto (25% of 4 = 1)
+        assert len(gepa.generator.feedback_data) == 3    # d_feedback (75% of 4 = 3)
         
-        # Each component can create its own minibatches/subsets as needed
-        # Evaluator creates minibatch for 2-phase evaluation
-        assert len(gepa.evaluator.minibatch_data) == 1  # 20% of 4 = 1
-        assert gepa.evaluator.minibatch_data == training_data[:1]
-        
-        # Generator uses full dataset for feedback
-        assert gepa.generator.feedback_data == training_data
+        # Total dataset size should be preserved
+        assert len(gepa.evaluator.evaluation_data) + len(gepa.generator.feedback_data) == len(training_data)
+
+        # Each component can create its own minibatches/subsets from their assigned data
+        # Evaluator creates minibatch for 2-phase evaluation from d_pareto
+        assert len(gepa.evaluator.minibatch_data) <= len(gepa.evaluator.evaluation_data)
         
         # Return compiled module
         compiled_module = cohort.first().module  
@@ -127,7 +133,7 @@ def test_single_training_dataset_design():
     
     gepa.next_generation = mock_next_generation
     
-    # Compile with single training dataset (no artificial pareto_data/feedback_data split)
+    # Compile with paper-compliant dataset split (GEPA Algorithm 1, Line 1)
     result = gepa.compile(student, training_data)
     
     assert result._compiled == True

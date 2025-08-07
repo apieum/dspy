@@ -309,6 +309,9 @@ class SystemAwareMerge(Generator):
         """Clear merge history (useful for testing or reset)."""
         self.merge_history.clear_history()
 
-    def start_compilation(self, student: dspy.Module, training_data: List[dspy.Example]) -> None:
-        """Prepare generator with training dataset when compilation begins."""
-        self.feedback_data = training_data
+    def start_compilation(self, student: dspy.Module, 
+                         d_feedback: List[dspy.Example], 
+                         d_pareto: List[dspy.Example]) -> None:
+        """Prepare generator with feedback dataset for crossover operations (GEPA Algorithm 1)."""
+        # Generator uses D_feedback for minibatch sampling (not D_pareto)
+        self.feedback_data = d_feedback

@@ -109,8 +109,13 @@ class TestComponentInterfaces:
     def test_generation_interface(self):
         """Generation components should implement required interface."""
         from dspy.teleprompt.gepa.generation import ReflectivePromptMutation
-
-        strategy = ReflectivePromptMutation()
+        from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
+        
+        def simple_metric(example, prediction, trace=None):
+            return 0.5
+        
+        feedback_provider = FeedbackProvider(metric=simple_metric)
+        strategy = ReflectivePromptMutation(feedback_provider)
 
         # Interface methods
         assert hasattr(strategy, 'generate')
@@ -183,7 +188,9 @@ class TestDataStructures:
         from dspy.teleprompt.gepa.data.cohort import Survivors
         selector = ParetoFrontier()
         training_data = ["task0", "task1", "task2"]
-        selector.start_compilation(None, training_data)
+        d_feedback = training_data
+        d_pareto = training_data
+        selector.start_compilation(None, d_feedback, d_pareto)
         candidate = Candidate(SimpleQA(), generation_number=0)
         candidate.set_task_scores({0: 0.8, 1: 0.6, 2: 0.7})
 
@@ -195,7 +202,7 @@ class TestDataStructures:
 
         # Test that selector contains the candidate by checking size changes
         selector2 = ParetoFrontier()
-        selector2.start_compilation(None, training_data)
+        selector2.start_compilation(None, d_feedback, d_pareto)
         assert selector2.size() == 0
         cohort2 = Survivors(candidate, iteration=0)
         selector2.promote(cohort2)

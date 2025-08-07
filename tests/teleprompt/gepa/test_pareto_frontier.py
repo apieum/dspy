@@ -17,8 +17,9 @@ class TestParetoFrontier:
         """Setup fresh selector for each test."""
         self.selector = ParetoFrontier()
         # Create mock training data with 3 tasks
-        training_data = ["task0", "task1", "task2"]
-        self.selector.start_compilation(None, training_data)
+        d_feedback = ["task0", "task1", "task2"]
+        d_pareto = ["task0", "task1", "task2"]
+        self.selector.start_compilation(None, d_feedback, d_pareto)
 
     def create_candidate(self, scores_dict, generation=0, parents=None):
         """Helper to create candidates with specific scores."""
@@ -327,7 +328,9 @@ class TestParetoFrontier:
         """Test that only candidates from correct generation are eligible."""
         # Override with 2-task setup
         training_data = ["task0", "task1"]
-        self.selector.start_compilation(None, training_data)
+        d_feedback = training_data
+        d_pareto = training_data
+        self.selector.start_compilation(None, d_feedback, d_pareto)
 
         # Create candidates from different generations
         gen0_candidate = self.create_candidate({0: 0.8, 1: 0.6}, generation=0)
@@ -401,7 +404,9 @@ class TestParetoFrontier:
         """Test stochastic sampling functionality."""
         # Override with 2-task setup
         training_data = ["task0", "task1"]
-        self.selector.start_compilation(None, training_data)
+        d_feedback = training_data
+        d_pareto = training_data
+        self.selector.start_compilation(None, d_feedback, d_pareto)
 
         # Create multiple good candidates
         candidates = [
@@ -428,7 +433,9 @@ class TestParetoFrontier:
         """Test complex scenario with 5 tasks and 8 candidates."""
         # Override with 5-task setup
         training_data = ["task0", "task1", "task2", "task3", "task4"]
-        self.selector.start_compilation(None, training_data)
+        d_feedback = training_data
+        d_pareto = training_data
+        self.selector.start_compilation(None, d_feedback, d_pareto)
 
         # Create diverse candidates with different specializations
         candidates = [
@@ -464,7 +471,9 @@ class TestParetoFrontier:
         """Test performance and correctness with larger candidate sets."""
         # Override with 4-task setup
         training_data = ["task0", "task1", "task2", "task3"]
-        self.selector.start_compilation(None, training_data)
+        d_feedback = training_data
+        d_pareto = training_data
+        self.selector.start_compilation(None, d_feedback, d_pareto)
 
         # Create 20 candidates with random-ish but controlled performance
         candidates = []

@@ -30,9 +30,9 @@ def test_compilation_lifecycle_events():
     original_start_iteration = gepa.budget.start_iteration
     original_finish_iteration = gepa.budget.finish_iteration
 
-    def track_start_compilation(student, training_data):
+    def track_start_compilation(student, d_feedback, d_pareto):
         events.append("budget_start_compilation")
-        return original_start_compilation(student, training_data)
+        return original_start_compilation(student, d_feedback, d_pareto)
 
     def track_finish_compilation(result):
         events.append("budget_finish_compilation")
@@ -129,7 +129,9 @@ def test_components_can_opt_into_lifecycle_events():
 
     # Create components
     evaluator = PromotionEvaluator(metric=simple_metric)
-    generator = ReflectivePromptMutation()
+    from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
+    feedback_provider = FeedbackProvider(metric=simple_metric)
+    generator = ReflectivePromptMutation(feedback_provider)
 
     # Test that they have lifecycle methods (inherited from CompilationObserver)
     assert hasattr(evaluator, 'start_compilation')
@@ -147,12 +149,14 @@ def test_components_can_opt_into_lifecycle_events():
     training_data = [dspy.Example(input="test", answer="test")]
 
     # Components should handle lifecycle events gracefully
-    evaluator.start_compilation(student, training_data)
+    d_feedback = training_data
+    d_pareto = training_data
+    evaluator.start_compilation(student, d_feedback, d_pareto)
     evaluator.finish_compilation(student)
     evaluator.start_iteration(0, None, None)
     evaluator.finish_iteration(0, None, None)
 
-    generator.start_compilation(student, training_data)
+    generator.start_compilation(student, d_feedback, d_pareto)
     generator.finish_compilation(student)
     generator.start_iteration(0, None, None)
     generator.finish_iteration(0, None, None)

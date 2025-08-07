@@ -32,11 +32,13 @@ def test_evaluator_returns_cohorts_gepa_manages_pool():
     )
     # Prepare evaluator with data
     student = dspy.Predict("input -> output")
-    evaluator.start_compilation(student, evaluation_data)
+    d_feedback = evaluation_data
+    d_pareto = evaluation_data
+    evaluator.start_compilation(student, d_feedback, d_pareto)
 
     # Create selector (managed by GEPA)
     selector = ParetoFrontier()
-    selector.start_compilation(student, evaluation_data)
+    selector.start_compilation(student, d_feedback, d_pareto)
 
     # Create test candidates
     module1 = dspy.Predict("input -> output")
@@ -87,11 +89,13 @@ def test_evaluation_separation():
     )
     # Prepare evaluator with data
     student = dspy.Predict("input -> output")
-    evaluator.start_compilation(student, evaluation_data)
+    d_feedback = evaluation_data
+    d_pareto = evaluation_data
+    evaluator.start_compilation(student, d_feedback, d_pareto)
 
     # Create selector
     selector = ParetoFrontier()
-    selector.start_compilation(student, evaluation_data)
+    selector.start_compilation(student, d_feedback, d_pareto)
 
     # Create test candidates
     module1 = dspy.Predict("input -> output")

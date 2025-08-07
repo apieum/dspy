@@ -49,15 +49,18 @@ class PromotionEvaluator(Evaluator):
     def get_metric(self) -> Callable:
         return self.metric
 
-    def start_compilation(self, student: dspy.Module, training_data: List[dspy.Example]) -> None:
-        """Prepare evaluator with training dataset when compilation begins.
+    def start_compilation(self, student: dspy.Module, 
+                         d_feedback: List[dspy.Example], 
+                         d_pareto: List[dspy.Example]) -> None:
+        """Prepare evaluator with Pareto dataset for candidate evaluation (GEPA Algorithm 1).
 
-        Creates evaluation dataset and minibatch dataset for 2-phase evaluation.
+        Evaluator uses D_pareto for measuring candidate performance.
         """
-        self.evaluation_data = training_data
-        # Create minibatch as 20% of training data for fast filtering
-        minibatch_size = max(1, len(training_data) // 5)
-        self.minibatch_data = training_data[:minibatch_size]
+        # Evaluator uses D_pareto for final candidate evaluation (not D_feedback)
+        self.evaluation_data = d_pareto
+        # Create minibatch as 20% of pareto data for fast filtering
+        minibatch_size = max(1, len(d_pareto) // 5)
+        self.minibatch_data = d_pareto[:minibatch_size]
 
 
     def evaluate_for_promotion(self, cohort: Cohort, budget) -> Cohort:

@@ -53,12 +53,14 @@ class GEPA:
         self.evaluator = evaluator
         self.current_iteration = 0
 
-    def start_compilation(self, student: Module, training_data: List[dspy.Example]):
+    def start_compilation(self, student: Module, 
+                         d_feedback: List[dspy.Example], 
+                         d_pareto: List[dspy.Example]):
         logger.info("Starting GEPA framework compilation...")
-        self.budget.start_compilation(student, training_data)
-        self.selector.start_compilation(student, training_data)
-        self.generator.start_compilation(student, training_data)
-        self.evaluator.start_compilation(student, training_data)
+        self.budget.start_compilation(student, d_feedback, d_pareto)
+        self.selector.start_compilation(student, d_feedback, d_pareto)
+        self.generator.start_compilation(student, d_feedback, d_pareto)
+        self.evaluator.start_compilation(student, d_feedback, d_pareto)
 
     def finish_compilation(self, result: Module):
         logger.info("Terminating GEPA framework compilation.")
@@ -82,17 +84,32 @@ class GEPA:
         self.evaluator.finish_iteration(self.current_iteration, cohort, self.budget)
 
     def compile(self, student: Module,
-               training_data: List[dspy.Example]) -> Module:
+               training_data: List[dspy.Example],
+               pareto_split_ratio: float = 0.25) -> Module:
         """Main compilation method - entry point for optimization.
 
+        Implements GEPA Algorithm 1, Line 1: Split training data into D_feedback and D_pareto.
+        
         Args:
             student: Initial program to optimize
             training_data: Training dataset for optimization
+            pareto_split_ratio: Fraction of data to use for Pareto evaluation (default: 0.25)
 
         Returns:
             Optimized program module
         """
-        self.start_compilation(student, training_data)
+        # GEPA Algorithm 1, Line 1: Split D_train into D_feedback, D_pareto
+        import random
+        shuffled_data = training_data.copy()
+        random.shuffle(shuffled_data)  # Ensure random split
+        
+        n_pareto = max(1, int(len(training_data) * pareto_split_ratio))
+        d_pareto = shuffled_data[:n_pareto]      # For candidate evaluation (Evaluator)
+        d_feedback = shuffled_data[n_pareto:]    # For mutation minibatches (Generator)
+        
+        logger.info(f"Dataset split: {len(d_feedback)} examples for feedback, {len(d_pareto)} examples for Pareto evaluation")
+        
+        self.start_compilation(student, d_feedback, d_pareto)
         # Initialize first candidate generation
         initial_candidate = Candidate(student.deepcopy(), generation_number=0)
         gen_0 = NewBorns(initial_candidate, iteration=0)
@@ -139,9 +156,11 @@ class GEPA:
 
         # Filter candidates based on performance
         logger.debug("Filtering candidates based on scores")
+        survivors = self.selector.filter(cohort, self.budget)
+        
         # Generate new candidates from filtered survivors
         logger.debug("Generating new candidates")
-        new_cohort = self.generator.generate(cohort, self.budget)
+        new_cohort = self.generator.generate(survivors, self.budget)
 
         # Evaluate and promote new generation
         logger.debug(f"Evaluating {new_cohort.size()} new candidates")
@@ -189,12 +208,15 @@ class GEPA:
         from .budget import LLMCallsBudget
         from .selection import ParetoFrontier
         from .generation import ReflectivePromptMutation
+        from .generation.feedback import FeedbackProvider
         from .evaluation import PromotionEvaluator
 
         return GEPA(
             budget=LLMCallsBudget(max_calls),
             selector=ParetoFrontier(),
-            generator=ReflectivePromptMutation(),
+            generator=ReflectivePromptMutation(
+                feedback_provider=FeedbackProvider(metric=metric)
+            ),
             evaluator=PromotionEvaluator(
                 metric=metric,
                 promotion_threshold=0.5
@@ -220,12 +242,15 @@ class GEPA:
         from .budget import IterationBudget
         from .selection import ParetoFrontier
         from .generation import ReflectivePromptMutation
+        from .generation.feedback import FeedbackProvider
         from .evaluation import PromotionEvaluator
 
         return GEPA(
             budget=IterationBudget(max_iterations),
             selector=ParetoFrontier(),
-            generator=ReflectivePromptMutation(),
+            generator=ReflectivePromptMutation(
+                feedback_provider=FeedbackProvider(metric=metric)
+            ),
             evaluator=PromotionEvaluator(
                 metric=metric,
                 promotion_threshold=0.6

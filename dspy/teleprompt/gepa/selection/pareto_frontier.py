@@ -57,15 +57,16 @@ class ParetoFrontier(Selector):
         self.task_wins: Dict[Candidate, int] = defaultdict(int)  # candidate -> number of tasks won
         self.num_tasks = 0  # Will be set in start_compilation
 
-    def start_compilation(self, student, training_data) -> None:
-        """Called when compilation begins. Store the number of tasks."""
-        self.num_tasks = len(training_data)
+    def start_compilation(self, student, d_feedback: List, d_pareto: List) -> None:
+        """Called when compilation begins. Store the number of tasks (GEPA Algorithm 1)."""
+        # Selector uses D_pareto for task counting (evaluation dataset size)
+        self.num_tasks = len(d_pareto)
         # Initialize task_best_candidates and task_scores for all tasks
-        # training_data can be either a list (indexed 0, 1, 2...) or dict with keys
-        if hasattr(training_data, 'keys'):
-            task_ids = training_data.keys()
+        # d_pareto can be either a list (indexed 0, 1, 2...) or dict with keys
+        if hasattr(d_pareto, 'keys'):
+            task_ids = d_pareto.keys()
         else:
-            task_ids = range(len(training_data))
+            task_ids = range(len(d_pareto))
             
         for task_id in task_ids:
             self.task_best_candidates[task_id] = []
@@ -96,7 +97,7 @@ class ParetoFrontier(Selector):
         return Survivors(*pareto_frontier)
 
     def promote(self, survivors: Survivors, budget: Optional[Budget] = None) -> Parents:
-        """Promote survivors to parents and update task scores.
+        """Promote survivors to parents with Pareto frontier filtering.
 
         Args:
             survivors: Survivors cohort to promote to parents
@@ -105,29 +106,22 @@ class ParetoFrontier(Selector):
         Returns:
             Parents cohort with incremented iteration for next generation
         """
-        # Reset task win counts for survivors being promoted
-        for candidate in survivors:
-            self.task_wins[candidate] = self.task_wins.get(candidate, 0)
-
         # Update all task scores for all survivors in batch
+        # Note: task_wins are already calculated in update_score() method
         self.update_scores_batch(survivors)
 
-        # Count wins for each survivor after batch update
-        for task_id in range(self.num_tasks):
-            winners = self.task_best_candidates.get(task_id, [])
-            for winner in winners:
-                if winner in survivors:
-                    self.task_wins[winner] += 1
-
-        # Extract task_wins for just the survivors being promoted
+        # Apply Pareto frontier filtering to remove dominated candidates
+        pareto_filtered = self._remove_dominated_candidates(list(survivors.candidates))
+        
+        # Extract task_wins for just the Pareto-filtered candidates being promoted
         relevant_task_wins = {
             candidate: self.task_wins[candidate]
-            for candidate in survivors
+            for candidate in pareto_filtered
         }
 
         # Create new parents cohort with incremented iteration and task_wins data
         promoted_cohort = Parents(
-            *survivors.candidates,
+            *pareto_filtered,
             iteration=survivors.iteration + 1,
             task_wins=relevant_task_wins
         )

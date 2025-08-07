@@ -43,9 +43,12 @@ class LLMCallsBudget(Budget):
 
     # CompilationObserver lifecycle methods
 
-    def start_compilation(self, student: dspy.Module, training_data: List[dspy.Example]) -> None:
-        """Initialize budget tracking when compilation begins."""
+    def start_compilation(self, student: dspy.Module, 
+                         d_feedback: List[dspy.Example], 
+                         d_pareto: List[dspy.Example]) -> None:
+        """Initialize budget tracking when compilation begins (GEPA Algorithm 1)."""
         logger.info(f"Starting compilation with budget of {self.max_calls} LLM calls")
+        logger.info(f"Dataset split: {len(d_feedback)} feedback examples, {len(d_pareto)} pareto examples")
         self.consumed_calls = 0
         self.iteration_costs = []
 

@@ -46,7 +46,9 @@ class TestEvaluationInterface:
 
         # Configure with training data
         student = dspy.Predict("input -> output")
-        evaluator.start_compilation(student, training_data)
+        d_feedback = training_data
+        d_pareto = training_data
+        evaluator.start_compilation(student, d_feedback, d_pareto)
 
         # Verify configuration
         assert evaluator.evaluation_data == training_data
@@ -72,7 +74,9 @@ class TestPromotionEvaluation:
         ]
 
         student = dspy.Predict("input -> output")
-        evaluator.start_compilation(student, evaluation_data)
+        d_feedback = evaluation_data
+        d_pareto = evaluation_data
+        evaluator.start_compilation(student, d_feedback, d_pareto)
 
         # Create test candidates
         module1 = dspy.Predict("input -> output")
@@ -110,7 +114,9 @@ class TestPromotionEvaluation:
         ]
 
         student = dspy.Predict("input -> output")
-        evaluator.start_compilation(student, evaluation_data)
+        d_feedback = evaluation_data
+        d_pareto = evaluation_data
+        evaluator.start_compilation(student, d_feedback, d_pareto)
 
         # Create test candidates
         module1 = dspy.Predict("input -> output")
@@ -142,7 +148,9 @@ class TestPromotionEvaluation:
         ]
 
         student = dspy.Predict("input -> output")
-        evaluator.start_compilation(student, evaluation_data)
+        d_feedback = evaluation_data
+        d_pareto = evaluation_data
+        evaluator.start_compilation(student, d_feedback, d_pareto)
 
         # Create test candidates
         module = dspy.Predict("input -> output")
@@ -170,7 +178,9 @@ class TestEvaluationBudgetIntegration:
         ]
 
         student = dspy.Predict("input -> output")
-        evaluator.start_compilation(student, evaluation_data)
+        d_feedback = evaluation_data
+        d_pareto = evaluation_data
+        evaluator.start_compilation(student, d_feedback, d_pareto)
 
         # Create test candidate
         module = dspy.Predict("input -> output")
@@ -194,7 +204,9 @@ class TestEvaluationBudgetIntegration:
 
         evaluation_data = [dspy.Example(input="test", answer="answer")]
         student = dspy.Predict("input -> output")
-        evaluator.start_compilation(student, evaluation_data)
+        d_feedback = evaluation_data
+        d_pareto = evaluation_data
+        evaluator.start_compilation(student, d_feedback, d_pareto)
 
         # Create test candidates
         module = dspy.Predict("input -> output")

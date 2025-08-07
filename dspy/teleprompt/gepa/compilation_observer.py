@@ -15,12 +15,17 @@ class CompilationObserver(Protocol):
     only the lifecycle events they care about.
     """
 
-    def start_compilation(self, student: dspy.Module, training_data: List[dspy.Example]) -> None:
+    def start_compilation(self, student: dspy.Module, 
+                         d_feedback: List[dspy.Example], 
+                         d_pareto: List[dspy.Example]) -> None:
         """Called when compilation begins. Components can prepare resources.
+        
+        GEPA Algorithm 1 compliant: Uses split datasets for different purposes.
 
         Args:
             student: The initial program being optimized
-            training_data: The training dataset for optimization
+            d_feedback: Feedback dataset for mutation minibatches (Generator uses this)
+            d_pareto: Pareto dataset for candidate evaluation (Evaluator uses this)
         """
         pass
 
