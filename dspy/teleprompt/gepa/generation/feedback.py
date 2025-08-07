@@ -12,15 +12,22 @@ class FeedbackProvider:
     """Encapsulates metric (μ) and enhanced feedback function (μf) for GEPA.
     
     This class provides a clean interface for evaluation and diagnostic feedback,
-    allowing easy experimentation with different feedback strategies.
+    supporting both simple metrics and rich μf-compliant metrics that return
+    detailed evaluation traces for intelligent reflection.
+    
+    The metric can return either:
+    - float: Simple score (backward compatible)
+    - (float, str): Score and rich feedback text (μf-compliant)
     """
     
     def __init__(self, metric: Callable, feedback_function: Optional[Callable] = None):
         """Initialize feedback provider.
         
         Args:
-            metric: Evaluation function μ that returns score
-            feedback_function: Optional enhanced feedback function μf for rich diagnostics
+            metric: Evaluation function μ that returns either:
+                   - float: Simple score for backward compatibility  
+                   - (float, str): Score and rich diagnostic text (μf-compliant)
+            feedback_function: Optional enhanced feedback function μf for additional diagnostics
         """
         if metric is None:
             raise ValueError("FeedbackProvider requires a metric function")
@@ -41,35 +48,57 @@ class FeedbackProvider:
         Returns:
             Tuple of (score, diagnostic_text)
         """
-        # Get score using metric (μ)
+        # Get score and optional feedback_text using metric (μ/μf)
+        feedback_text = None
         try:
-            score = float(self.metric(example, prediction, trace))
+            metric_result = self.metric(example, prediction, trace)
+            
+            # Unpack the result for μf compliance
+            if isinstance(metric_result, tuple):
+                score, feedback_text = metric_result
+            else:
+                score = metric_result  # Maintain backward compatibility
+                
+            score = float(score)
+            
         except TypeError:
-            # Metric might not accept trace parameter
-            score = float(self.metric(example, prediction))
+            # Fallback for metrics that don't accept trace parameter
+            metric_result = self.metric(example, prediction)
+            if isinstance(metric_result, tuple):
+                score, feedback_text = metric_result
+            else:
+                score = metric_result
+            score = float(score)
         
-        # Get diagnostic feedback
+        # Start with base diagnostic from metric evaluation
+        status = "SUCCESS" if score > 0.5 else "FAILURE"
+        diagnostic = f"Score: {score:.2f} ({status})"
+        
+        # Append rich feedback from metric's μf output if available
+        if feedback_text:
+            diagnostic += f" | Evaluator Feedback: {feedback_text}"
+        
+        # Get additional diagnostic feedback from enhanced feedback function
         if self.feedback_function:
             try:
-                # Enhanced feedback function (μf) provides rich diagnostics
+                # Enhanced feedback function (μf) provides additional rich diagnostics
                 feedback_result = self.feedback_function(example, prediction, trace, module_idx)
                 
                 if isinstance(feedback_result, tuple) and len(feedback_result) == 2:
-                    # μf can override score, diagnostic_text
-                    enhanced_score, diagnostic = feedback_result
+                    # μf can override score but we append diagnostic_text
+                    enhanced_score, additional_diagnostic = feedback_result
                     score = float(enhanced_score)
+                    diagnostic = f"Score: {score:.2f} ({status}) | {additional_diagnostic}"
                 elif isinstance(feedback_result, dict):
                     # Rich feedback dictionary
-                    diagnostic = self._format_rich_feedback(feedback_result, score)
+                    additional_diagnostic = self._format_rich_feedback(feedback_result, score)
+                    diagnostic += f" | {additional_diagnostic}"
                 else:
-                    # Simple diagnostic text
-                    diagnostic = str(feedback_result)
+                    # Simple diagnostic text - append to existing
+                    diagnostic += f" | {str(feedback_result)}"
             except Exception as e:
                 logger.warning(f"Enhanced feedback function failed: {e}")
-                diagnostic = f"Enhanced feedback failed, score: {score:.2f}"
-        else:
-            # Default diagnostic when no μf provided
-            diagnostic = f"Score: {score:.2f} ({'SUCCESS' if score > 0.5 else 'FAILURE'})"
+                diagnostic += f" | Enhanced feedback failed: {str(e)}"
         
         return score, diagnostic
     
