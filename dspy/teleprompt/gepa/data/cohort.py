@@ -41,7 +41,7 @@ class Cohort:
     def iteration(self) -> int:
         """Get iteration number for this cohort."""
         return self._iteration
-    
+
     @iteration.setter
     def iteration(self, value: int) -> None:
         """Set iteration number for this cohort."""
@@ -63,24 +63,20 @@ class Cohort:
         """Return number of candidates."""
         return len(self.candidates)
 
-    def add_candidate(self, candidate: 'Candidate') -> None:
-        """Add a candidate to this cohort."""
-        self.candidates.add(candidate)
-    
     def contains(self, candidate: 'Candidate') -> bool:
         """Check if cohort contains a specific candidate."""
         return candidate in self.candidates
-    
+
     def to_list(self) -> List['Candidate']:
         """Get all candidates as a list (for cases where order doesn't matter)."""
         return list(self.candidates)
 
     def first(self) -> 'Candidate':
         """Get the first candidate from this cohort.
-        
+
         Returns:
             First candidate from the set
-            
+
         Raises:
             StopIteration: If cohort is empty
         """
@@ -129,25 +125,25 @@ class Cohort:
 
 class Survivors(Cohort):
     """Cohort of candidates that survived Pareto selection.
-    
+
     These candidates represent the Pareto frontier and are eligible
     for selection as parents in the next generation.
     """
-    
+
     def __init__(self, *candidates: 'Candidate', **kwargs):
         super().__init__(*candidates, **kwargs)
 
 
 class Parents(Cohort):
     """Cohort of candidates selected for reproduction.
-    
+
     These candidates have been chosen through stochastic selection
     and will be used for mutation or merge operations.
     """
-    
+
     def __init__(self, *candidates: 'Candidate', task_wins: Optional[Dict['Candidate', int]] = None, **kwargs):
         """Initialize Parents cohort with optional task win counts.
-        
+
         Args:
             *candidates: Candidate objects to include
             task_wins: Optional pre-computed mapping of candidate -> number of tasks won
@@ -156,80 +152,53 @@ class Parents(Cohort):
         """
         super().__init__(*candidates, **kwargs)
         self.task_wins = task_wins or {}
-    
+
     def sample_stochastic(self, n: int = 1) -> 'Parents':
         """Stochastic sampling based on task winning frequency (Algorithm 2 line 14).
-        
+
         Implements Algorithm 2's stochastic selection: "Sample Φk from Ĉ with probability ∝ f[Φk]"
         where f[Φk] is the number of tasks on which candidate Φk achieves the best score.
-        
+
         Args:
             n: Number of candidates to sample
-            
+
         Returns:
             Parents cohort with stochastically selected candidates
         """
         if self.is_empty():
             return Parents()
-            
+
         if len(self.candidates) <= n:
-            return Parents(*self.candidates)
-            
+            return Parents(*self.candidates, task_wins=self.task_wins)
+
         # Use pre-computed task_wins if available, otherwise calculate
-        if self.task_wins:
-            candidate_task_wins = self.task_wins
-        else:
-            # Fallback: calculate task wins from scratch
-            # Get all task IDs from all candidates
-            all_task_ids = set()
-            for candidate in self.candidates:
-                all_task_ids.update(candidate.task_scores.keys())
-                
-            if not all_task_ids:
-                # If no task scores, return random sample
-                return Parents(*random.sample(list(self.candidates), n))
-                
-            # Count how many tasks each candidate wins (achieves best score on)
-            candidate_task_wins = defaultdict(int)
-            
-            for task_id in all_task_ids:
-                # Find the best score for this task among all candidates
-                best_score = max(candidate.task_score(task_id) or 0.0 for candidate in self.candidates)
-                
-                # Count all candidates that achieve this best score
-                for candidate in self.candidates:
-                    if (candidate.task_score(task_id) or 0.0) == best_score:
-                        candidate_task_wins[candidate] += 1
-        
-        # Stochastic selection based on task winning frequency
-        selected_candidates = []
-        candidates_pool = list(self.candidates)
-        
-        for _ in range(n):
-            if not candidates_pool:
-                break
-                
-            # Create weights based on task wins (default to 0 if not in dict)
-            weights = [candidate_task_wins.get(candidate, 0) for candidate in candidates_pool]
-            
-            # Handle case where all weights are 0
-            if sum(weights) == 0:
-                weights = [1] * len(candidates_pool)
-            
-            # Sample one candidate based on weights
-            selected = random.choices(candidates_pool, weights=weights)[0]
-            selected_candidates.append(selected)
-            candidates_pool.remove(selected)
-            
-        return Parents(*selected_candidates)
+        if not self.task_wins:
+            raise ValueError(
+                "sample_stochastic requires pre-computed task_wins. "
+                "Please provide task_wins when initializing the Parents cohort."
+            )
+            return
+
+        # Create weights based on task wins (default to 0 if not in dict)
+        weights = [self.task_wins.get(candidate, 0) for candidate in self]
+
+        # Handle case where all weights are 0
+        if sum(weights) == 0:
+            weights = [1] * self.size()
+
+        # Sample one candidate based on weights
+        selected = random.choices(list(self), weights=weights, k=n)
+        task_wins = {candidate: self.task_wins.get(candidate, 0) for candidate in selected}
+
+        return Parents(*selected, task_wins=task_wins)
 
 
 class NewBorns(Cohort):
     """Cohort of newly generated candidates.
-    
+
     These candidates have been created through mutation or merge
     and need to be evaluated before they can become survivors.
     """
-    
+
     def __init__(self, *candidates: 'Candidate', **kwargs):
         super().__init__(*candidates, **kwargs)

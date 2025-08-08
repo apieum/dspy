@@ -53,46 +53,20 @@ class ParetoFrontier(Selector):
 
     def __init__(self):
         """Initialize the Pareto Frontier selector."""
-        self.selection_stats = defaultdict(int)  # Statistics tracking
         # Internal candidate and task score management
         self.task_scores: Dict[int, float] = {}  # task_id -> score for that task
         self.task_best_candidates: Dict[int, List[Candidate]] = {}  # task_id -> all tied winners
         self.task_wins: Dict[Candidate, int] = defaultdict(int)  # candidate -> number of tasks won
-        self.dataset_manager: Optional["DatasetManager"] = None
 
     def start_compilation(self, student, dataset_manager: "DatasetManager") -> None:
         """Called when compilation begins. Initialize task tracking structures."""
-        self.dataset_manager = dataset_manager
-        num_tasks = self.dataset_manager.num_pareto_tasks
+        num_tasks = dataset_manager.num_pareto_tasks
 
         # Initialize task_best_candidates and task_scores for all tasks
         for task_id in range(num_tasks):
             self.task_best_candidates[task_id] = []
             self.task_scores[task_id] = 0.0
 
-    def filter(self, survivors: Survivors, budget: Optional[Budget] = None) -> Survivors:
-        """GEPA Algorithm 2: Pareto frontier selection.
-
-        Args:
-            survivors: Current cohort of survivors to filter from
-            budget: Optional budget constraints
-
-        Returns:
-            Cohort containing the Pareto frontier candidates
-        """
-        self.budget = budget
-        # Get all task winner candidates (including ties)
-        all_task_winners = set()
-        for task_winners in self.task_best_candidates.values():
-            all_task_winners.update(task_winners)
-
-        # Filter out candidates that are not eligible parents (from previous iteration)
-        eligible_candidates = [c for c in all_task_winners if c.generation_number == survivors.iteration - 1]
-
-        # Remove Pareto-dominated candidates
-        pareto_frontier = self._remove_dominated_candidates(eligible_candidates)
-
-        return Survivors(*pareto_frontier)
 
     def promote(self, survivors: Survivors, budget: Optional[Budget] = None) -> Parents:
         """
@@ -187,7 +161,7 @@ class ParetoFrontier(Selector):
                         self._update_old_winner(parent)
                     current_winners.append(candidate)
                     self.task_wins[candidate] = self.task_wins.get(candidate, 0) + 1
-                elif not candidate.has_descendant_in(current_winners):
+                elif not candidate.is_ancestor_of_any(current_winners):
                     # No ancestry relationship → keep as genuinely different solution
                     current_winners.append(candidate)
                     self.task_wins[candidate] = self.task_wins.get(candidate, 0) + 1
@@ -218,50 +192,3 @@ class ParetoFrontier(Selector):
         for task_id in all_task_ids:
             for candidate in candidates:
                 self.update_score(task_id, candidate)
-
-
-    def _pareto_filter(self, candidates: List[Candidate], survivors: Cohort) -> List[Candidate]:
-        """Filter candidates using Pareto dominance.
-
-        Candidates passed here are already the best for at least one task.
-        We just need to filter out used candidates and remove dominated ones.
-        """
-        # Filter out candidates that are not eligible parents
-        eligible_candidates = [c for c in candidates if c.generation_number == survivors.iteration - 1]
-
-        if not eligible_candidates:
-            return []
-
-        # Remove dominated candidates
-        return self._remove_dominated_candidates(eligible_candidates)
-
-
-
-
-    def _remove_dominated_candidates(self, candidates: List[Candidate]) -> List[Candidate]:
-        """Remove strictly dominated candidates using Pareto dominance."""
-        if not candidates:
-            return []
-
-        pareto_frontier = []
-
-        for candidate in candidates:
-            is_dominated = False
-
-            # Check if this candidate is dominated by any candidate already in the frontier
-            for frontier_candidate in pareto_frontier:
-                if frontier_candidate.dominate(candidate):
-                    is_dominated = True
-                    break
-
-            if not is_dominated:
-                # Remove any frontier candidates that are dominated by this candidate
-                pareto_frontier = [fc for fc in pareto_frontier if not candidate.dominate(fc)]
-                pareto_frontier.append(candidate)
-
-        return pareto_frontier
-
-
-    def get_selection_stats(self) -> dict:
-        """Get selection statistics for monitoring and debugging."""
-        return dict(self.selection_stats)

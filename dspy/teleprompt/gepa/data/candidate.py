@@ -1,8 +1,6 @@
 """Candidate data structure for GEPA optimization."""
-
-import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Callable
 from typing_extensions import Any
 
 import dspy
@@ -17,7 +15,7 @@ class Candidate:
     module: Module  # DSPy module - the actual program
     parents: List['Candidate'] = field(default_factory=list)  # Direct parent references
     generation_number: int = 0  # Which generation this belongs to
-    creation_metadata: Dict[str, str] = field(default_factory=dict)
+    creation_metadata: Dict[str, Any] = field(default_factory=dict)
     task_scores: Dict[int, float] = field(default_factory=dict)  # task_scores[task_id] = score
 
     def __hash__(self) -> int:
@@ -179,26 +177,30 @@ class Candidate:
                 to_visit.extend(parent.parents)
         return ancestors
 
+    def is_descendant_of(self, other: 'Candidate'):
+        if other in self.parents:
+            return True
+        for parent in self.parents:
+            if parent.is_descendant_of(other):
+                return True
+        return False
+
     def is_ancestor_of(self, other: 'Candidate') -> bool:
         """Check if this candidate is an ancestor of another candidate."""
-        return self in other._get_all_ancestors()
+        return other.is_descendant_of(self)
+
+    def filter_ancestors(self, allowed_ancestors: set['Candidate']) -> set['Candidate']:
+        """
+        Filters this candidate's ancestors, keeping only those present in a given set.
+        """
+        my_ancestors = self._get_all_ancestors()
+        return my_ancestors.intersection(allowed_ancestors)
 
     def find_common_ancestors(self, other: 'Candidate') -> set['Candidate']:
         """Find all common ancestors shared with another candidate."""
         my_ancestors = self._get_all_ancestors()
-        other_ancestors = other._get_all_ancestors()
-        return my_ancestors.intersection(other_ancestors)
+        return other.filter_ancestors(my_ancestors)
 
     def is_ancestor_of_any(self, candidates: List['Candidate']) -> bool:
         """Check if this candidate is an ancestor of any candidate in the given list."""
-        for candidate in candidates:
-            if self.is_ancestor_of(candidate):
-                return True
-        return False
-
-    def has_descendant_in(self, candidates: List['Candidate']) -> bool:
-        """Check if this candidate has any descendants in the given list."""
-        for other_candidate in candidates:
-            if self.is_ancestor_of(other_candidate):
-                return True
-        return False
+        return any(candidate.is_descendant_of(self) for candidate in candidates)

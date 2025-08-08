@@ -116,18 +116,6 @@ class TestCohort:
         empty_cohort = Cohort()
         assert empty_cohort.size() == 0
 
-    def test_cohort_add_candidates(self):
-        """Test adding candidates to cohort."""
-        cohort = Cohort()
-
-        module1 = dspy.Predict("input -> output")
-        candidate1 = Candidate(module1, generation_number=1)
-
-        # Add candidate
-        cohort.add_candidate(candidate1)
-        assert cohort.size() == 1
-        assert candidate1 in cohort
-
 
 class TestCandidateLineage:
     """Test candidate parent-child relationships."""

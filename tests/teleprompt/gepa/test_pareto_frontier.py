@@ -64,7 +64,8 @@ class TestParetoFrontier:
 
         # Step 2: Test Algorithm 2 Pareto frontier selection
         survivors = Survivors(*candidates, iteration=1)
-        pareto_frontier = self.selector.filter(survivors)
+        pareto_parents = self.selector.promote(survivors)
+        pareto_frontier = pareto_parents
 
         frontier_candidates = set()
         for candidate in pareto_frontier:
@@ -98,7 +99,8 @@ class TestParetoFrontier:
 
         # All should be in Pareto frontier (no domination)
         survivors = Survivors(candidate_a, candidate_b, candidate_c, iteration=1)
-        pareto_frontier = self.selector.filter(survivors)
+        pareto_parents = self.selector.promote(survivors)
+        pareto_frontier = pareto_parents
         assert len(pareto_frontier) == 3
 
     def test_domination_exclusion(self):
@@ -123,7 +125,8 @@ class TestParetoFrontier:
 
         # Pareto frontier should only have A and C (B is dominated)
         survivors = Survivors(candidate_a, candidate_b, candidate_c, iteration=1)
-        pareto_frontier = self.selector.filter(survivors)
+        pareto_parents = self.selector.promote(survivors)
+        pareto_frontier = pareto_parents
 
         frontier_set = set()
         for candidate in pareto_frontier:
@@ -330,30 +333,6 @@ class TestParetoFrontier:
         # Task 2: merge_child should win (0.8 > 0.2)
         assert self.selector.task_best_candidates[2] == [merge_child]
 
-    def test_generation_eligibility_filtering(self):
-        """Test that only candidates from correct generation are eligible."""
-        # Override with 2-task setup
-        training_data = [dspy.Example(task=f"task{i}") for i in range(2)]
-        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.5)
-        self.selector.start_compilation(None, dataset_manager)
-
-        # Create candidates from different generations
-        gen0_candidate = self.create_candidate({0: 0.8, 1: 0.6}, generation=0)
-        gen1_candidate = self.create_candidate({0: 0.7, 1: 0.9}, generation=1)
-        gen2_candidate = self.create_candidate({0: 0.9, 1: 0.5}, generation=2)
-
-        # Promote all candidates
-        for candidate in [gen0_candidate, gen1_candidate, gen2_candidate]:
-            cohort = Survivors(candidate, iteration=0)
-            self.selector.promote(cohort)
-
-        # Test filtering with survivors from iteration 2 (should select gen 1 candidates)
-        survivors_iter2 = Survivors(gen0_candidate, gen1_candidate, gen2_candidate, iteration=2)
-        pareto_frontier = self.selector.filter(survivors_iter2)
-
-        # Only candidates with generation 1 should be eligible (generation 1 == iteration 2 - 1)
-        for candidate in pareto_frontier:
-            assert candidate.generation_number == 1, f"Expected generation 1, got {candidate.generation_number}"
 
     def test_empty_cohort_handling(self):
         """Test behavior with empty cohorts and no candidates."""
@@ -368,7 +347,8 @@ class TestParetoFrontier:
 
         # Test filtering with no promoted candidates
         survivors = Survivors(iteration=1)
-        pareto_frontier = self.selector.filter(survivors)
+        pareto_parents = self.selector.promote(survivors)
+        pareto_frontier = pareto_parents
 
         assert len(pareto_frontier) == 0
 
@@ -386,7 +366,8 @@ class TestParetoFrontier:
 
         # Should be in Pareto frontier
         survivors = Survivors(single_candidate, iteration=1)
-        pareto_frontier = self.selector.filter(survivors)
+        pareto_parents = self.selector.promote(survivors)
+        pareto_frontier = pareto_parents
 
         assert len(pareto_frontier) == 1
         assert single_candidate in pareto_frontier
@@ -419,12 +400,10 @@ class TestParetoFrontier:
             self.create_candidate({0: 0.8, 1: 0.8})
         ]
 
-        for candidate in candidates:
-            cohort = Survivors(candidate, iteration=0)
-            self.selector.promote(cohort)
+        cohort = Survivors(*candidates, iteration=0)
+        parents = self.selector.promote(cohort)
 
         # Test stochastic sampling
-        parents = Parents(*candidates, iteration=1)
         sampled = parents.sample_stochastic(2)
 
         assert len(sampled) <= 2
@@ -465,7 +444,8 @@ class TestParetoFrontier:
 
         # Test Pareto frontier - should include all specialists (no domination)
         survivors = Survivors(*candidates, iteration=1)
-        pareto_frontier = self.selector.filter(survivors)
+        pareto_parents = self.selector.promote(survivors)
+        pareto_frontier = pareto_parents
 
         # Specialists shouldn't dominate each other
         assert len(pareto_frontier) >= 5  # At least the 5 specialists
@@ -492,7 +472,8 @@ class TestParetoFrontier:
         # Verify system can handle large sets - filter candidates from generation 4 (last generation)
         last_gen_candidates = [c for c in candidates if c.generation_number == 4]
         survivors = Survivors(*last_gen_candidates, iteration=5)  # iteration 5, so gen 4 candidates are eligible
-        pareto_frontier = self.selector.filter(survivors)
+        pareto_parents = self.selector.promote(survivors)
+        pareto_frontier = pareto_parents
 
         assert len(pareto_frontier) >= 1
         assert len(pareto_frontier) <= len(last_gen_candidates)
@@ -522,7 +503,8 @@ class TestParetoFrontier:
         assert candidate_a in self.selector.task_best_candidates[2]  # 1.0 is best
 
         survivors = Survivors(candidate_a, candidate_b, candidate_c, iteration=1)
-        pareto_frontier = self.selector.filter(survivors)
+        pareto_parents = self.selector.promote(survivors)
+        pareto_frontier = pareto_parents
 
         # A and B should be in frontier, C is dominated by both
         assert len(pareto_frontier) == 2
@@ -591,7 +573,8 @@ class TestParetoFrontier:
 
         # Algorithm 2 Step 4: Remove dominated candidates from C
         survivors = Survivors(*[candidate_a, candidate_b, candidate_c], iteration=1)
-        pareto_frontier = self.selector.filter(survivors)
+        pareto_parents = self.selector.promote(survivors)
+        pareto_frontier = pareto_parents
 
         # Final result: all three should be in frontier (no domination)
         frontier_set = set()
