@@ -178,7 +178,7 @@ class ParetoFrontier(Selector):
                 return
             else:
                 # Neither dominates → check ancestry
-                parents_in_winners = [w for w in current_winners if self._is_ancestor(w, candidate)]
+                parents_in_winners = [w for w in current_winners if w.is_ancestor_of(candidate)]
 
                 if parents_in_winners:
                     # Remove all parents and add the evolved child
@@ -187,7 +187,7 @@ class ParetoFrontier(Selector):
                         self._update_old_winner(parent)
                     current_winners.append(candidate)
                     self.task_wins[candidate] = self.task_wins.get(candidate, 0) + 1
-                elif not self._has_any_descendants_in(candidate, current_winners):
+                elif not candidate.has_descendant_in(current_winners):
                     # No ancestry relationship → keep as genuinely different solution
                     current_winners.append(candidate)
                     self.task_wins[candidate] = self.task_wins.get(candidate, 0) + 1
@@ -219,25 +219,6 @@ class ParetoFrontier(Selector):
             for candidate in candidates:
                 self.update_score(task_id, candidate)
 
-    def _is_ancestor(self, potential_ancestor: Candidate, descendant: Candidate) -> bool:
-        """Check if potential_ancestor is an ancestor of descendant."""
-        found_ancestor = False
-        def check_ancestor(ancestor, gen_number, metadata):
-            nonlocal found_ancestor
-            if ancestor == potential_ancestor:
-                found_ancestor = True
-                return False  # Stop traversal
-            return True  # Continue traversal
-
-        descendant.traverse_ancestors(check_ancestor)
-        return found_ancestor
-
-    def _has_any_descendants_in(self, candidate: Candidate, candidate_list: List[Candidate]) -> bool:
-        """Check if candidate has any descendants in the given list."""
-        for other_candidate in candidate_list:
-            if self._is_ancestor(candidate, other_candidate):
-                return True
-        return False
 
     def _pareto_filter(self, candidates: List[Candidate], survivors: Cohort) -> List[Candidate]:
         """Filter candidates using Pareto dominance.

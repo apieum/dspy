@@ -188,3 +188,17 @@ class Candidate:
         my_ancestors = self._get_all_ancestors()
         other_ancestors = other._get_all_ancestors()
         return my_ancestors.intersection(other_ancestors)
+
+    def is_ancestor_of_any(self, candidates: List['Candidate']) -> bool:
+        """Check if this candidate is an ancestor of any candidate in the given list."""
+        for candidate in candidates:
+            if self.is_ancestor_of(candidate):
+                return True
+        return False
+
+    def has_descendant_in(self, candidates: List['Candidate']) -> bool:
+        """Check if this candidate has any descendants in the given list."""
+        for other_candidate in candidates:
+            if self.is_ancestor_of(other_candidate):
+                return True
+        return False
