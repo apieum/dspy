@@ -131,7 +131,7 @@ class Candidate:
             best_candidate = best_candidate.best_for_task(task_id, candidate)
         return best_candidate
 
-    def better_than(self, other: 'Candidate') -> bool:
+    def dominate(self, other: 'Candidate') -> bool:
         """Check if this candidate Pareto-dominates another candidate.
 
         Returns True if this candidate performs at least as well on all tasks

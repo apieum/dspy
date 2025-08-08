@@ -259,14 +259,16 @@ class TestSimplifiedSystemAwareMerge:
         self.generator.attempted_merges.add((1, 2, 3))
         self.generator.merge_stats["success"] = 5
         
+        from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
         training_data = [Mock(), Mock()]
+        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.5)
         
-        self.generator.start_compilation(Mock(), training_data, training_data)
+        self.generator.start_compilation(Mock(), dataset_manager)
         
         # Verify reset
         assert len(self.generator.attempted_merges) == 0
         assert self.generator.merge_stats["success"] == 0
-        assert self.generator.feedback_data == training_data
+        assert self.generator.dataset_manager is dataset_manager
 
     def test_get_merge_statistics(self):
         """Test merge statistics reporting."""

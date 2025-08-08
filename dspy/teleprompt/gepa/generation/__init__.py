@@ -8,8 +8,7 @@ from .crossover import SystemAwareMerge
 from .feedback import FeedbackProvider
 from .enhanced_metrics import (
     code_evaluation_metric, math_problem_metric, 
-    text_classification_metric, qa_accuracy_metric,
-    simple_accuracy_metric
+    text_classification_metric, qa_accuracy_metric
 )
 from .reflective_mutation_native import ReflectivePromptMutation
 from .reflection_strategy import (
@@ -37,8 +36,7 @@ __all__ = [
     
     # Enhanced μf-compliant metrics
     'code_evaluation_metric', 'math_problem_metric',
-    'text_classification_metric', 'qa_accuracy_metric', 
-    'simple_accuracy_metric',
+    'text_classification_metric', 'qa_accuracy_metric',
     
     # DSPy-native architectural components  
     'ReflectionStrategy',

@@ -20,11 +20,11 @@ class TestParetoFrontier:
         # Create mock training data with 3 tasks
         d_feedback = [dspy.Example(task=f"task{i}") for i in range(3)]
         d_pareto = [dspy.Example(task=f"task{i}") for i in range(3)]
-        
+
         # Combine training data and create DatasetManager
         combined_training_data = d_feedback + d_pareto
         dataset_manager = DefaultDatasetManager(combined_training_data, pareto_split_ratio=0.5)
-        
+
         self.selector.start_compilation(None, dataset_manager)
 
     def create_candidate(self, scores_dict, generation=0, parents=None):
@@ -112,7 +112,7 @@ class TestParetoFrontier:
         self.selector.promote(cohort)
 
         # Verify domination relationship
-        assert candidate_a.better_than(candidate_b)
+        assert candidate_a.dominate(candidate_b)
 
         # A should be the only task 0 winner (dominates B)
         assert self.selector.task_best_candidates[0] == [candidate_a]
@@ -145,8 +145,8 @@ class TestParetoFrontier:
         cand_b = self.create_candidate({0: 1.0, 1: 0.1, 2: 0.1})
 
         # Verify A dominates B
-        assert cand_a.better_than(cand_b), "A should dominate B"
-        assert not cand_b.better_than(cand_a), "B should not dominate A"
+        assert cand_a.dominate(cand_b), "A should dominate B"
+        assert not cand_b.dominate(cand_a), "B should not dominate A"
 
         # Update scores in selector
         self.selector.update_score(0, cand_a)
@@ -173,8 +173,8 @@ class TestParetoFrontier:
         cand_b = self.create_candidate({0: 1.0, 1: 0.7, 2: 0.7})
 
         # Verify neither dominates the other
-        assert not cand_a.better_than(cand_b), "A should not dominate B"
-        assert not cand_b.better_than(cand_a), "B should not dominate A"
+        assert not cand_a.dominate(cand_b), "A should not dominate B"
+        assert not cand_b.dominate(cand_a), "B should not dominate A"
 
         # B should win task 0 due to better performance
         assert cand_b.task_score(0) > cand_a.task_score(0), "B should score better on task 0 (1.0 > 0.8)"
@@ -202,8 +202,8 @@ class TestParetoFrontier:
         cand_b = self.create_candidate({0: 1.0, 1: 0.9, 2: 0.7})
 
         # Verify neither dominates the other
-        assert not cand_a.better_than(cand_b), "A should not dominate B"
-        assert not cand_b.better_than(cand_a), "B should not dominate A"
+        assert not cand_a.dominate(cand_b), "A should not dominate B"
+        assert not cand_b.dominate(cand_a), "B should not dominate A"
 
         # Both have equal scores on task 0
         assert cand_a.task_score(0) == cand_b.task_score(0), "Both should have equal scores on task 0"
@@ -224,7 +224,7 @@ class TestParetoFrontier:
         cand_b = self.create_candidate({0: 1.0, 1: 0.1, 2: 0.1})
 
         # Verify A dominates B
-        assert cand_a.better_than(cand_b), "A should dominate B"
+        assert cand_a.dominate(cand_b), "A should dominate B"
 
         # Both have equal scores on task 0
         assert cand_a.task_score(0) == cand_b.task_score(0), "Both should have equal scores on task 0 (1.0)"
@@ -263,7 +263,7 @@ class TestParetoFrontier:
 
         # Step 3: C arrives with same task score but dominates B
         cand_c = self.create_candidate({0: 0.9, 1: 0.5, 2: 0.5})
-        assert cand_c.better_than(cand_b), "C should dominate B (better on tasks 1 and 2)"
+        assert cand_c.dominate(cand_b), "C should dominate B (better on tasks 1 and 2)"
 
         self.selector.update_score(0, cand_c)
 
@@ -503,7 +503,7 @@ class TestParetoFrontier:
             for j, candidate_b in enumerate(frontier_list):
                 if i != j:
                     # No candidate in frontier should dominate another
-                    assert not candidate_a.better_than(candidate_b)
+                    assert not candidate_a.dominate(candidate_b)
 
     def test_edge_case_zero_scores(self):
         """Test handling of zero scores."""

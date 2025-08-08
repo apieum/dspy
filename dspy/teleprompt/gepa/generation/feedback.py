@@ -12,21 +12,17 @@ class FeedbackProvider:
     """Encapsulates metric (μ) and enhanced feedback function (μf) for GEPA.
     
     This class provides a clean interface for evaluation and diagnostic feedback,
-    supporting both simple metrics and rich μf-compliant metrics that return
-    detailed evaluation traces for intelligent reflection.
+    supporting μf-compliant metrics that return detailed evaluation traces 
+    for intelligent reflection.
     
-    The metric can return either:
-    - float: Simple score (backward compatible)
-    - (float, str): Score and rich feedback text (μf-compliant)
+    The metric returns (float, str): Score and rich feedback text (μf-compliant).
     """
     
     def __init__(self, metric: Callable, feedback_function: Optional[Callable] = None):
         """Initialize feedback provider.
         
         Args:
-            metric: Evaluation function μ that returns either:
-                   - float: Simple score for backward compatibility  
-                   - (float, str): Score and rich diagnostic text (μf-compliant)
+            metric: Evaluation function μ that returns (float, str): Score and rich diagnostic text (μf-compliant)
             feedback_function: Optional enhanced feedback function μf for additional diagnostics
         """
         if metric is None:
@@ -37,7 +33,7 @@ class FeedbackProvider:
     
     def evaluate(self, example: dspy.Example, prediction, trace: Optional[List] = None, 
                 module_idx: Optional[int] = None) -> tuple[float, str]:
-        """Evaluate example and provide feedback.
+        """Evaluate example and provide feedback, now capturing rich µf output.
         
         Args:
             example: Training example
@@ -48,35 +44,17 @@ class FeedbackProvider:
         Returns:
             Tuple of (score, diagnostic_text)
         """
-        # Get score and optional feedback_text using metric (μ/μf)
-        feedback_text = None
         try:
             metric_result = self.metric(example, prediction, trace)
-            
-            # Unpack the result for μf compliance
-            if isinstance(metric_result, tuple):
-                score, feedback_text = metric_result
-            else:
-                score = metric_result  # Maintain backward compatibility
-                
+            score, feedback_text = metric_result
             score = float(score)
-            
         except TypeError:
-            # Fallback for metrics that don't accept trace parameter
             metric_result = self.metric(example, prediction)
-            if isinstance(metric_result, tuple):
-                score, feedback_text = metric_result
-            else:
-                score = metric_result
+            score, feedback_text = metric_result
             score = float(score)
-        
-        # Start with base diagnostic from metric evaluation
+
         status = "SUCCESS" if score > 0.5 else "FAILURE"
-        diagnostic = f"Score: {score:.2f} ({status})"
-        
-        # Append rich feedback from metric's μf output if available
-        if feedback_text:
-            diagnostic += f" | Evaluator Feedback: {feedback_text}"
+        diagnostic = f"Score: {score:.2f} ({status}) | Evaluator Feedback: {feedback_text}"
         
         # Get additional diagnostic feedback from enhanced feedback function
         if self.feedback_function:

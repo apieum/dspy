@@ -44,65 +44,45 @@ class PromotionEvaluator(Evaluator):
         pareto_size = len(dataset_manager.get_pareto_set())
         logger.debug(f"PromotionEvaluator prepared with {pareto_size} pareto tasks and dataset manager")
 
-    def evaluate(self, cohort: NewBorns, budget: Budget) -> Survivors:
+    def evaluate(self, new_borns: NewBorns, budget) -> Survivors:
+        """Two-phase evaluation implementing GEPA Algorithm 1.
+        
+        This method is completely independent of the Generator's minibatch process.
+        The Evaluator performs its own validation using its own minibatch sampling.
         """
-        Two-phase evaluation from GEPA Algorithm 1.
+        promoted_candidates = []
         
-        For candidates with parents: minibatch validation + full evaluation
-        For candidates without parents: direct full evaluation
-        
-        Args:
-            cohort: Newly generated candidates to evaluate
-            budget: Budget to track evaluation costs
+        for candidate in new_borns.candidates:
+            is_promising = False
             
-        Returns:
-            Survivors containing only validated candidates with full task_scores
-        """
-        validated_candidates = []
+            if candidate.parents:
+                # Phase 1: Independent minibatch validation against parent
+                parent = candidate.parents[0]
+                is_improved, cost = self._validate_on_minibatch(candidate, parent)
+                budget.spend_on_evaluation(candidate.module, {"phase": "validation", "cost": cost})
+                if is_improved:
+                    is_promising = True
+            else:
+                # The initial candidate is always promising (no parent to compare against)
+                is_promising = True
 
-        for candidate in cohort.candidates:
-            if not candidate.parents:
-                # No parent comparison needed - directly evaluate on pareto data
-                logger.debug("Evaluating parentless candidate directly on pareto data")
+            # Phase 2: Full evaluation for promising candidates
+            if is_promising:
                 pareto_set = self.dataset_manager.get_pareto_set()
                 candidate.evaluate_on_batch(pareto_set, self.metric)
-                budget.spend_on_evaluation(candidate.module, {
-                    "phase": "direct_pareto_evaluation", 
-                    "examples": len(pareto_set)
-                })
-                validated_candidates.append(candidate)
-            else:
-                parent = candidate.parents[0]  # Assuming single parent for mutation
+                budget.spend_on_evaluation(
+                    candidate.module, 
+                    {"phase": "full_evaluation", "examples": len(pareto_set)}
+                )
+                promoted_candidates.append(candidate)
 
-                # Phase 1: Minibatch Validation
-                is_improved, minibatch_cost = self._validate_on_minibatch(candidate, parent)
-                budget.spend_on_evaluation(candidate.module, {
-                    "phase": "minibatch_validation", 
-                    "cost": minibatch_cost,
-                    "examples": minibatch_cost // 2
-                })
+        logger.info(f"Two-phase evaluation: {len(promoted_candidates)}/{len(new_borns.candidates)} candidates promoted")
+        return Survivors(*promoted_candidates, iteration=new_borns.iteration)
 
-                if is_improved:
-                    # Phase 2: Full Evaluation on Pareto Data
-                    logger.debug(f"Candidate validated, running full Pareto evaluation")
-                    pareto_set = self.dataset_manager.get_pareto_set()
-                    candidate.evaluate_on_batch(pareto_set, self.metric)
-                    budget.spend_on_evaluation(candidate.module, {
-                        "phase": "full_pareto_evaluation", 
-                        "examples": len(pareto_set)
-                    })
-                    validated_candidates.append(candidate)
-                    logger.debug(f"Candidate promoted with average score: {candidate.average_task_score():.3f}")
-                else:
-                    logger.debug("Candidate did not improve on minibatch validation")
-
-        logger.info(f"Two-phase evaluation: {len(validated_candidates)}/{len(cohort.candidates)} candidates validated")
-        
-        return Survivors(*validated_candidates, iteration=cohort.iteration)
-
-    def _validate_on_minibatch(self, child, parent) -> tuple[bool, int]:
+    def _validate_on_minibatch(self, child: 'Candidate', parent: 'Candidate') -> tuple[bool, int]:
         """
         Algorithm 1, Lines 13-14: Compare child and parent on validation minibatch.
+        Gets a validation minibatch, separate from the generator's feedback minibatch.
         
         Args:
             child: Generated candidate to validate
@@ -111,43 +91,38 @@ class PromotionEvaluator(Evaluator):
         Returns:
             Tuple of (is_improved: bool, cost: int)
         """
+        # Gets a validation minibatch, separate from the generator's
         validation_minibatch = self.dataset_manager.get_validation_minibatch(self.minibatch_size)
-        if not validation_minibatch:
-            logger.warning("No validation data available for minibatch validation")
+        if not validation_minibatch: 
             return False, 0
         
         try:
-            # Evaluate child on validation minibatch
-            child_scores = []
-            for example in validation_minibatch:
-                prediction = child.module(**example.inputs())
-                score = self.metric(example, prediction)
-                child_scores.append(score)
-            
-            # Evaluate parent on same validation minibatch
-            parent_scores = []
-            for example in validation_minibatch:
-                prediction = parent.module(**example.inputs())
-                score = self.metric(example, prediction)
-                parent_scores.append(score)
+            child_scores = [self._get_score(ex, child) for ex in validation_minibatch]
+            parent_scores = [self._get_score(ex, parent) for ex in validation_minibatch]
 
-            # Calculate averages
-            avg_child_score = sum(child_scores) / len(child_scores) if child_scores else 0
-            avg_parent_score = sum(parent_scores) / len(parent_scores) if parent_scores else 0
+            avg_child = sum(child_scores) / len(child_scores) if child_scores else 0
+            avg_parent = sum(parent_scores) / len(parent_scores) if parent_scores else 0
             
-            # Cost is number of examples * 2 (for child and parent)
-            cost = len(validation_minibatch) * 2
+            is_improved = avg_child > avg_parent
+            cost = len(validation_minibatch) * 2  # Cost for evaluating both child and parent
             
-            # Check if child better than parent
-            is_improved = avg_child_score > avg_parent_score
-            logger.debug(f"Minibatch validation: parent={avg_parent_score:.3f}, "
-                        f"child={avg_child_score:.3f}, improved={is_improved}")
+            logger.debug(f"Minibatch validation: parent={avg_parent:.3f}, "
+                        f"child={avg_child:.3f}, improved={is_improved}")
             
             return is_improved, cost
             
         except Exception as e:
             logger.warning(f"Minibatch validation failed: {e}")
             return False, len(validation_minibatch) * 2  # Still count the cost
+
+    def _get_score(self, example, candidate):
+        """Helper method to get score from a candidate on an example."""
+        try:
+            prediction = candidate.module(**example.inputs())
+            return self.metric(example, prediction)
+        except Exception as e:
+            logger.warning(f"Failed to get score for candidate: {e}")
+            return 0.0
 
     def get_metric(self) -> Callable:
         """Get the metric function used by this evaluator."""

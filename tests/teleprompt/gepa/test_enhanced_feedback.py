@@ -9,29 +9,13 @@ from dspy.teleprompt.gepa.generation.enhanced_metrics import (
     code_evaluation_metric,
     math_problem_metric, 
     text_classification_metric,
-    qa_accuracy_metric,
-    simple_accuracy_metric
+    qa_accuracy_metric
 )
 
 
 class TestEnhancedFeedbackFunction:
     """Test μf-compliant enhanced feedback functionality."""
 
-    def test_backward_compatibility_simple_metric(self):
-        """Test that simple metrics (returning float) still work."""
-        def simple_metric(example, prediction, trace=None):
-            return 0.75
-        
-        provider = FeedbackProvider(metric=simple_metric)
-        example = dspy.Example(question="test", answer="correct")
-        prediction = Mock()
-        prediction.answer = "correct"
-        
-        score, diagnostic = provider.evaluate(example, prediction)
-        
-        assert score == 0.75
-        assert "Score: 0.75 (SUCCESS)" in diagnostic
-        assert "Evaluator Feedback:" not in diagnostic  # No rich feedback
 
     def test_enhanced_metric_with_rich_feedback(self):
         """Test μf-compliant metrics with rich diagnostic feedback."""

@@ -257,13 +257,3 @@ def qa_accuracy_metric(example: dspy.Example, prediction, trace: Optional[list] 
         return (0.0, f"Evaluation failed: {str(e)}")
 
 
-# Backward compatibility: Simple metric that returns only float
-def simple_accuracy_metric(example: dspy.Example, prediction, trace: Optional[list] = None) -> float:
-    """
-    Traditional metric that returns only a float score.
-    
-    This demonstrates backward compatibility - existing metrics continue to work.
-    """
-    expected = getattr(example, 'answer', '').strip().lower()
-    actual = getattr(prediction, 'answer', str(prediction)).strip().lower()
-    return 1.0 if expected == actual else 0.0

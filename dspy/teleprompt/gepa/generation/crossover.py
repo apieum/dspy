@@ -6,13 +6,16 @@ overall architecture and removing the need for a separate utils directory.
 """
 
 import logging
-from typing import List, Optional, Tuple, Set
+from typing import List, Optional, Tuple, Set, TYPE_CHECKING
 
 import dspy
 from dspy.teleprompt.utils import get_signature, set_signature
 from .generator import Generator
 from ..data.candidate import Candidate
 from ..data.cohort import Parents, NewBorns
+
+if TYPE_CHECKING:
+    from ..dataset_manager import DatasetManager
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +33,8 @@ class SystemAwareMerge(Generator):
         self.merge_rate = merge_rate
         self.population_size = population_size
 
-        # For interface compatibility (not used in Algorithm 4)
-        self.feedback_data: List[dspy.Example] = []
+        # DatasetManager for interface compatibility (not used in Algorithm 4)
+        self.dataset_manager: Optional["DatasetManager"] = None
 
         # Integrated merge history tracking (replaces MergeHistoryTracker)
         self.attempted_merges: Set[Tuple[int, int, int]] = set()
@@ -182,13 +185,11 @@ class SystemAwareMerge(Generator):
             logger.warning(f"Error creating merged candidate: {e}")
             return None
 
-    def start_compilation(self, student: dspy.Module,
-                         d_feedback: List[dspy.Example],
-                         d_pareto: List[dspy.Example]) -> None:
+    def start_compilation(self, student: dspy.Module, dataset_manager: "DatasetManager") -> None:
         """Resets merge history for a new compilation run."""
-        # Store feedback data for interface compatibility
+        # Store dataset manager for interface compatibility
         # (Algorithm 4 doesn't use it, unlike ReflectivePromptMutation)
-        self.feedback_data = d_feedback
+        self.dataset_manager = dataset_manager
 
         self.attempted_merges.clear()
         self.merge_stats = {"success": 0, "failure_not_desirable": 0, "failure_ancestry": 0}
