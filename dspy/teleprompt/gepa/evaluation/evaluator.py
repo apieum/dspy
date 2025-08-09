@@ -33,8 +33,3 @@ class Evaluator(CompilationObserver):
             successfully promoted after passing evaluation.
         """
         ...
-
-    @abstractmethod
-    def get_metric(self) -> Callable:
-        """Get the metric function used by this component."""
-        ...

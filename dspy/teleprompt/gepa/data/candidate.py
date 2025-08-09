@@ -1,10 +1,12 @@
 """Candidate data structure for GEPA optimization."""
 from dataclasses import dataclass, field
-from typing import Dict, List, Callable
+from typing import Dict, List, Callable, Tuple
 from typing_extensions import Any
 
-import dspy
-from dspy import Module
+from dspy import Module, Example, Prediction
+from dspy.dsp.utils.settings import settings
+#from dspy.primitives.example import Example
+from dspy.utils.parallelizer import ParallelExecutor
 
 
 @dataclass
@@ -28,53 +30,61 @@ class Candidate:
             return False
         return self is other
 
-    def traverse_ancestors(self, callback: Callable[['Candidate', int, Dict[str, str]], bool]) -> None:
-        """Traverse ancestors of this candidate."""
-        for parent in self.parents:
-            if callback(parent, self.generation_number, self.creation_metadata):
-                parent.traverse_ancestors(callback)
-
-    def analyse_scores(self, callback: Callable[[int, float], Any], acc=[]) -> Any:
-        """Analyse scores of this candidate."""
-        for index, score in self.task_scores.items():
-            acc.append(callback(index, score))
-        return acc
-
-    def set_task_score(self, task_id: int, score: float) -> None:
-        """Set score for a specific task during evaluation."""
-        self.task_scores[task_id] = score
-
-    def set_task_scores(self, task_scores: Dict[int, float]) -> None:
-        """Set scores for multiple tasks."""
-        for task_id, score in task_scores.items():
-            self.set_task_score(task_id, score)
-
-    def task_score(self, task_id: int) -> float:
+    def task_score(self, task_id: int, default=0.0) -> float:
         """Get score for a specific task."""
-        return self.task_scores.get(task_id, 0.0)
+        return self.task_scores.get(task_id, default)
 
     def average_task_score(self) -> float:
         """Calculate average score across all tasks."""
         return sum(self.task_scores.values()) / len(self.task_scores) if self.task_scores else 0.0
 
-    def evaluate_on_example(self, example: dspy.Example, task_id: int, metric: Callable) -> float:
+    def evaluate_on_task(self, task: Example, metric: Callable) -> Tuple[float, Any]:
         """Evaluate this candidate on a single example using provided metric."""
         try:
-            prediction = self.module(**example.inputs())
-            score = float(metric(example, prediction))
-            self.task_scores[task_id] = score
-            return score
+            prediction = self.module(**task.inputs())
+            score = float(metric(task, prediction))
+            return (score, prediction)
         except Exception:
-            return 0.0  # Failed evaluation
+            return (-1.0, None)  # Failed evaluation
 
-    def evaluate_on_batch(self, examples: List[dspy.Example], metric: Callable) -> Dict[int, float]:
+    def evaluate_on_batch(self, examples: Dict[int, Example], metric: Callable,
+        num_threads=None,
+        max_errors=None,
+        provide_traceback=False,
+        disable_progress_bar=False) -> Dict[int, float]:
         """Evaluate this candidate on a batch of examples."""
         if not examples:
             return {}
 
-        for task_id, example in enumerate(examples):
-            self.evaluate_on_example(example, task_id, metric)
-        return self.task_scores
+        num_threads = num_threads if num_threads is not None else settings.num_threads
+        max_errors = max_errors if max_errors is not None else settings.max_errors
+        executor = ParallelExecutor(
+            num_threads=num_threads,
+            max_errors=max_errors,
+            provide_traceback=provide_traceback,
+            disable_progress_bar=disable_progress_bar,
+        )
+        def process_example(example):
+            try:
+                task_id, task = example
+                prediction = self.module(**task.inputs())
+                score = float(metric(task, prediction))
+                return (task_id, score)
+            except Exception:
+                return (task_id, -1.0)  # Failed evaluation
+
+        result = executor.execute(process_example, examples.items())
+        if result:
+            return {task_id:score for task_id, score in result}
+        return {task_id:-1.0 for task_id in examples.keys()}
+
+    def batch_task_scores(self, examples: Dict[int, Example], metric: Callable,
+        num_threads=None,
+        max_errors=None,
+        provide_traceback=False,
+        disable_progress_bar=False) -> Dict[int, float]:
+            self.task_scores = self.evaluate_on_batch(examples, metric, num_threads, max_errors, provide_traceback, disable_progress_bar)
+            return self.task_scores
 
     def best_overall(self, other: 'Candidate') -> 'Candidate':
         my_avg_score = self.average_task_score()

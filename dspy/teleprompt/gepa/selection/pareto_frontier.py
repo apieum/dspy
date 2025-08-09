@@ -60,7 +60,7 @@ class ParetoFrontier(Selector):
 
     def start_compilation(self, student, dataset_manager: "DatasetManager") -> None:
         """Called when compilation begins. Initialize task tracking structures."""
-        num_tasks = dataset_manager.num_pareto_tasks
+        num_tasks = dataset_manager.num_eval_tasks
 
         # Initialize task_best_candidates and task_scores for all tasks
         for task_id in range(num_tasks):

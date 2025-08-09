@@ -46,7 +46,7 @@ class TestParetoPromotion:
 
         # Initialize selector with 2 tasks
         training_data = [dspy.Example(task_id=f"task{i}", input="dummy", output="dummy") for i in [1, 2, 3]]
-        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.67)
+        dataset_manager = DefaultDatasetManager(training_data, split_ratio=0.67)
         selector.start_compilation(Mock(), dataset_manager)
 
         # Create survivors cohort
@@ -89,7 +89,7 @@ class TestParetoPromotion:
 
         # Initialize selector with 3 tasks
         training_data = [dspy.Example(task_id=f"task{i}", input="dummy", output="dummy") for i in [1, 2, 3, 4]]
-        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.75)
+        dataset_manager = DefaultDatasetManager(training_data, split_ratio=0.75)
         selector.start_compilation(Mock(), dataset_manager)
 
         # Create survivors cohort
@@ -127,7 +127,7 @@ class TestParetoPromotion:
 
         # Initialize selector
         training_data = [dspy.Example(task_id=f"task{i}", input="dummy", output="dummy") for i in [1, 2, 3]]
-        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.67)
+        dataset_manager = DefaultDatasetManager(training_data, split_ratio=0.67)
         selector.start_compilation(Mock(), dataset_manager)
 
         # Create survivors cohort
@@ -163,7 +163,7 @@ class TestParetoPromotion:
 
         # Initialize selector with 2 tasks
         training_data = [dspy.Example(task_id=f"task{i}", input="dummy", output="dummy") for i in [1, 2, 3]]
-        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.67)
+        dataset_manager = DefaultDatasetManager(training_data, split_ratio=0.67)
         selector.start_compilation(Mock(), dataset_manager)
 
         # Create survivors cohort
@@ -189,7 +189,7 @@ class TestParetoPromotion:
         candidate_a.generation_number = 1
 
         training_data = [dspy.Example(task_id="task1", input="dummy", output="dummy")]
-        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=1.0)
+        dataset_manager = DefaultDatasetManager(training_data, split_ratio=1.0)
         selector.start_compilation(Mock(), dataset_manager)
 
         # Create survivors with iteration 5

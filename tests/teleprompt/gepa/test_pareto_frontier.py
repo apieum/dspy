@@ -23,7 +23,7 @@ class TestParetoFrontier:
 
         # Combine training data and create DatasetManager
         combined_training_data = d_feedback + d_pareto
-        dataset_manager = DefaultDatasetManager(combined_training_data, pareto_split_ratio=0.5)
+        dataset_manager = DefaultDatasetManager(combined_training_data, split_ratio=0.5)
 
         self.selector.start_compilation(None, dataset_manager)
 
@@ -390,7 +390,7 @@ class TestParetoFrontier:
         """Test stochastic sampling functionality."""
         # Override with 2-task setup
         training_data = [dspy.Example(task=f"task{i}") for i in range(2)]
-        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.5)
+        dataset_manager = DefaultDatasetManager(training_data, split_ratio=0.5)
         self.selector.start_compilation(None, dataset_manager)
 
         # Create multiple good candidates
@@ -416,7 +416,7 @@ class TestParetoFrontier:
         """Test complex scenario with 5 tasks and 8 candidates."""
         # Override with 5-task setup - create enough data to ensure 5 pareto tasks
         training_data = [dspy.Example(task=f"task{i}") for i in range(10)]  # 10 examples
-        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.6)  # 6 pareto tasks, but we'll only use first 5
+        dataset_manager = DefaultDatasetManager(training_data, split_ratio=0.6)  # 6 pareto tasks, but we'll only use first 5
         self.selector.start_compilation(None, dataset_manager)
 
         # Create diverse candidates with different specializations
@@ -454,7 +454,7 @@ class TestParetoFrontier:
         """Test performance and correctness with larger candidate sets."""
         # Override with 4-task setup
         training_data = [dspy.Example(task=f"task{i}") for i in range(4)]
-        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=0.5)
+        dataset_manager = DefaultDatasetManager(training_data, split_ratio=0.5)
         self.selector.start_compilation(None, dataset_manager)
 
         # Create 20 candidates with random-ish but controlled performance

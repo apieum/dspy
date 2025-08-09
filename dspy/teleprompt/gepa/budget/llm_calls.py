@@ -49,8 +49,8 @@ class LLMCallsBudget(Budget):
     def start_compilation(self, student: dspy.Module, dataset_manager: "DatasetManager") -> None:
         """Initialize budget tracking when compilation begins."""
         logger.info(f"Starting compilation with budget of {self.max_calls} LLM calls")
-        feedback_size = dataset_manager.num_feedback_examples
-        pareto_size = dataset_manager.num_pareto_tasks
+        feedback_size = dataset_manager.num_dev_examples
+        pareto_size = dataset_manager.num_eval_tasks
         logger.info(f"Dataset split: {feedback_size} feedback examples, {pareto_size} pareto examples")
         self.consumed_calls = 0
         self.iteration_costs = []

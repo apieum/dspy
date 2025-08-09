@@ -110,10 +110,10 @@ class TestComponentInterfaces:
         """Generation components should implement required interface."""
         from dspy.teleprompt.gepa.generation import ReflectivePromptMutation
         from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
-        
+
         def simple_metric(example, prediction, trace=None):
             return 0.5
-        
+
         feedback_provider = FeedbackProvider(metric=simple_metric)
         strategy = ReflectivePromptMutation(feedback_provider)
 
@@ -188,13 +188,12 @@ class TestDataStructures:
         from dspy.teleprompt.gepa.selection import ParetoFrontier
         from dspy.teleprompt.gepa.data.cohort import Survivors
         from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
-        
+
         selector = ParetoFrontier()
         training_data = [dspy.Example(input="task0"), dspy.Example(input="task1"), dspy.Example(input="task2")]
-        dataset_manager = DefaultDatasetManager(training_data, pareto_split_ratio=1.0)  # Use all for pareto
+        dataset_manager = DefaultDatasetManager(training_data, split_ratio=1.0)  # Use all for pareto
         selector.start_compilation(None, dataset_manager)
-        candidate = Candidate(SimpleQA(), generation_number=0)
-        candidate.set_task_scores({0: 0.8, 1: 0.6, 2: 0.7})
+        candidate = Candidate(SimpleQA(), generation_number=0, task_scores={0: 0.8, 1: 0.6, 2: 0.7})
 
         # Add candidate via promote (selectors don't have append)
         cohort = Survivors(candidate, iteration=0)
