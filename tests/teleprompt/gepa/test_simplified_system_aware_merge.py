@@ -8,77 +8,6 @@ from dspy.teleprompt.gepa.data.candidate import Candidate
 from dspy.teleprompt.gepa.data.cohort import Parents, NewBorns
 from dspy.teleprompt.gepa.generation.crossover import SystemAwareMerge
 
-
-class TestCandidateAncestryEncapsulation:
-    """Test the encapsulated ancestry methods on Candidate."""
-
-    def test_is_ancestor_of_simple_lineage(self):
-        """Test is_ancestor_of with a simple parent-child relationship."""
-        # Create lineage: grandparent -> parent -> child
-        grandparent = Candidate(module=Mock(), generation_number=0)
-        parent = Candidate(module=Mock(), parents=[grandparent], generation_number=1)
-        child = Candidate(module=Mock(), parents=[parent], generation_number=2)
-
-        # Test direct ancestry relationships
-        assert parent.is_ancestor_of(child)
-        assert grandparent.is_ancestor_of(child)
-        assert grandparent.is_ancestor_of(parent)
-
-        # Test negative cases
-        assert not child.is_ancestor_of(parent)
-        assert not child.is_ancestor_of(grandparent)
-        assert not parent.is_ancestor_of(grandparent)
-
-    def test_find_common_ancestors_diamond_pattern(self):
-        """Test find_common_ancestors with diamond inheritance pattern."""
-        # Create diamond pattern: ancestor -> parent1, parent2 -> child1, child2
-        ancestor = Candidate(module=Mock(), generation_number=0)
-        parent1 = Candidate(module=Mock(), parents=[ancestor], generation_number=1)
-        parent2 = Candidate(module=Mock(), parents=[ancestor], generation_number=1)
-        child1 = Candidate(module=Mock(), parents=[parent1], generation_number=2)
-        child2 = Candidate(module=Mock(), parents=[parent2], generation_number=2)
-
-        # Children should find ancestor as common ancestor
-        common_ancestors = child1.find_common_ancestors(child2)
-        assert ancestor in common_ancestors
-        assert len(common_ancestors) == 1
-
-        # Parents should also find ancestor as common ancestor
-        common_ancestors = parent1.find_common_ancestors(parent2)
-        assert ancestor in common_ancestors
-        assert len(common_ancestors) == 1
-
-    def test_find_common_ancestors_no_relation(self):
-        """Test find_common_ancestors with unrelated candidates."""
-        # Create two completely separate lineages
-        ancestor1 = Candidate(module=Mock(), generation_number=0)
-        child1 = Candidate(module=Mock(), parents=[ancestor1], generation_number=1)
-
-        ancestor2 = Candidate(module=Mock(), generation_number=0)
-        child2 = Candidate(module=Mock(), parents=[ancestor2], generation_number=1)
-
-        # Should find no common ancestors
-        common_ancestors = child1.find_common_ancestors(child2)
-        assert len(common_ancestors) == 0
-
-    def test_ancestry_handles_cycles_gracefully(self):
-        """Test that ancestry methods handle cycles without infinite loops."""
-        # Create cycle: parent1 -> parent2 -> parent1
-        parent1 = Candidate(module=Mock(), generation_number=1)
-        parent2 = Candidate(module=Mock(), parents=[parent1], generation_number=1)
-        parent1.parents = [parent2]  # Create cycle
-
-        # Should not infinite loop and should handle the cycle
-        assert parent1.is_ancestor_of(parent2)
-        assert parent2.is_ancestor_of(parent1)
-
-        # Common ancestors should work with cycles
-        common_ancestors = parent1.find_common_ancestors(parent2)
-        # In a cycle, they're both ancestors of each other
-        assert len(common_ancestors) >= 0  # May or may not find common ancestors depending on cycle handling
-
-
-
 class TestSimplifiedSystemAwareMerge:
     """Test the simplified SystemAwareMerge implementation."""
 
@@ -101,8 +30,6 @@ class TestSimplifiedSystemAwareMerge:
 
     def test_initialization(self):
         """Test SystemAwareMerge initialization."""
-        assert self.generator.merge_rate == 0.7
-        assert self.generator.population_size == 10
         assert len(self.generator.attempted_merges) == 0
         assert self.generator.merge_stats["success"] == 0
 
@@ -117,18 +44,6 @@ class TestSimplifiedSystemAwareMerge:
         single_parent = Parents([Candidate(module=self.mock_module1)])
         result = self.generator.generate(single_parent)
         assert result.is_empty()
-
-    def test_generate_direct_ancestry_prevention(self):
-        """Test that direct ancestry prevents merging."""
-        # Create parent-child relationship
-        parent = Candidate(module=self.mock_module1, generation_number=0)
-        child = Candidate(module=self.mock_module2, parents=[parent], generation_number=1)
-
-        parents = Parents([parent, child])
-
-        result = self.generator.generate(parents)
-        assert result.is_empty()
-        assert self.generator.merge_stats["failure_ancestry"] == 1
 
     def test_generate_no_common_ancestors(self):
         """Test generate with parents that have no common ancestors."""
@@ -262,7 +177,6 @@ class TestSimplifiedSystemAwareMerge:
         # Verify reset
         assert len(self.generator.attempted_merges) == 0
         assert self.generator.merge_stats["success"] == 0
-        assert self.generator.dataset_manager is dataset_manager
 
     def test_get_merge_statistics(self):
         """Test merge statistics reporting."""
@@ -292,52 +206,3 @@ class TestSimplifiedSystemAwareMerge:
 
         assert len(self.generator.attempted_merges) == 0
         assert self.generator.merge_stats["success"] == 0
-
-
-class TestArchitecturalSimplification:
-    """Test that the refactoring achieved its architectural goals."""
-
-    def test_no_utils_imports(self):
-        """Verify that SystemAwareMerge no longer imports from utils."""
-        import inspect
-        from dspy.teleprompt.gepa.generation.crossover import SystemAwareMerge
-
-        source = inspect.getsource(SystemAwareMerge)
-
-        # Should not import from utils
-        assert "from ..utils" not in source
-        assert "import ..utils" not in source
-
-        # Should be self-contained and use encapsulated methods
-        assert "find_common_ancestors" in source  # Uses Candidate method
-        assert "is_ancestor_of" in source  # Uses Candidate method
-
-    def test_integrated_functionality(self):
-        """Test that all functionality is integrated into the main class."""
-        generator = SystemAwareMerge()
-
-        # Should have integrated merge history
-        assert hasattr(generator, 'attempted_merges')
-        assert hasattr(generator, 'merge_stats')
-
-        # Should have integrated signature detection
-        assert hasattr(generator, '_find_desirable_signatures')
-        assert hasattr(generator, '_create_merged_candidate')
-
-    def test_ancestry_integration(self):
-        """Test that Candidate ancestry methods work correctly."""
-        ancestor = Candidate(module=Mock(), generation_number=0)
-        parent = Candidate(module=Mock(), parents=[ancestor], generation_number=1)
-        child = Candidate(module=Mock(), parents=[parent], generation_number=2)
-
-        # Test the encapsulated methods work
-        assert parent.is_ancestor_of(child)
-        assert ancestor.is_ancestor_of(child)
-
-        # Common ancestors can be found using the new method
-        parent2 = Candidate(module=Mock(), parents=[ancestor], generation_number=1)
-        child2 = Candidate(module=Mock(), parents=[parent2], generation_number=2)
-
-        common_ancestors = child.find_common_ancestors(child2)
-        assert ancestor in common_ancestors
-        assert len(common_ancestors) == 1

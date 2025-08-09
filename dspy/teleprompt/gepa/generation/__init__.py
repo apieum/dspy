@@ -7,12 +7,12 @@ from .crossover import SystemAwareMerge
 # DSPy-native implementation (reuses DSPy's built-in systems)
 from .feedback import FeedbackProvider
 from .enhanced_metrics import (
-    code_evaluation_metric, math_problem_metric, 
+    code_evaluation_metric, math_problem_metric,
     text_classification_metric, qa_accuracy_metric
 )
-from .reflective_mutation_native import ReflectivePromptMutation
+from .reflective_mutation import ReflectivePromptMutation
 from .reflection_strategy import (
-    ReflectionStrategy, 
+    ReflectionStrategy,
     GEPAReflection, SimpleReflection, PrefixReflection
 )
 from .prompt_mutator import (
@@ -24,21 +24,21 @@ from .config import ReflectiveMutationConfig, ModuleSelectionStrategy
 
 __all__ = [
     # Core components
-    'Cohort', 
-    'Generator', 
-    'ReflectivePromptMutation', 
+    'Cohort',
+    'Generator',
+    'ReflectivePromptMutation',
     'FeedbackProvider',
     'SystemAwareMerge',
-    
+
     # Configuration
-    'ReflectiveMutationConfig', 
+    'ReflectiveMutationConfig',
     'ModuleSelectionStrategy',
-    
+
     # Enhanced μf-compliant metrics
     'code_evaluation_metric', 'math_problem_metric',
     'text_classification_metric', 'qa_accuracy_metric',
-    
-    # DSPy-native architectural components  
+
+    # DSPy-native architectural components
     'ReflectionStrategy',
     'GEPAReflection', 'SimpleReflection', 'PrefixReflection',
     'PromptMutator',

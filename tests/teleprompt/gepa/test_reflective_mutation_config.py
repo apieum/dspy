@@ -1,7 +1,7 @@
 """Test simplified ReflectivePromptMutation generator."""
 
 import dspy
-from dspy.teleprompt.gepa.generation.reflective_mutation_native import ReflectivePromptMutation
+from dspy.teleprompt.gepa.generation.reflective_mutation import ReflectivePromptMutation
 from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
 from dspy.teleprompt.gepa.data.cohort import Parents
 from dspy.teleprompt.gepa.data.candidate import Candidate

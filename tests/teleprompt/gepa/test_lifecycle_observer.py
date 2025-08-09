@@ -94,7 +94,7 @@ def test_components_opt_into_lifecycle_events():
         return 0.5
 
     # Create components
-    from dspy.teleprompt.gepa.generation.reflective_mutation_native import ReflectivePromptMutation
+    from dspy.teleprompt.gepa.generation.reflective_mutation import ReflectivePromptMutation
     from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
     from dspy.teleprompt.gepa.evaluation import GEPAEvaluator
     from dspy.teleprompt.gepa.selection import ParetoFrontier

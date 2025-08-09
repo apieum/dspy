@@ -1,8 +1,7 @@
 """System-Aware Merge generator implementing Algorithm 4 from the GEPA paper.
 
 This is a self-contained implementation that integrates all necessary logic
-for ancestry, desirability checks, and history tracking, simplifying the
-overall architecture and removing the need for a separate utils directory.
+for ancestry, desirability checks, and history tracking.
 """
 
 import logging
@@ -23,19 +22,9 @@ logger = logging.getLogger(__name__)
 class SystemAwareMerge(Generator):
     """
     System-Aware Merge generator implementing Algorithm 4 from the GEPA paper.
-
-    This is a self-contained implementation that integrates all necessary logic
-    for ancestry, desirability checks, and history tracking, simplifying the
-    overall architecture and removing the need for a separate utils directory.
     """
 
-    def __init__(self, merge_rate: float = 0.7, population_size: int = 10):
-        self.merge_rate = merge_rate
-        self.population_size = population_size
-
-        # DatasetManager for interface compatibility (not used in Algorithm 4)
-        self.dataset_manager: Optional["DatasetManager"] = None
-
+    def __init__(self):
         # Integrated merge history tracking (replaces MergeHistoryTracker)
         self.attempted_merges: Set[Tuple[int, int, int]] = set()
         self.merge_stats = {"success": 0, "failure_not_desirable": 0, "failure_ancestry": 0}
@@ -46,25 +35,17 @@ class SystemAwareMerge(Generator):
             return NewBorns()
 
         try:
-            # Step 1: Stochastic selection of two parent candidates
+            # Stochastic selection of two parent candidates
             selected_parents = parents.sample_stochastic(2)
             if selected_parents.size() < 2:
                 return NewBorns()
 
             parent1, parent2 = list(selected_parents)
 
-            # Step 2: Check for direct ancestry
-            # This is much cleaner and respects encapsulation.
-            if parent1.is_ancestor_of(parent2) or parent2.is_ancestor_of(parent1):
-                self.merge_stats["failure_ancestry"] += 1
-                return NewBorns()
-
-            # Step 3: Find common ancestors
+            # Find common ancestors
             common_ancestors = parent1.find_common_ancestors(parent2)
-            if not common_ancestors:
-                return NewBorns()
 
-            # Step 4: Iterate through common ancestors to find a valid merge
+            # Iterate through common ancestors to find a valid merge
             # Sort by generation number (most recent first) for better results
             for ancestor in sorted(list(common_ancestors), key=lambda c: c.generation_number, reverse=True):
 
@@ -74,7 +55,7 @@ class SystemAwareMerge(Generator):
                     continue
                 self.attempted_merges.add(merge_key)
 
-                # Step 5: Check for desirable divergence (integrated as a private method)
+                # Check for desirable divergence
                 desirable_signatures = self._find_desirable_signatures(ancestor, parent1, parent2)
                 if not desirable_signatures:
                     self.merge_stats["failure_not_desirable"] += 1
@@ -97,9 +78,7 @@ class SystemAwareMerge(Generator):
 
     def _find_desirable_signatures(self, ancestor: Candidate, p1: Candidate, p2: Candidate) -> List[Tuple[int, any]]:
         """
-        Private method to check for desirable signature patterns.
-        This encapsulates the logic from the 'desirable' function.
-
+        Check for desirable signature patterns.
         Implements the DESIRABLE function from Algorithm 4:
         - Condition 1: p1 innovated, p2 did not (πa = πj and πi ≠ πj) → use p1's innovation
         - Condition 2: p2 innovated, p1 did not (πa = πi and πj ≠ πi) → use p2's innovation
@@ -187,10 +166,6 @@ class SystemAwareMerge(Generator):
 
     def start_compilation(self, student: dspy.Module, dataset_manager: "DatasetManager") -> None:
         """Resets merge history for a new compilation run."""
-        # Store dataset manager for interface compatibility
-        # (Algorithm 4 doesn't use it, unlike ReflectivePromptMutation)
-        self.dataset_manager = dataset_manager
-
         self.attempted_merges.clear()
         self.merge_stats = {"success": 0, "failure_not_desirable": 0, "failure_ancestry": 0}
         logger.debug("Reset SystemAwareMerge for new compilation")

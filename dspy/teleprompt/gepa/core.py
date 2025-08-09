@@ -247,10 +247,7 @@ class GEPA:
         return GEPA(
             budget=LMCallsBudget(max_calls),
             selector=ParetoFrontier(),
-            generator=SystemAwareMerge(
-                merge_rate=0.6,
-                population_size=population_size
-            ),
+            generator=SystemAwareMerge(),
             evaluator=GEPAEvaluator(
                 metric=metric,
             ),

@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 class ReflectivePromptMutation(Generator):
     """
     GEPA's reflective mutation, focused purely on generation.
-    Validation of new candidates is delegated to the Evaluator.
     """
 
     def __init__(self,
@@ -91,14 +90,14 @@ class ReflectivePromptMutation(Generator):
                 generation_number=parent.generation_number + 1,
                 parents=[parent],
             )
-            
+
             # Spend budget for the generation (reflection + mutations)
             if budget:
                 budget.spend_on_generation(child_module, {
                     "type": "reflective_mutation",
                     "module_idx": module_idx
                 })
-            
+
             return NewBorns(child_candidate, iteration=parents.iteration)
 
         except Exception as e:

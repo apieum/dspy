@@ -582,3 +582,37 @@ class TestParetoFrontier:
             frontier_set.add(candidate)
         assert frontier_set == {candidate_a, candidate_b, candidate_c}
         assert len(pareto_frontier) == 3
+
+    def test_promote_increments_iteration_number(self):
+        """Test that promote() properly increments iteration number."""
+        single_candidate = self.create_candidate({0: 0.8, 1: 0.6, 2: 0.4})
+        
+        # Create survivors with iteration 5
+        survivors = Survivors(single_candidate, iteration=5)
+        
+        # Promote survivors
+        parents = self.selector.promote(survivors)
+        
+        # Should increment iteration
+        assert parents.iteration == 6
+
+    def test_promote_preserves_task_wins_for_promoted_candidates(self):
+        """Test that promote() includes task_wins data for promoted candidates only."""
+        # Create candidates where one dominates the other
+        candidate_a = self.create_candidate({0: 0.9, 1: 0.8, 2: 0.7})  # Superior
+        candidate_b = self.create_candidate({0: 0.3, 1: 0.2, 2: 0.1})  # Dominated by A
+        
+        # Verify A dominates B
+        assert candidate_a.dominate(candidate_b)
+        
+        # Create survivors cohort
+        survivors = Survivors(candidate_a, candidate_b, iteration=1)
+        
+        # Promote survivors
+        parents = self.selector.promote(survivors)
+        
+        # Check that task_wins only includes promoted candidates (not dominated ones)
+        assert candidate_a in parents.task_wins
+        assert candidate_b not in parents.task_wins
+        # Verify task_wins has valid data
+        assert parents.task_wins[candidate_a] >= 0

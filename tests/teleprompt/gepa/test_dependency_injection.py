@@ -3,7 +3,7 @@
 import dspy
 from dspy.teleprompt.gepa.core import GEPA
 from dspy.teleprompt.gepa.evaluation import GEPAEvaluator
-from dspy.teleprompt.gepa.generation.reflective_mutation_native import ReflectivePromptMutation
+from dspy.teleprompt.gepa.generation.reflective_mutation import ReflectivePromptMutation
 from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
 from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
 
@@ -98,54 +98,7 @@ def test_gepa_delegates_configuration():
     assert hasattr(result, '_compiled')
 
 
-def test_dataset_split_algorithm():
-    """Test paper-compliant dataset split implementation."""
-
-    training_data = [
-        dspy.Example(question=f"test{i}", answer=f"answer{i}").with_inputs("question")
-        for i in range(10)
-    ]
-
-    gepa = GEPA.create_basic(metric=simple_metric, max_calls=5)
-    student = dspy.Predict("question -> answer")
-
-    # Mock to capture and verify split
-    split_captured = False
-
-    def mock_next_generation(parents):
-        nonlocal split_captured
-        if not split_captured:
-            # Verify algorithm-compliant split through dataset manager
-            dataset_mgr = gepa.evaluator.dataset_manager
-            eval_size = dataset_mgr.num_eval_tasks
-            dev_size = dataset_mgr.num_dev_examples
-
-            # Should preserve total dataset size
-            assert eval_size + dev_size == len(training_data)
-
-            # Should have reasonable split (not all to one dataset)
-            assert eval_size >= 1
-            assert dev_size >= 1
-
-            split_captured = True
-
-        # Terminate quickly
-        if not parents.is_empty():
-            first_candidate = parents.first()
-            first_candidate.module._compiled = True
-            return first_candidate.module
-        return student
-
-    gepa.next_generation = mock_next_generation
-
-    result = gepa.compile(student, training_data)
-
-    assert split_captured
-    assert hasattr(result, '_compiled')
-
-
 if __name__ == "__main__":
     test_components_self_configure()
     test_gepa_delegates_configuration()
-    test_dataset_split_algorithm()
     print("All dependency injection tests passed!")

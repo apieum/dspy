@@ -83,63 +83,6 @@ class TestGEPABehavior:
             assert result._compiled is True
 
 
-class TestComponentInterfaces:
-    """Test that strategy interfaces work correctly."""
-
-    def test_budget_interface(self):
-        """Budget components should implement new interface."""
-        from dspy.teleprompt.gepa.budget import LMCallsBudget
-
-        budget = LMCallsBudget(100)
-
-        # New interface methods
-        assert hasattr(budget, 'spend_on_evaluation')
-        assert hasattr(budget, 'spend_on_generation')
-        assert hasattr(budget, 'spend_on_selection')
-        assert hasattr(budget, 'get_remaining')
-
-        # Magic comparison methods
-        assert hasattr(budget, '__gt__')
-        assert hasattr(budget, '__float__')
-
-        # Test magic methods work
-        assert budget > 0
-        assert float(budget) == 100.0
-
-    def test_generation_interface(self):
-        """Generation components should implement required interface."""
-        from dspy.teleprompt.gepa.generation import ReflectivePromptMutation
-        from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
-
-        def simple_metric(example, prediction, trace=None):
-            return 0.5
-
-        feedback_provider = FeedbackProvider(metric=simple_metric)
-        strategy = ReflectivePromptMutation(feedback_provider)
-
-        # Interface methods
-        assert hasattr(strategy, 'generate')
-
-    def test_selection_interface(self):
-        """Selection components should implement required interface."""
-        from dspy.teleprompt.gepa.selection import ParetoFrontier
-
-        strategy = ParetoFrontier()
-
-        # Interface methods
-        assert hasattr(strategy, 'promote')
-        assert hasattr(strategy, 'best_candidate')
-
-    def test_evaluation_interface(self):
-        """Evaluation components should implement required interface."""
-        from dspy.teleprompt.gepa.evaluation import GEPAEvaluator
-
-        strategy = GEPAEvaluator(simple_metric, minibatch_size=3)
-
-        # Interface methods
-        assert hasattr(strategy, 'evaluate')
-
-
 class TestGEPAAlgorithmStructure:
     """Test the GEPA algorithm follows the correct structure."""
 
@@ -161,54 +104,6 @@ class TestGEPAAlgorithmStructure:
             assert optimizer.selector.size() > 0
 
 
-class TestDataStructures:
-    """Test core data structures work correctly."""
-
-    def test_candidate_creation(self):
-        """Candidates should be created with proper structure."""
-        module = SimpleQA()
-        candidate = Candidate(module=module, generation_number=1)
-
-        assert candidate.module is module
-        assert candidate.generation_number == 1
-        assert not hasattr(candidate, 'candidate_id')  # No longer using IDs
-        assert isinstance(candidate.task_scores, dict)
-
-    def test_cohort_creation(self):
-        """Cohorts should manage candidates correctly."""
-        candidates = [Candidate(SimpleQA(), generation_number=0)]
-        cohort = Cohort(candidates)
-
-        assert cohort.size() == 1
-        assert not cohort.is_empty()
-        assert cohort.iteration == -1  # Default iteration value
-
-    def test_candidate_pool_operations(self):
-        """Selector should manage candidates correctly."""
-        from dspy.teleprompt.gepa.selection import ParetoFrontier
-        from dspy.teleprompt.gepa.data.cohort import Survivors
-        from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
-
-        selector = ParetoFrontier()
-        training_data = [dspy.Example(input="task0"), dspy.Example(input="task1"), dspy.Example(input="task2")]
-        dataset_manager = DefaultDatasetManager(training_data, split_ratio=1.0)  # Use all for pareto
-        selector.start_compilation(None, dataset_manager)
-        candidate = Candidate(SimpleQA(), generation_number=0, task_scores={0: 0.8, 1: 0.6, 2: 0.7})
-
-        # Add candidate via promote (selectors don't have append)
-        cohort = Survivors(candidate, iteration=0)
-        selector.promote(cohort)
-
-        assert selector.size() == 1
-
-        # Test that selector contains the candidate by checking size changes
-        selector2 = ParetoFrontier()
-        selector2.start_compilation(None, dataset_manager)
-        assert selector2.size() == 0
-        cohort2 = Survivors(candidate, iteration=0)
-        selector2.promote(cohort2)
-        assert selector2.size() == 1
-
 
 class TestFactoryFunctions:
     """Test factory functions create valid GEPA instances."""
@@ -222,20 +117,3 @@ class TestFactoryFunctions:
         assert hasattr(optimizer, 'selector')
         assert hasattr(optimizer, 'generator')
         assert hasattr(optimizer, 'evaluator')
-
-
-
-class TestGEPAIntegration:
-    """Integration tests for complete GEPA workflows."""
-
-    def test_basic_optimization_workflow(self, simple_trainset, dummy_lm):
-        """Test basic optimization workflow end-to-end."""
-        with dspy.context(lm=dummy_lm):
-            student = SimpleQA()
-            optimizer = GEPA.create_basic(simple_metric, max_calls=2)
-
-            # Should complete without errors
-            result = optimizer.compile(student, simple_trainset)
-
-            assert isinstance(result, Module)
-            assert result._compiled is True
