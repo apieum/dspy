@@ -4,7 +4,7 @@ import dspy
 from dspy.teleprompt.gepa.core import GEPA
 from dspy.teleprompt.gepa.generation.reflective_mutation_native import ReflectivePromptMutation
 from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
-from dspy.teleprompt.gepa.evaluation.promotion import PromotionEvaluator
+from dspy.teleprompt.gepa.evaluation import GEPAEvaluator
 from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManagerFactory, DefaultDatasetManager
 
 
@@ -29,13 +29,13 @@ class TestDatasetSplit:
 
         feedback_provider = FeedbackProvider(metric=simple_metric)
         generator = ReflectivePromptMutation(feedback_provider)
-        evaluator = PromotionEvaluator(metric=simple_metric)
+        evaluator = GEPAEvaluator(metric=simple_metric)
 
-        from dspy.teleprompt.gepa.budget.llm_calls import LLMCallsBudget
+        from dspy.teleprompt.gepa.budget.lm_calls import LMCallsBudget
         from dspy.teleprompt.gepa.selection import ParetoFrontier
 
         gepa = GEPA(
-            budget=LLMCallsBudget(5),  # Small budget to terminate quickly
+            budget=LMCallsBudget(5),  # Small budget to terminate quickly
             selector=ParetoFrontier(),
             generator=generator,
             evaluator=evaluator,
@@ -114,7 +114,7 @@ class TestDatasetSplit:
     def test_evaluator_uses_both_datasets(self):
         """Test that Evaluator receives and uses dataset manager."""
 
-        evaluator = PromotionEvaluator(metric=lambda ex, pred, trace=None: 0.5)
+        evaluator = GEPAEvaluator(metric=lambda ex, pred, trace=None: 0.5)
 
         # Create training data that will be split by dataset manager
         training_data = [

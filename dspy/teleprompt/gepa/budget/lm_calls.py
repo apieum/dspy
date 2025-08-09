@@ -1,4 +1,4 @@
-"""LLM calls budget implementation."""
+"""LM calls budget implementation."""
 
 import logging
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class LLMCallsBudget(Budget):
+class LMCallsBudget(Budget):
     """Budget that tracks LLM API calls."""
 
     def __init__(self, max_calls: int):

@@ -88,9 +88,9 @@ class TestComponentInterfaces:
 
     def test_budget_interface(self):
         """Budget components should implement new interface."""
-        from dspy.teleprompt.gepa.budget import LLMCallsBudget
+        from dspy.teleprompt.gepa.budget import LMCallsBudget
 
-        budget = LLMCallsBudget(100)
+        budget = LMCallsBudget(100)
 
         # New interface methods
         assert hasattr(budget, 'spend_on_evaluation')
@@ -132,9 +132,9 @@ class TestComponentInterfaces:
 
     def test_evaluation_interface(self):
         """Evaluation components should implement required interface."""
-        from dspy.teleprompt.gepa.evaluation import PromotionEvaluator
+        from dspy.teleprompt.gepa.evaluation import GEPAEvaluator
 
-        strategy = PromotionEvaluator(simple_metric, minibatch_size=3)
+        strategy = GEPAEvaluator(simple_metric, minibatch_size=3)
 
         # Interface methods
         assert hasattr(strategy, 'evaluate')

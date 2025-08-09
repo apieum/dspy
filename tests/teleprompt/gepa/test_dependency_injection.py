@@ -2,7 +2,7 @@
 
 import dspy
 from dspy.teleprompt.gepa.core import GEPA
-from dspy.teleprompt.gepa.evaluation.promotion import PromotionEvaluator
+from dspy.teleprompt.gepa.evaluation import GEPAEvaluator
 from dspy.teleprompt.gepa.generation.reflective_mutation_native import ReflectivePromptMutation
 from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
 from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
@@ -26,7 +26,7 @@ def test_components_self_configure():
     ]
 
     # Create components without dataset knowledge
-    evaluator = PromotionEvaluator(metric=simple_metric, minibatch_size=2)
+    evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=2)
     feedback_provider = FeedbackProvider(metric=simple_metric)
     generator = ReflectivePromptMutation(feedback_provider)
 

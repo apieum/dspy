@@ -107,20 +107,20 @@ class TestPatienceMechanism:
 
     def test_patience_initialization(self):
         """Test direct GEPA initialization with patience."""
-        from dspy.teleprompt.gepa.budget import LLMCallsBudget
+        from dspy.teleprompt.gepa.budget import LMCallsBudget
         from dspy.teleprompt.gepa.selection import ParetoFrontier
         from dspy.teleprompt.gepa.generation import ReflectivePromptMutation
         from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
-        from dspy.teleprompt.gepa.evaluation import PromotionEvaluator
+        from dspy.teleprompt.gepa.evaluation import GEPAEvaluator
         from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManagerFactory
 
         gepa = GEPA(
-            budget=LLMCallsBudget(1000),
+            budget=LMCallsBudget(1000),
             selector=ParetoFrontier(),
             generator=ReflectivePromptMutation(
                 feedback_provider=FeedbackProvider(metric=create_μf_metric(0.5))
             ),
-            evaluator=PromotionEvaluator(metric=create_μf_metric(0.5)),
+            evaluator=GEPAEvaluator(metric=create_μf_metric(0.5)),
             dataset_manager_factory=DefaultDatasetManagerFactory(),
             patience=8
         )

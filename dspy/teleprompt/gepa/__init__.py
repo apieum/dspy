@@ -16,10 +16,10 @@ from .generation import Generator
 from .evaluation import Evaluator
 
 # Business step implementations
-from .budget import LLMCallsBudget, IterationBudget, AdaptiveBudget
+from .budget import LMCallsBudget, IterationBudget, AdaptiveBudget
 from .selection import ParetoFrontier
 from .generation import ReflectivePromptMutation, SystemAwareMerge
-from .evaluation import PromotionEvaluator
+from .evaluation import GEPAEvaluator, FullTaskScores, ParentFastCompare
 from .evaluation.trace_collector import EnhancedTraceCollector
 from .evaluation.feedback import FeedbackResult, EvaluationTrace, ModuleFeedback
 
@@ -38,13 +38,15 @@ __all__ = [
     'Evaluator',
 
     # Business step implementations
-    'LLMCallsBudget',
+    'LMCallsBudget',
     'IterationBudget',
     'AdaptiveBudget',
     'ParetoFrontier',
     'ReflectivePromptMutation',
     'SystemAwareMerge',
-    'PromotionEvaluator',
+    'GEPAEvaluator',
+    'FullTaskScores',
+    'ParentFastCompare',
     'EnhancedTraceCollector',
     'FeedbackResult',
     'EvaluationTrace',

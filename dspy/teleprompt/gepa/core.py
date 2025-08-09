@@ -5,7 +5,7 @@ dependency injection and the strategy pattern for research flexibility.
 """
 
 import logging
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, TYPE_CHECKING
 
 import dspy
 from dspy import Module
@@ -60,7 +60,7 @@ class GEPA:
         self.evaluator = evaluator
         self.dataset_manager_factory = dataset_manager_factory
         self.current_iteration = 0
-        
+
         # Patience mechanism for resilient termination
         self.patience = patience
         self.generations_without_progress = 0
@@ -110,7 +110,7 @@ class GEPA:
         initial_parents = self.selector.promote(initial_survivors)
 
         # Start the main evolutionary loop.
-        final_parents = self.next_generation(initial_parents)
+        self.next_generation(initial_parents)
 
         # Return the best candidate from the final population.
         best_module = self.selector.best_candidate().module
@@ -137,12 +137,12 @@ class GEPA:
             self.generations_without_progress += 1
             logger.info(f"No new candidates generated (patience: {self.generations_without_progress}/{self.patience})")
             self.finish_iteration(parents)
-            
+
             # Check if we've exceeded patience
             if self.generations_without_progress >= self.patience:
                 logger.info(f"Patience exhausted after {self.patience} consecutive failed generations - terminating")
                 return parents
-            
+
             # Still have patience, try again with current parents
             return self.next_generation(parents)
 
@@ -154,18 +154,18 @@ class GEPA:
             self.generations_without_progress += 1
             logger.info(f"No candidates survived evaluation (patience: {self.generations_without_progress}/{self.patience})")
             self.finish_iteration(parents)
-            
+
             # Check if we've exceeded patience
             if self.generations_without_progress >= self.patience:
                 logger.info(f"Patience exhausted after {self.patience} consecutive failed generations - terminating")
                 return parents
-            
+
             # Still have patience, try again
             return self.next_generation(parents)
 
         # 3. Selector adds the successful survivors to the pool and returns the new frontier.
         next_gen_parents = self.selector.promote(new_survivors)
-        
+
         # Reset patience counter - we made progress!
         if not new_survivors.is_empty():
             if self.generations_without_progress > 0:
@@ -191,20 +191,20 @@ class GEPA:
     @staticmethod
     def create_basic(metric, max_calls: int = 1000, population_size: int = 10, patience: int = 3) -> "GEPA":
         """Create a basic GEPA optimizer with standard settings."""
-        from .budget import LLMCallsBudget
+        from .budget import LMCallsBudget
         from .selection import ParetoFrontier
         from .generation import ReflectivePromptMutation
         from .generation.feedback import FeedbackProvider
-        from .evaluation import PromotionEvaluator
+        from .evaluation import GEPAEvaluator
         from .dataset_manager import DefaultDatasetManagerFactory
 
         return GEPA(
-            budget=LLMCallsBudget(max_calls),
+            budget=LMCallsBudget(max_calls),
             selector=ParetoFrontier(),
             generator=ReflectivePromptMutation(
                 feedback_provider=FeedbackProvider(metric=metric)
             ),
-            evaluator=PromotionEvaluator(
+            evaluator=GEPAEvaluator(
                 metric=metric,
             ),
             dataset_manager_factory=DefaultDatasetManagerFactory(),
@@ -219,7 +219,7 @@ class GEPA:
         from .selection import ParetoFrontier
         from .generation import ReflectivePromptMutation
         from .generation.feedback import FeedbackProvider
-        from .evaluation import PromotionEvaluator
+        from .evaluation import GEPAEvaluator
         from .dataset_manager import DefaultDatasetManagerFactory
 
         return GEPA(
@@ -228,7 +228,7 @@ class GEPA:
             generator=ReflectivePromptMutation(
                 feedback_provider=FeedbackProvider(metric=metric)
             ),
-            evaluator=PromotionEvaluator(
+            evaluator=GEPAEvaluator(
                 metric=metric,
             ),
             dataset_manager_factory=DefaultDatasetManagerFactory(),
@@ -238,20 +238,20 @@ class GEPA:
     @staticmethod
     def create_with_merge(metric, max_calls: int = 1000, population_size: int = 12, patience: int = 3) -> "GEPA":
         """Create GEPA optimizer with System-Aware Merge for complex optimization."""
-        from .budget import LLMCallsBudget
+        from .budget import LMCallsBudget
         from .selection import ParetoFrontier
         from .generation import SystemAwareMerge
-        from .evaluation import PromotionEvaluator
+        from .evaluation import GEPAEvaluator
         from .dataset_manager import DefaultDatasetManagerFactory
 
         return GEPA(
-            budget=LLMCallsBudget(max_calls),
+            budget=LMCallsBudget(max_calls),
             selector=ParetoFrontier(),
             generator=SystemAwareMerge(
                 merge_rate=0.6,
                 population_size=population_size
             ),
-            evaluator=PromotionEvaluator(
+            evaluator=GEPAEvaluator(
                 metric=metric,
             ),
             dataset_manager_factory=DefaultDatasetManagerFactory(),

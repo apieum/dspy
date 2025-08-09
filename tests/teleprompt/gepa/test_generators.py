@@ -5,7 +5,7 @@ from dspy.teleprompt.gepa.generation.reflective_mutation_native import Reflectiv
 from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
 from dspy.teleprompt.gepa.data.candidate import Candidate
 from dspy.teleprompt.gepa.data.cohort import Parents, NewBorns
-from dspy.teleprompt.gepa.budget.llm_calls import LLMCallsBudget
+from dspy.teleprompt.gepa.budget.lm_calls import LMCallsBudget
 from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
 from unittest.mock import Mock
 
@@ -38,7 +38,7 @@ class TestReflectivePromptMutationGenerator:
         feedback_provider = FeedbackProvider(metric=simple_metric)
         generator = ReflectivePromptMutation(feedback_provider)
         empty_parents = Parents(iteration=0)
-        budget = LLMCallsBudget(100)
+        budget = LMCallsBudget(100)
 
         result = generator.generate(empty_parents, budget)
         assert isinstance(result, NewBorns)
@@ -73,7 +73,7 @@ class TestReflectivePromptMutationGenerator:
 
         feedback_provider = FeedbackProvider(metric=simple_metric)
         generator = ReflectivePromptMutation(feedback_provider)
-        budget = LLMCallsBudget(100)
+        budget = LMCallsBudget(100)
 
         # No feedback data set
         generator.dev_data = []
@@ -93,7 +93,7 @@ class TestReflectivePromptMutationGenerator:
 
         feedback_provider = FeedbackProvider(metric=simple_metric)
         generator = ReflectivePromptMutation(feedback_provider)
-        budget = LLMCallsBudget(100)
+        budget = LMCallsBudget(100)
 
         initial_calls = budget.consumed_calls
 

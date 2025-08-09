@@ -4,8 +4,8 @@ import dspy
 from dspy.teleprompt.gepa.data.candidate import Candidate
 from dspy.teleprompt.gepa.data.cohort import NewBorns, Survivors
 from dspy.teleprompt.gepa.selection import ParetoFrontier
-from dspy.teleprompt.gepa.evaluation.promotion import PromotionEvaluator
-from dspy.teleprompt.gepa.budget.llm_calls import LLMCallsBudget
+from dspy.teleprompt.gepa.evaluation import GEPAEvaluator
+from dspy.teleprompt.gepa.budget.lm_calls import LMCallsBudget
 from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
 from unittest.mock import Mock
 
@@ -28,7 +28,7 @@ def test_evaluator_handles_two_phase_evaluation():
     ]
 
     # Create evaluator with DatasetManager
-    evaluator = PromotionEvaluator(metric=simple_metric, minibatch_size=2)
+    evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=2)
     student = dspy.Predict("input -> output")
     dataset_manager = DefaultDatasetManager(training_data, split_ratio=0.33)
     evaluator.start_compilation(student, dataset_manager)
@@ -42,7 +42,7 @@ def test_evaluator_handles_two_phase_evaluation():
 
     # Test direct evaluation (no parent comparison)
     new_borns = NewBorns(candidate1, iteration=0)
-    budget = LLMCallsBudget(100)
+    budget = LMCallsBudget(100)
 
     survivors = evaluator.evaluate(new_borns, budget)
 

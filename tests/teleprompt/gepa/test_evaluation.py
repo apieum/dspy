@@ -2,10 +2,10 @@
 
 import dspy
 from unittest.mock import Mock
-from dspy.teleprompt.gepa.evaluation.promotion import PromotionEvaluator
+from dspy.teleprompt.gepa.evaluation import GEPAEvaluator
 from dspy.teleprompt.gepa.data.candidate import Candidate
 from dspy.teleprompt.gepa.data.cohort import NewBorns, Parents, Survivors
-from dspy.teleprompt.gepa.budget.llm_calls import LLMCallsBudget
+from dspy.teleprompt.gepa.budget.lm_calls import LMCallsBudget
 from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
 
 
@@ -35,12 +35,11 @@ class TestTwoPhaseEvaluationInterface:
     """Test two-phase evaluation component interfaces."""
 
     def test_promotion_evaluator_interface(self):
-        """Test PromotionEvaluator implements required two-phase interface."""
-        evaluator = PromotionEvaluator(metric=simple_metric, minibatch_size=3)
+        """Test GEPAEvaluator implements required two-phase interface."""
+        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=3)
 
         # Interface methods
         assert hasattr(evaluator, 'evaluate')
-        assert hasattr(evaluator, 'get_metric')
         assert hasattr(evaluator, 'start_compilation')
         assert hasattr(evaluator, 'finish_compilation')
 
@@ -49,7 +48,7 @@ class TestTwoPhaseEvaluationInterface:
 
     def test_evaluator_configuration(self):
         """Test evaluator configuration via start_compilation."""
-        evaluator = PromotionEvaluator(metric=simple_metric, minibatch_size=2)
+        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=2)
 
         dev_data = [
             dspy.Example(input="feedback1", answer="answer1").with_inputs("input"),
@@ -82,7 +81,7 @@ class TestTwoPhaseEvaluation:
 
     def test_minibatch_validation_improves(self):
         """Test minibatch validation when child improves over parent."""
-        evaluator = PromotionEvaluator(metric=simple_metric, minibatch_size=2)
+        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=2)
 
         dev_data = [
             dspy.Example(input="test1", answer="correct").with_inputs("input"),
@@ -111,10 +110,11 @@ class TestTwoPhaseEvaluation:
         parents = Parents(parent_candidate, iteration=0)
 
         # Budget
-        budget = LLMCallsBudget(100)
+        budget = LMCallsBudget(100)
 
         # Evaluate
         survivors = evaluator.evaluate(new_borns, budget)
+        print(f"Survivors: {survivors}")
 
         # Child should be promoted since it improved
         assert survivors.size() == 1
@@ -127,7 +127,7 @@ class TestTwoPhaseEvaluation:
 
     def test_minibatch_validation_rejects(self):
         """Test minibatch validation when child doesn't improve over parent."""
-        evaluator = PromotionEvaluator(metric=simple_metric, minibatch_size=2)
+        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=2)
 
         dev_data = [
             dspy.Example(input="test1", answer="correct").with_inputs("input"),
@@ -156,7 +156,7 @@ class TestTwoPhaseEvaluation:
         parents = Parents(parent_candidate, iteration=0)
 
         # Budget
-        budget = LLMCallsBudget(100)
+        budget = LMCallsBudget(100)
 
         # Evaluate
         survivors = evaluator.evaluate(new_borns, budget)
@@ -166,7 +166,7 @@ class TestTwoPhaseEvaluation:
 
     def test_full_evaluation_after_minibatch_success(self):
         """Test that full evaluation is only run after minibatch success."""
-        evaluator = PromotionEvaluator(metric=simple_metric, minibatch_size=1)
+        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=1)
 
         data = {
             0:dspy.Example(input="pareto1", answer="correct").with_inputs("input"),
@@ -192,7 +192,7 @@ class TestTwoPhaseEvaluation:
         parents = Parents(parent_candidate, iteration=0)
 
         # Budget
-        budget = LLMCallsBudget(100)
+        budget = LMCallsBudget(100)
         initial_calls = budget.consumed_calls
 
         # Evaluate
@@ -214,7 +214,7 @@ class TestEvaluationBudgetIntegration:
 
     def test_evaluation_updates_budget_correctly(self):
         """Test that both evaluation phases update budget correctly."""
-        evaluator = PromotionEvaluator(metric=simple_metric, minibatch_size=2)
+        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=2)
 
         dev_data = [
             dspy.Example(input="feedback1", answer="correct").with_inputs("input"),
@@ -238,7 +238,7 @@ class TestEvaluationBudgetIntegration:
         parents = Parents(parent_candidate, iteration=0)
 
         # Track budget usage
-        budget = LLMCallsBudget(100)
+        budget = LMCallsBudget(100)
         initial_consumed = budget.consumed_calls
 
         # Evaluate (should consume budget for both phases)
@@ -249,7 +249,7 @@ class TestEvaluationBudgetIntegration:
 
     def test_evaluation_handles_budget_limits_gracefully(self):
         """Test evaluation handles budget constraints gracefully."""
-        evaluator = PromotionEvaluator(metric=simple_metric, minibatch_size=1)
+        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=1)
 
         dev_data = [dspy.Example(input="feedback", answer="correct").with_inputs("input")]
         eval_data = [dspy.Example(input="pareto", answer="correct").with_inputs("input")]
@@ -270,7 +270,7 @@ class TestEvaluationBudgetIntegration:
         parents = Parents(parent_candidate, iteration=0)
 
         # Very limited budget
-        budget = LLMCallsBudget(10)
+        budget = LMCallsBudget(10)
         budget.consumed_calls = 5  # Already partially consumed
 
         # Should still handle evaluation
@@ -285,7 +285,7 @@ class TestEvaluationErrorHandling:
 
     def test_evaluation_with_no_parents(self):
         """Test evaluation handles candidates with no parents."""
-        evaluator = PromotionEvaluator(metric=simple_metric, minibatch_size=2)
+        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=2)
 
         dev_data = [dspy.Example(input="feedback", answer="correct").with_inputs("input")]
         eval_data = [dspy.Example(input="pareto", answer="correct").with_inputs("input")]
@@ -302,7 +302,7 @@ class TestEvaluationErrorHandling:
         new_borns = NewBorns(candidate, iteration=1)
         parents = Parents(iteration=0)  # Empty parents
 
-        budget = LLMCallsBudget(100)
+        budget = LMCallsBudget(100)
 
         # Should evaluate directly on pareto data (no parent comparison needed)
         survivors = evaluator.evaluate(new_borns, budget)
@@ -311,7 +311,7 @@ class TestEvaluationErrorHandling:
 
     def test_evaluation_with_empty_dev_data(self):
         """Test evaluation handles empty feedback data."""
-        evaluator = PromotionEvaluator(metric=simple_metric, minibatch_size=2)
+        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=2)
 
         # Empty feedback data
         dev_data = []
@@ -332,7 +332,7 @@ class TestEvaluationErrorHandling:
         new_borns = NewBorns(child_candidate, iteration=1)
         parents = Parents(parent_candidate, iteration=0)
 
-        budget = LLMCallsBudget(100)
+        budget = LMCallsBudget(100)
 
         # Should handle empty feedback data gracefully
         survivors = evaluator.evaluate(new_borns, budget)

@@ -5,7 +5,7 @@ from dspy.teleprompt.gepa.generation.reflective_mutation_native import Reflectiv
 from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
 from dspy.teleprompt.gepa.data.cohort import Parents
 from dspy.teleprompt.gepa.data.candidate import Candidate
-from dspy.teleprompt.gepa.budget.llm_calls import LLMCallsBudget
+from dspy.teleprompt.gepa.budget.lm_calls import LMCallsBudget
 from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
 from unittest.mock import Mock
 
@@ -69,7 +69,7 @@ class TestSimplifiedReflectiveMutation:
 
         feedback_provider = FeedbackProvider(metric=lambda ex, pred: 0.5)
         generator = ReflectivePromptMutation(feedback_provider)
-        budget = LLMCallsBudget(100)
+        budget = LMCallsBudget(100)
 
         # Test with empty parents
         empty_parents = Parents(iteration=0)
@@ -127,7 +127,7 @@ class TestSimplifiedReflectiveMutation:
 
         feedback_provider = FeedbackProvider(metric=lambda ex, pred: 0.5)
         generator = ReflectivePromptMutation(feedback_provider)
-        budget = LLMCallsBudget(100)
+        budget = LMCallsBudget(100)
 
         initial_calls = budget.consumed_calls
 
@@ -157,7 +157,7 @@ class TestSimplifiedReflectiveMutation:
         parent_candidate = Candidate(parent_module, generation_number=0)
         parents = Parents(parent_candidate, iteration=0)
 
-        budget = LLMCallsBudget(100)
+        budget = LMCallsBudget(100)
         initial_calls = budget.consumed_calls
 
         # Should attempt generation (may fail due to mocking, but should consume budget)
