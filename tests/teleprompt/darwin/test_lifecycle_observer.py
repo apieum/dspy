@@ -1,5 +1,6 @@
 """Test compilation lifecycle observer pattern."""
 
+import pytest
 import dspy
 from dspy.teleprompt.darwin.optimizer import Darwin, GEPAMute
 from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
@@ -7,6 +8,7 @@ from dspy.teleprompt.darwin.dataset_manager import DefaultDatasetManager
 from unittest.mock import Mock
 
 
+# @pytest.mark.slow_test
 def test_compilation_lifecycle_events():
     """Test that components receive compilation lifecycle events."""
 

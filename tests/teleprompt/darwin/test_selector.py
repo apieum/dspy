@@ -4,6 +4,7 @@ Tests all scenarios and edge cases for selection strategies including Pareto fro
 selection with task winner logic, domination handling, and integration scenarios.
 """
 
+import pytest
 import dspy
 from dspy.teleprompt.darwin.data.candidate import Candidate
 from dspy.teleprompt.darwin.data.cohort import Survivors, Parents
@@ -412,6 +413,7 @@ class TestSelector:
         for candidate in sampled:
             assert candidate in candidates
 
+    # @pytest.mark.slow_test
     def test_complex_multi_task_scenario(self):
         """Test complex scenario with 5 tasks and 8 candidates."""
         # Override with 5-task setup - create enough data to ensure 5 pareto tasks
@@ -450,6 +452,7 @@ class TestSelector:
         # Specialists shouldn't dominate each other
         assert len(pareto_frontier) >= 5  # At least the 5 specialists
 
+    # @pytest.mark.slow_test
     def test_performance_with_large_candidate_set(self):
         """Test performance and correctness with larger candidate sets."""
         # Override with 4-task setup
@@ -586,13 +589,13 @@ class TestSelector:
     def test_promote_increments_iteration_number(self):
         """Test that promote() properly increments iteration number."""
         single_candidate = self.create_candidate({0: 0.8, 1: 0.6, 2: 0.4})
-        
+
         # Create survivors with iteration 5
         survivors = Survivors(single_candidate, iteration=5)
-        
+
         # Promote survivors
         parents = self.selector.promote(survivors)
-        
+
         # Should increment iteration
         assert parents.iteration == 6
 
@@ -601,16 +604,16 @@ class TestSelector:
         # Create candidates where one dominates the other
         candidate_a = self.create_candidate({0: 0.9, 1: 0.8, 2: 0.7})  # Superior
         candidate_b = self.create_candidate({0: 0.3, 1: 0.2, 2: 0.1})  # Dominated by A
-        
+
         # Verify A dominates B
         assert candidate_a.dominate(candidate_b)
-        
+
         # Create survivors cohort
         survivors = Survivors(candidate_a, candidate_b, iteration=1)
-        
+
         # Promote survivors
         parents = self.selector.promote(survivors)
-        
+
         # Check that task_wins only includes promoted candidates (not dominated ones)
         assert candidate_a in parents.task_wins
         assert candidate_b not in parents.task_wins

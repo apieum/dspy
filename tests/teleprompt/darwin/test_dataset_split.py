@@ -1,5 +1,6 @@
 """Test GEPA dataset split implementation."""
 
+import pytest
 import dspy
 from dspy.teleprompt.darwin.optimizer import Darwin, GEPAMute
 from dspy.teleprompt.darwin.generation.mutation import ReflectivePromptMutation
@@ -180,6 +181,7 @@ class TestDatasetSplit:
             # Budget exhaustion is expected, but split should work
             assert 'Budget exhausted' in str(e) or hasattr(result, '_compiled')
 
+    # @pytest.mark.slow_test
     def test_gepa_integration_uses_split_data(self):
         """
         Tests that the main GEPA orchestrator correctly uses the DatasetManager

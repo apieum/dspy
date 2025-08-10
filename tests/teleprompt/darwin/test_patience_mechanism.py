@@ -17,6 +17,7 @@ def create_μf_metric(score: float, feedback: str = "Test feedback") -> Mock:
 class TestPatienceMechanism:
     """Test patience counter for resilient termination."""
 
+    # @pytest.mark.slow_test
     def test_patience_prevents_infinite_recursion(self):
         """Test that patience mechanism prevents infinite recursion when generation fails."""
         # Create Darwin with patience=2 for quick testing
@@ -41,6 +42,7 @@ class TestPatienceMechanism:
         assert final_parents.size() == 1
         assert final_parents == parents
 
+    # @pytest.mark.slow_test
     def test_patience_prevents_infinite_recursion_on_evaluation_failure(self):
         """Test that patience mechanism handles evaluation failures."""
         darwin = GEPAMute(metric=create_μf_metric(0.5), max_calls=1000, patience=2)

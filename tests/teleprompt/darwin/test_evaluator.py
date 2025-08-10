@@ -1,5 +1,6 @@
 """Test Darwin evaluator components including two-phase evaluation."""
 
+import pytest
 import dspy
 from unittest.mock import Mock
 from dspy.teleprompt.darwin.evaluation.gepa_evaluator import ParentFastCompare, FullTaskScores, GEPATwoPhasesEval
@@ -165,6 +166,7 @@ class TestTwoPhaseEvaluation:
         # Child should NOT be promoted since it didn't improve
         assert survivors.size() == 0
 
+    # @pytest.mark.slow_test
     def test_full_evaluation_after_minibatch_success(self):
         """Test that full evaluation is only run after minibatch success."""
         evaluator = GEPATwoPhasesEval(metric=simple_metric, minibatch_size=1)

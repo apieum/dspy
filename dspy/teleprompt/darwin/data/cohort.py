@@ -1,14 +1,9 @@
 """Cohort data structure for GEPA optimization."""
 import random
 import time
-from typing import Dict, List, Set, Optional, Any
-from collections import defaultdict
+from typing import Dict, List, Set, Callable, Any
 
-# Import Candidate with relative import to avoid circular imports
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from ..data.candidate import Candidate
-
+from ..data.candidate import Candidate
 
 class Cohort:
     """A cohort of candidates created in a single iteration.
@@ -18,14 +13,13 @@ class Cohort:
     in the candidates themselves as they're always from the same iteration.
     """
 
-    def __init__(self, *candidates: 'Candidate', creation_timestamp: Optional[float] = None, metadata: Optional[Dict[str, Any]] = None, iteration: int = -1):
+    def __init__(self, *candidates: 'Candidate', iteration: int = -1, **stochastic_weights):
         """Initialize cohort with candidates.
 
         Args:
             *candidates: Variable number of candidate arguments, or a single list of candidates
-            creation_timestamp: When cohort was created (defaults to current time)
-            metadata: Optional metadata dict
             iteration: Iteration number for this cohort (defaults to -1)
+            stochastic_weights: kwargs used as weights for sample_stochastic
         """
         # Handle both Cohort(candidate1, candidate2) and Cohort([candidate1, candidate2])
         if len(candidates) == 1 and isinstance(candidates[0], (list, set)):
@@ -33,19 +27,48 @@ class Cohort:
         else:
             self.candidates: Set['Candidate'] = set(candidates)
 
-        self.creation_timestamp: float = creation_timestamp or time.time()
-        self.metadata: Dict[str, Any] = metadata or {}
+        self.creation_timestamp: float = time.time()
         self._iteration: int = iteration
+        self.weights: Dict[str, Dict[Candidate, float]] = {}
+        for name, feature in stochastic_weights.items():
+            self.weights[name] = self._extract_feature_values(feature)
+
+    def _extract_feature_values(self, feature_spec: Any) -> Dict[Candidate, float]:
+        """Internal helper to resolve a feature specification into a list of float values."""
+        if isinstance(feature_spec, dict):
+            return {c: float(feature_spec.get(c, 0.0)) for c in self.candidates}
+        if callable(feature_spec):
+            return {c:float(feature_spec(c)) for c in self.candidates}
+        if isinstance(feature_spec, (list, tuple)):
+            if len(feature_spec) != len(self.candidates):
+                raise ValueError(
+                    f"Sequence feature has length {len(feature_spec)} but cohort has "
+                    f"{len(self.candidates)} candidates. They must match."
+                )
+            candidates = list(self.candidates)
+            return {candidates[index]: float(feature_spec[index]) for index in range(len(candidates))}
+        if isinstance(feature_spec, (int, float)):
+            return {c: float(feature_spec) for c in self.candidates}
+
+        raise TypeError(f"Unsupported feature specification type: {type(feature_spec)}")
+
+    def add_feature(self, name:str, values):
+        self.weights[name] = self._extract_feature_values(values)
+
+    def del_feature(self, name:str):
+        if name in self.weights:
+            del self.weights[name]
 
     @property
     def iteration(self) -> int:
         """Get iteration number for this cohort."""
         return self._iteration
 
-    @iteration.setter
-    def iteration(self, value: int) -> None:
-        """Set iteration number for this cohort."""
-        self._iteration = value
+    def __getattr__(self, name: str) -> Any:
+        """Get attribute from cohort."""
+        if name in self.weights:
+            return self.weights[name]
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
     def is_empty(self) -> bool:
         """Check if cohort has no candidates."""
@@ -82,23 +105,73 @@ class Cohort:
         """
         return next(iter(self.candidates))
 
-    def sample(self, size: int) -> List['Candidate']:
+    def sample(self, n: int = 1, exclude: List[Candidate] = [], rng = random) -> 'Cohort':
         """Sample a subset of candidates from this cohort.
 
         Args:
-            size: Number of candidates to sample
+            n: Number of candidates to sample
 
         Returns:
-            List of sampled candidates
+            New Cohort of randomly sampled candidates
         """
-        return random.sample(list(self.candidates), size)
+        candidates = [c for c in self.candidates if c not in exclude]
+        candidates = rng.sample(candidates, n)
+        new_weights = self._new_weights(candidates)
+        return self.__class__(*candidates, iteration=self._iteration, **new_weights)
 
-    def filter(self, comparison_func) -> 'Cohort':
+    def sample_stochastic(self, n: int = 1, exclude: List[Candidate] = [], rng = random, **factors) -> 'Cohort':
+        """Stochastic sampling based on task winning frequency (Algorithm 2 line 14).
+
+        Implements GEPA Algorithm 2's stochastic selection and more: "Sample Φk from Ĉ with probability ∝ f[Φk]"
+        where f[Φk] is the number of tasks on which candidate Φk achieves the best score.
+
+        Args:
+            n: Number of candidates to sample
+            **factors: Keyword arguments where keys match feature names provided during
+                cohort initialization (e.g., `task_wins=2.0`, `average_score=1.0`).
+                The values are float multipliers for each feature.
+
+        Returns:
+            Parents cohort with stochastically selected candidates
+        """
+
+        candidates = [c for c in self.candidates if c not in exclude]
+        pool_size = len(candidates)
+        if pool_size <= n:
+            new_weights = self._new_weights(candidates)
+            return self.__class__(*candidates, iteration=self._iteration, **new_weights)
+
+
+        # If no explicit factors are given, use all features from __init__ with weight 1.0.
+        factors = {key: factors.get(key, 1.0) for key in self.weights}
+
+        abs = lambda val: (val >= 0.0 and float(val) or 0.0)
+        final_weights = [0.0] * pool_size
+        for feature, weights in self.weights.items():
+            final_weights = [final_weights[i] + abs(weights[candidates[i]] * factors[feature]) for i in range(pool_size)]
+
+        # Handle case where all weights are 0
+        if sum(final_weights) == 0:
+            final_weights = [1.0] * pool_size
+
+        # Sample n candidates based on weights
+        selected = rng.choices(candidates, weights=final_weights, k=n)
+        new_weights = self._new_weights(selected)
+        return self.__class__(*selected, iteration=self._iteration, **new_weights)
+
+    def _new_weights(self, candidates: List[Candidate] = []):
+        new_weights = {}
+        for feature, weights in self.weights.items():
+             new_weights[feature] = {candidate: float(weights.get(candidate, 0.0)) for candidate in candidates}
+        return new_weights
+
+
+    def filter(self, comparison_func:Callable) -> 'Cohort':
         """Filter candidates using a comparison function.
 
         Args:
             comparison_func: Function that takes (candidate1, candidate2) -> bool
-                           Returns True if candidate1 should exclude candidate2
+                            Returns True if candidate1 should exclude candidate2
 
         Returns:
             New Cohort with filtered candidates
@@ -119,7 +192,8 @@ class Cohort:
             if not is_excluded:
                 kept_candidates.append(candidate)
 
-        return Cohort(*kept_candidates)
+        new_weights = self._new_weights(kept_candidates)
+        return self.__class__(*kept_candidates, iteration=self._iteration, **new_weights)
 
 
 
@@ -141,57 +215,14 @@ class Parents(Cohort):
     and will be used for mutation or merge operations.
     """
 
-    def __init__(self, *candidates: 'Candidate', task_wins: Optional[Dict['Candidate', int]] = None, **kwargs):
+    def __init__(self, *candidates: 'Candidate', **kwargs):
         """Initialize Parents cohort with optional task win counts.
 
         Args:
             *candidates: Candidate objects to include
-            task_wins: Optional pre-computed mapping of candidate -> number of tasks won
-                      If provided, avoids recalculation in sample_stochastic()
             **kwargs: Additional arguments passed to Cohort
         """
         super().__init__(*candidates, **kwargs)
-        self.task_wins = task_wins or {}
-
-    def sample_stochastic(self, n: int = 1) -> 'Parents':
-        """Stochastic sampling based on task winning frequency (Algorithm 2 line 14).
-
-        Implements Algorithm 2's stochastic selection: "Sample Φk from Ĉ with probability ∝ f[Φk]"
-        where f[Φk] is the number of tasks on which candidate Φk achieves the best score.
-
-        Args:
-            n: Number of candidates to sample
-
-        Returns:
-            Parents cohort with stochastically selected candidates
-        """
-        if self.is_empty():
-            return Parents()
-
-        if len(self.candidates) <= n:
-            return Parents(*self.candidates, task_wins=self.task_wins)
-
-        # Use pre-computed task_wins if available, otherwise calculate
-        if not self.task_wins:
-            raise ValueError(
-                "sample_stochastic requires pre-computed task_wins. "
-                "Please provide task_wins when initializing the Parents cohort."
-            )
-            return
-
-        # Create weights based on task wins (default to 0 if not in dict)
-        weights = [self.task_wins.get(candidate, 0) for candidate in self]
-
-        # Handle case where all weights are 0
-        if sum(weights) == 0:
-            weights = [1] * self.size()
-
-        # Sample one candidate based on weights
-        selected = random.choices(list(self), weights=weights, k=n)
-        task_wins = {candidate: self.task_wins.get(candidate, 0) for candidate in selected}
-
-        return Parents(*selected, task_wins=task_wins)
-
 
 class NewBorns(Cohort):
     """Cohort of newly generated candidates.

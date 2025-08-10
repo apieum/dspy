@@ -8,6 +8,7 @@ from dspy.teleprompt.darwin.data.candidate import Candidate
 from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
 from dspy.teleprompt.darwin.dataset_manager import DefaultDatasetManager
 from unittest.mock import Mock
+import pytest
 
 
 class TestMutation:
@@ -122,6 +123,7 @@ class TestMutation:
         minibatch = limited_dataset_manager.get_feedback_minibatch(2)
         assert len(minibatch) == 1  # Respects available data
 
+    # @pytest.mark.slow_test
     def test_budget_consumption(self):
         """Test that generator consumes budget appropriately."""
 
@@ -136,6 +138,7 @@ class TestMutation:
         generator.generate(empty_parents, budget)
         assert budget.consumed_calls > initial_calls
 
+    # @pytest.mark.slow_test
     def test_successful_generation_flow(self):
         """Test the complete generation flow when everything works."""
 
