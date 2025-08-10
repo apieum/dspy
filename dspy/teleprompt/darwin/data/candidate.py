@@ -1,6 +1,6 @@
 """Candidate data structure for GEPA optimization."""
 from dataclasses import dataclass, field
-from typing import Dict, List, Callable, Tuple
+from typing import Dict, List, Callable, Tuple, Optional, Union
 from typing_extensions import Any
 
 from dspy import Module, Example, Prediction
@@ -24,13 +24,13 @@ class Candidate:
         """Make candidates hashable based on object identity."""
         return hash(id(self))
 
-    def __eq__(self, other) -> bool:
+    def __eq__(self, other: object) -> bool:
         """Compare candidates by object identity."""
         if not isinstance(other, Candidate):
             return False
         return self is other
 
-    def task_score(self, task_id: int, default=0.0) -> float:
+    def task_score(self, task_id: int, default: float = 0.0) -> float:
         """Get score for a specific task."""
         return self.task_scores.get(task_id, default)
 

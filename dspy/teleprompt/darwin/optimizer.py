@@ -6,7 +6,7 @@ Darwin serves as a general-purpose toolkit for building evolutionary optimizers.
 """
 
 import logging
-from typing import List, Callable, TYPE_CHECKING
+from typing import List, Callable, TYPE_CHECKING, Optional, Union
 
 import dspy
 from dspy import Module
@@ -42,7 +42,7 @@ class Darwin:
                  generator: Generator,
                  evaluator: Evaluator,
                  dataset_manager_factory: "DatasetManagerFactory",
-                 patience: int = 3):
+                 patience: int = 3) -> None:
         """Initialize Darwin optimization with algorithms for each step.
 
         Args:
@@ -64,7 +64,7 @@ class Darwin:
         self.patience = patience
         self.generations_without_progress = 0
 
-    def start_compilation(self, student: Module, dataset_manager: "DatasetManager"):
+    def start_compilation(self, student: Module, dataset_manager: "DatasetManager") -> None:
         logger.info("Starting Darwin framework compilation...")
         # Pass the dataset manager to all components
         self.generator.start_compilation(student, dataset_manager)
@@ -72,7 +72,7 @@ class Darwin:
         self.selector.start_compilation(student, dataset_manager)
         self.budget.start_compilation(student, dataset_manager)
 
-    def finish_compilation(self, result: Module):
+    def finish_compilation(self, result: Module) -> None:
         logger.info("Terminating Darwin framework compilation.")
         self.budget.finish_compilation(result)
         self.selector.finish_compilation(result)

@@ -5,7 +5,7 @@ modular, testable, and easier to experiment with.
 """
 
 from dataclasses import dataclass
-from typing import Optional, Callable, Any, List
+from typing import Optional, Callable, Any, List, Union, Type
 from enum import Enum
 
 import dspy
@@ -47,14 +47,14 @@ class ReflectiveMutationConfig:
     """Maximum attempts to generate improved instructions."""
     
     # Reflection configuration  
-    reflection_strategy: Optional[Any] = None
+    reflection_strategy: Optional['ReflectionStrategy'] = None
     """ReflectionStrategy instance for generating improved instructions."""
     
     # Feedback configuration
-    feedback_provider: Optional[Any] = None
+    feedback_provider: Optional['FeedbackProvider'] = None
     """FeedbackProvider instance for evaluation and diagnostics."""
     
-    enhanced_feedback_function: Optional[Callable] = None
+    enhanced_feedback_function: Optional[Callable[..., Any]] = None
     """Enhanced μf function for rich diagnostic feedback."""
     
     # Module selection parameters
@@ -87,7 +87,7 @@ class ReflectiveMutationConfig:
             raise ValueError("max_modules_per_generation must be positive or None")
     
     @classmethod
-    def for_quick_experiments(cls, **overrides) -> 'ReflectiveMutationConfig':
+    def for_quick_experiments(cls, **overrides: Any) -> 'ReflectiveMutationConfig':
         """Create configuration optimized for quick experimental iterations."""
         defaults = {
             'minibatch_size': 3,
@@ -98,7 +98,7 @@ class ReflectiveMutationConfig:
         return cls(**defaults)
     
     @classmethod
-    def for_production(cls, **overrides) -> 'ReflectiveMutationConfig':
+    def for_production(cls, **overrides: Any) -> 'ReflectiveMutationConfig':
         """Create configuration optimized for production performance."""
         defaults = {
             'minibatch_size': 8,
@@ -109,7 +109,7 @@ class ReflectiveMutationConfig:
         return cls(**defaults)
     
     @classmethod  
-    def for_debugging(cls, **overrides) -> 'ReflectiveMutationConfig':
+    def for_debugging(cls, **overrides: Any) -> 'ReflectiveMutationConfig':
         """Create configuration with detailed logging for debugging."""
         defaults = {
             'enable_detailed_logging': True,
