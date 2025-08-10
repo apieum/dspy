@@ -12,6 +12,7 @@ from dspy.teleprompt.simba import SIMBA
 from dspy.teleprompt.teleprompt import Teleprompter
 from dspy.teleprompt.teleprompt_optuna import BootstrapFewShotWithOptuna
 from dspy.teleprompt.vanilla import LabeledFewShot
+from dspy.teleprompt.darwin import Darwin, GEPA, GEPAMute, GEPAMerge
 
 __all__ = [
     "AvatarOptimizer",
@@ -27,4 +28,6 @@ __all__ = [
     "LabeledFewShot",
     "InferRules",
     "SIMBA",
+    "Darwin",
+    "GEPA", "GEPAMute", "GEPAMerge"
 ]

@@ -1,6 +1,6 @@
-"""Tests for GEPA telepromter.
+"""Tests for Darwin optimizer.
 
-Following DSPy test patterns and BDD approach for GEPA implementation.
+Following DSPy test patterns and BDD approach for Darwin framework implementation.
 """
 
 import pytest
@@ -67,11 +67,11 @@ def dummy_lm():
     ])
 
 
-class TestGEPABehavior:
-    """Test GEPA core behavior and algorithm structure."""
+class TestDarwinBehavior:
+    """Test Darwin core behavior and algorithm structure."""
 
-    def test_gepa_returns_compiled_program(self, simple_trainset, dummy_lm):
-        """GEPA should return a compiled program when given valid inputs."""
+    def test_darwin_returns_compiled_program(self, simple_trainset, dummy_lm):
+        """Darwin should return a compiled program when given valid inputs."""
         with dspy.context(lm=dummy_lm):
             student = SimpleQA()
             optimizer = GEPAMute(simple_metric, max_calls=2)
@@ -84,11 +84,11 @@ class TestGEPABehavior:
             assert result._compiled is True
 
 
-class TestGEPAAlgorithmStructure:
-    """Test the GEPA algorithm follows the correct structure."""
+class TestDarwinAlgorithmStructure:
+    """Test the Darwin framework follows the correct structure."""
 
-    def test_gepa_algorithm_phases(self, simple_trainset, dummy_lm):
-        """GEPA should follow the defined algorithm phases."""
+    def test_darwin_algorithm_phases(self, simple_trainset, dummy_lm):
+        """Darwin should follow the defined algorithm phases."""
         with dspy.context(lm=dummy_lm):
             student = SimpleQA()
             optimizer = GEPAMute(simple_metric, max_calls=2)
@@ -109,8 +109,8 @@ class TestGEPAAlgorithmStructure:
 class TestFactoryFunctions:
     """Test factory functions create valid GEPA instances."""
 
-    def test_create_basic_gepa(self):
-        """GEPA.create_basic should return working GEPA instance."""
+    def test_create_gepa_optimizer(self):
+        """GEPAMute should return working Darwin instance."""
         optimizer = GEPAMute(simple_metric, max_calls=2)
 
         assert isinstance(optimizer, Darwin)

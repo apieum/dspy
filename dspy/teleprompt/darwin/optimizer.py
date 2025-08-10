@@ -1,11 +1,12 @@
-"""GEPA Framework - Strategy-based prompt optimization framework.
+"""Darwin Toolkit - Extensible evolutionary optimization for language model programs.
 
-This module implements GEPA as a clean, configurable framework using
+This module implements Darwin as a clean, configurable framework using
 dependency injection and the strategy pattern for research flexibility.
+Darwin serves as a general-purpose toolkit for building evolutionary optimizers.
 """
 
 import logging
-from typing import List, TYPE_CHECKING
+from typing import List, Callable, TYPE_CHECKING
 
 import dspy
 from dspy import Module
@@ -16,17 +17,15 @@ from .generation import Generator
 from .evaluation import Evaluator
 from .data.candidate import Candidate
 from .data.cohort import Cohort,NewBorns, Survivors, Parents
-
-if TYPE_CHECKING:
-    from .dataset_manager import DatasetManagerFactory, DatasetManager
+from .dataset_manager import DatasetManagerFactory, DatasetManager
 
 logger = logging.getLogger(__name__)
 
 
-class GEPA:
-    """Framework for prompt optimization with injectable strategies.
+class Darwin:
+    """Framework for evolutionary optimization with injectable strategies.
 
-    GEPA orchestrates the optimization algorithm through clear phases:
+    Darwin orchestrates evolutionary optimization through clear phases:
     1. Scoring: Calculate candidate performance
     2. Filtering: Select surviving candidates
     3. Generation: Create new candidates
@@ -44,10 +43,10 @@ class GEPA:
                  evaluator: Evaluator,
                  dataset_manager_factory: "DatasetManagerFactory",
                  patience: int = 3):
-        """Initialize GEPA optimization with algorithms for each step.
+        """Initialize Darwin optimization with algorithms for each step.
 
         Args:
-            budget: Manages optimization budget (LLM calls, iterations)
+            budget: Manages optimization budget (LM calls, iterations)
             selector: Selects surviving candidates based on scores
             generator: Creates new candidates via genetic operations
             evaluator: Promotes worthy new candidates (owns metric)
@@ -66,7 +65,7 @@ class GEPA:
         self.generations_without_progress = 0
 
     def start_compilation(self, student: Module, dataset_manager: "DatasetManager"):
-        logger.info("Starting GEPA framework compilation...")
+        logger.info("Starting Darwin framework compilation...")
         # Pass the dataset manager to all components
         self.generator.start_compilation(student, dataset_manager)
         self.evaluator.start_compilation(student, dataset_manager)
@@ -74,14 +73,14 @@ class GEPA:
         self.budget.start_compilation(student, dataset_manager)
 
     def finish_compilation(self, result: Module):
-        logger.info("Terminating GEPA framework compilation.")
+        logger.info("Terminating Darwin framework compilation.")
         self.budget.finish_compilation(result)
         self.selector.finish_compilation(result)
         self.generator.finish_compilation(result)
         self.evaluator.finish_compilation(result)
 
     def start_iteration(self, cohort: Cohort) -> None:
-        """Starts a new iteration of the GEPA framework."""
+        """Starts a new iteration of the Darwin framework."""
         self.budget.start_iteration(self.current_iteration, cohort, self.budget)
         self.selector.start_iteration(self.current_iteration, cohort, self.budget)
         self.generator.start_iteration(self.current_iteration, cohort, self.budget)
@@ -188,69 +187,40 @@ class GEPA:
         compiled_module._compiled = True
         return compiled_module
 
-    @staticmethod
-    def create_basic(metric, max_calls: int = 1000, population_size: int = 10, patience: int = 3) -> "GEPA":
-        """Create a basic GEPA optimizer with standard settings."""
-        from .budget import LMCallsBudget
-        from .selection import ParetoFrontier
-        from .generation import ReflectivePromptMutation
-        from .generation.feedback import FeedbackProvider
-        from .evaluation import GEPAEvaluator
-        from .dataset_manager import DefaultDatasetManagerFactory
 
-        return GEPA(
-            budget=LMCallsBudget(max_calls),
-            selector=ParetoFrontier(),
-            generator=ReflectivePromptMutation(
-                feedback_provider=FeedbackProvider(metric=metric)
-            ),
-            evaluator=GEPAEvaluator(
-                metric=metric,
-            ),
-            dataset_manager_factory=DefaultDatasetManagerFactory(),
-            patience=patience
-        )
+def GEPA(generator:Generator, metric: Callable, budget:Budget, minibatch_size: int = 3, patience: int = 3) -> "Darwin":
+    """Create the default GEPA optimizer with ReflectivePromptMutator.
+
+    This factory method assembles the specific components needed to reproduce
+    the GEPA optimization algorithm as described in the original paper.
+    """
+    from .selection.pareto import ParetoFrontier
+    from .evaluation.gepa_evaluator import GEPATwoPhasesEval
+    from .dataset_manager import DefaultDatasetManagerFactory
 
 
-    @staticmethod
-    def create_iteration_limited(metric, max_iterations: int = 20, population_size: int = 8, patience: int = 3) -> "GEPA":
-        """Create a GEPA optimizer limited by iterations rather than LLM calls."""
-        from .budget import IterationBudget
-        from .selection import ParetoFrontier
-        from .generation import ReflectivePromptMutation
-        from .generation.feedback import FeedbackProvider
-        from .evaluation import GEPAEvaluator
-        from .dataset_manager import DefaultDatasetManagerFactory
+    return Darwin(
+        budget=budget,
+        selector=ParetoFrontier(),
+        generator=generator,
+        evaluator=GEPATwoPhasesEval(metric=metric, minibatch_size=minibatch_size),
+        dataset_manager_factory=DefaultDatasetManagerFactory(),
+        patience=patience
+    )
 
-        return GEPA(
-            budget=IterationBudget(max_iterations),
-            selector=ParetoFrontier(),
-            generator=ReflectivePromptMutation(
-                feedback_provider=FeedbackProvider(metric=metric)
-            ),
-            evaluator=GEPAEvaluator(
-                metric=metric,
-            ),
-            dataset_manager_factory=DefaultDatasetManagerFactory(),
-            patience=patience
-        )
 
-    @staticmethod
-    def create_with_merge(metric, max_calls: int = 1000, population_size: int = 12, patience: int = 3) -> "GEPA":
-        """Create GEPA optimizer with System-Aware Merge for complex optimization."""
-        from .budget import LMCallsBudget
-        from .selection import ParetoFrontier
-        from .generation import SystemAwareMerge
-        from .evaluation import GEPAEvaluator
-        from .dataset_manager import DefaultDatasetManagerFactory
+def GEPAMute(metric: Callable, max_calls: int = 2, minibatch_size: int = 3, patience: int = 3) -> "Darwin":
+    """Create a Darwin optimizer with ReflectivePromptMutation."""
+    from .budget import LMCallsBudget
+    from .generation.mutation import ReflectivePromptMutation
+    from .generation.feedback import FeedbackProvider
+    generator=ReflectivePromptMutation(
+        feedback_provider=FeedbackProvider(metric=metric)
+    )
+    return GEPA(generator, metric, LMCallsBudget(max_calls), minibatch_size, patience)
 
-        return GEPA(
-            budget=LMCallsBudget(max_calls),
-            selector=ParetoFrontier(),
-            generator=SystemAwareMerge(),
-            evaluator=GEPAEvaluator(
-                metric=metric,
-            ),
-            dataset_manager_factory=DefaultDatasetManagerFactory(),
-            patience=patience
-        )
+
+def GEPAMerge(metric: Callable, max_calls: int = 2, minibatch_size: int = 3, patience: int = 3) -> "Darwin":
+    """Create Darwin optimizer with System-Aware Merge."""
+    from .generation.system_aware_merge import SystemAwareMerge
+    return GEPA(SystemAwareMerge(), metric, LMCallsBudget(max_calls), minibatch_size, patience)

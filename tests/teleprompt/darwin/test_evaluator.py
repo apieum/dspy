@@ -1,12 +1,13 @@
-"""Test evaluation components with two-phase evaluation."""
+"""Test Darwin evaluator components including two-phase evaluation."""
 
 import dspy
 from unittest.mock import Mock
-from dspy.teleprompt.gepa.evaluation import GEPAEvaluator
-from dspy.teleprompt.gepa.data.candidate import Candidate
-from dspy.teleprompt.gepa.data.cohort import NewBorns, Parents, Survivors
-from dspy.teleprompt.gepa.budget.lm_calls import LMCallsBudget
-from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
+from dspy.teleprompt.darwin.evaluation.gepa_evaluator import ParentFastCompare, FullTaskScores, GEPATwoPhasesEval
+from dspy.teleprompt.darwin.evaluation.evaluator import Evaluator
+from dspy.teleprompt.darwin.data.candidate import Candidate
+from dspy.teleprompt.darwin.data.cohort import NewBorns, Parents, Survivors
+from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
+from dspy.teleprompt.darwin.dataset_manager import DefaultDatasetManager
 
 
 def simple_metric(example: dspy.Example, prediction, trace=None) -> float:
@@ -35,8 +36,8 @@ class TestTwoPhaseEvaluationInterface:
     """Test two-phase evaluation component interfaces."""
 
     def test_promotion_evaluator_interface(self):
-        """Test GEPAEvaluator implements required two-phase interface."""
-        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=3)
+        """Test GEPATwoPhasesEval implements required two-phase interface."""
+        evaluator = GEPATwoPhasesEval(metric=simple_metric, minibatch_size=3)
 
         # Interface methods
         assert hasattr(evaluator, 'evaluate')
@@ -48,7 +49,7 @@ class TestTwoPhaseEvaluationInterface:
 
     def test_evaluator_configuration(self):
         """Test evaluator configuration via start_compilation."""
-        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=2)
+        evaluator = GEPATwoPhasesEval(metric=simple_metric, minibatch_size=2)
 
         dev_data = [
             dspy.Example(input="feedback1", answer="answer1").with_inputs("input"),
@@ -81,7 +82,7 @@ class TestTwoPhaseEvaluation:
 
     def test_minibatch_validation_improves(self):
         """Test minibatch validation when child improves over parent."""
-        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=2)
+        evaluator = GEPATwoPhasesEval(metric=simple_metric, minibatch_size=2)
 
         dev_data = [
             dspy.Example(input="test1", answer="correct").with_inputs("input"),
@@ -127,7 +128,7 @@ class TestTwoPhaseEvaluation:
 
     def test_minibatch_validation_rejects(self):
         """Test minibatch validation when child doesn't improve over parent."""
-        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=2)
+        evaluator = GEPATwoPhasesEval(metric=simple_metric, minibatch_size=2)
 
         dev_data = [
             dspy.Example(input="test1", answer="correct").with_inputs("input"),
@@ -166,7 +167,7 @@ class TestTwoPhaseEvaluation:
 
     def test_full_evaluation_after_minibatch_success(self):
         """Test that full evaluation is only run after minibatch success."""
-        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=1)
+        evaluator = GEPATwoPhasesEval(metric=simple_metric, minibatch_size=1)
 
         data = {
             0:dspy.Example(input="pareto1", answer="correct").with_inputs("input"),
@@ -214,7 +215,7 @@ class TestEvaluationBudgetIntegration:
 
     def test_evaluation_updates_budget_correctly(self):
         """Test that both evaluation phases update budget correctly."""
-        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=2)
+        evaluator = GEPATwoPhasesEval(metric=simple_metric, minibatch_size=2)
 
         dev_data = [
             dspy.Example(input="feedback1", answer="correct").with_inputs("input"),
@@ -249,7 +250,7 @@ class TestEvaluationBudgetIntegration:
 
     def test_evaluation_handles_budget_limits_gracefully(self):
         """Test evaluation handles budget constraints gracefully."""
-        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=1)
+        evaluator = GEPATwoPhasesEval(metric=simple_metric, minibatch_size=1)
 
         dev_data = [dspy.Example(input="feedback", answer="correct").with_inputs("input")]
         eval_data = [dspy.Example(input="pareto", answer="correct").with_inputs("input")]
@@ -285,7 +286,7 @@ class TestEvaluationErrorHandling:
 
     def test_evaluation_with_no_parents(self):
         """Test evaluation handles candidates with no parents."""
-        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=2)
+        evaluator = GEPATwoPhasesEval(metric=simple_metric, minibatch_size=2)
 
         dev_data = [dspy.Example(input="feedback", answer="correct").with_inputs("input")]
         eval_data = [dspy.Example(input="pareto", answer="correct").with_inputs("input")]
@@ -311,7 +312,7 @@ class TestEvaluationErrorHandling:
 
     def test_evaluation_with_empty_dev_data(self):
         """Test evaluation handles empty feedback data."""
-        evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=2)
+        evaluator = GEPATwoPhasesEval(metric=simple_metric, minibatch_size=2)
 
         # Empty feedback data
         dev_data = []

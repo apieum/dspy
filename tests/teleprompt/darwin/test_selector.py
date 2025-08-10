@@ -1,17 +1,17 @@
-"""Comprehensive tests for ParetoFrontier selector.
+"""Comprehensive tests for Darwin selector components.
 
-Tests all scenarios and edge cases to ensure paper-compliant Algorithm 2 implementation,
-including task winner selection, domination logic, and integration scenarios.
+Tests all scenarios and edge cases for selection strategies including Pareto frontier
+selection with task winner logic, domination handling, and integration scenarios.
 """
 
 import dspy
-from dspy.teleprompt.gepa.data.candidate import Candidate
-from dspy.teleprompt.gepa.data.cohort import Survivors, Parents
-from dspy.teleprompt.gepa.selection.pareto_frontier import ParetoFrontier
-from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
+from dspy.teleprompt.darwin.data.candidate import Candidate
+from dspy.teleprompt.darwin.data.cohort import Survivors, Parents
+from dspy.teleprompt.darwin.selection.pareto import ParetoFrontier
+from dspy.teleprompt.darwin.dataset_manager import DefaultDatasetManager
 
 
-class TestParetoFrontier:
+class TestSelector:
     """Comprehensive tests for ParetoFrontier with all scenarios."""
 
     def setup_method(self):

@@ -1,11 +1,12 @@
 """Test clean dependency injection design for GEPA components."""
 
 import dspy
-from dspy.teleprompt.gepa.core import GEPA
-from dspy.teleprompt.gepa.evaluation import GEPAEvaluator
-from dspy.teleprompt.gepa.generation.reflective_mutation import ReflectivePromptMutation
-from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
-from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
+from dspy.teleprompt.darwin.optimizer import Darwin, GEPAMute
+from dspy.teleprompt.darwin.evaluation.gepa_evaluator import ParentFastCompare, FullTaskScores
+from dspy.teleprompt.darwin.evaluation.evaluator import Evaluator
+from dspy.teleprompt.darwin.generation.mutation import ReflectivePromptMutation
+from dspy.teleprompt.darwin.generation.feedback import FeedbackProvider
+from dspy.teleprompt.darwin.dataset_manager import DefaultDatasetManager
 
 
 def simple_metric(example: dspy.Example, prediction, trace=None) -> float:
@@ -26,7 +27,8 @@ def test_components_self_configure():
     ]
 
     # Create components without dataset knowledge
-    evaluator = GEPAEvaluator(metric=simple_metric, minibatch_size=2)
+    GEPATwoPhasesEval = Evaluator.create_chain('GEPATwoPhasesEval', [ParentFastCompare, FullTaskScores])
+    evaluator = GEPATwoPhasesEval(metric=simple_metric, minibatch_size=2)
     feedback_provider = FeedbackProvider(metric=simple_metric)
     generator = ReflectivePromptMutation(feedback_provider)
 
@@ -56,7 +58,7 @@ def test_gepa_delegates_configuration():
     ]
 
     # Create GEPA optimizer
-    gepa = GEPA.create_basic(metric=simple_metric, max_calls=10)
+    gepa = GEPAMute(metric=simple_metric, max_calls=10)
     student = dspy.Predict("question -> answer")
 
     # Verify components start unconfigured

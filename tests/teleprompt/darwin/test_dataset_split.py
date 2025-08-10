@@ -1,11 +1,12 @@
 """Test GEPA dataset split implementation."""
 
 import dspy
-from dspy.teleprompt.gepa.core import GEPA
-from dspy.teleprompt.gepa.generation.reflective_mutation import ReflectivePromptMutation
-from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
-from dspy.teleprompt.gepa.evaluation import GEPAEvaluator
-from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManagerFactory, DefaultDatasetManager
+from dspy.teleprompt.darwin.optimizer import Darwin, GEPAMute
+from dspy.teleprompt.darwin.generation.mutation import ReflectivePromptMutation
+from dspy.teleprompt.darwin.generation.feedback import FeedbackProvider
+from dspy.teleprompt.darwin.evaluation.gepa_evaluator import ParentFastCompare, FullTaskScores
+from dspy.teleprompt.darwin.evaluation.evaluator import Evaluator
+from dspy.teleprompt.darwin.dataset_manager import DefaultDatasetManagerFactory, DefaultDatasetManager
 
 
 class TestDatasetSplit:
@@ -29,12 +30,13 @@ class TestDatasetSplit:
 
         feedback_provider = FeedbackProvider(metric=simple_metric)
         generator = ReflectivePromptMutation(feedback_provider)
-        evaluator = GEPAEvaluator(metric=simple_metric)
+        GEPATwoPhasesEval = Evaluator.create_chain('GEPATwoPhasesEval', [ParentFastCompare, FullTaskScores])
+        evaluator = GEPATwoPhasesEval(metric=simple_metric)
 
-        from dspy.teleprompt.gepa.budget.lm_calls import LMCallsBudget
-        from dspy.teleprompt.gepa.selection import ParetoFrontier
+        from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
+        from dspy.teleprompt.darwin.selection.pareto import ParetoFrontier
 
-        gepa = GEPA(
+        gepa = Darwin(
             budget=LMCallsBudget(5),  # Small budget to terminate quickly
             selector=ParetoFrontier(),
             generator=generator,
@@ -114,7 +116,8 @@ class TestDatasetSplit:
     def test_evaluator_uses_both_datasets(self):
         """Test that Evaluator receives and uses dataset manager."""
 
-        evaluator = GEPAEvaluator(metric=lambda ex, pred, trace=None: 0.5)
+        GEPATwoPhasesEval = Evaluator.create_chain('GEPATwoPhasesEval', [ParentFastCompare, FullTaskScores])
+        evaluator = GEPATwoPhasesEval(metric=lambda ex, pred, trace=None: 0.5)
 
         # Create training data that will be split by dataset manager
         training_data = [
@@ -150,7 +153,7 @@ class TestDatasetSplit:
         ]
 
         student = dspy.Predict("question -> answer")
-        gepa = GEPA.create_basic(lambda ex, pred, trace=None: 0.5, max_calls=2)
+        gepa = GEPAMute(lambda ex, pred, trace=None: 0.5, max_calls=2)
 
         # Mock to check dataset manager handles small datasets properly
         original_start = gepa.start_compilation
@@ -182,8 +185,8 @@ class TestDatasetSplit:
         Tests that the main GEPA orchestrator correctly uses the DatasetManager
         to split the data and provide it to its components.
         """
-        from dspy.teleprompt.gepa.core import GEPA
-        from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManagerFactory
+        from dspy.teleprompt.darwin.optimizer import GEPAMute
+        from dspy.teleprompt.darwin.dataset_manager import DefaultDatasetManagerFactory
 
         # 1. Create a full training dataset
         training_data = [
@@ -193,7 +196,7 @@ class TestDatasetSplit:
 
         # 2. Instantiate GEPA with the factory
         # This ensures we are testing the end-to-end wiring
-        gepa = GEPA.create_basic(metric=lambda ex, pred, trace=None: 0.5, max_calls=5)
+        gepa = GEPAMute(metric=lambda ex, pred, trace=None: 0.5, max_calls=5)
 
         # 3. Mock the `start_compilation` method to intercept the dataset_manager
         #    that GEPA creates internally.

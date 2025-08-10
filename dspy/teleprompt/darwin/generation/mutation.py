@@ -1,4 +1,4 @@
-"""Simplified ReflectivePromptMutation using DSPy's native systems."""
+"""ReflectivePromptMutation - Evolutionary mutation using reflection on feedback."""
 
 import logging
 from typing import Any, List, Optional, TYPE_CHECKING

@@ -2,7 +2,7 @@
 
 from ..data.cohort import Cohort
 from .generator import Generator
-from .crossover import SystemAwareMerge
+from .system_aware_merge import SystemAwareMerge
 
 # DSPy-native implementation (reuses DSPy's built-in systems)
 from .feedback import FeedbackProvider
@@ -10,7 +10,7 @@ from .enhanced_metrics import (
     code_evaluation_metric, math_problem_metric,
     text_classification_metric, qa_accuracy_metric
 )
-from .reflective_mutation import ReflectivePromptMutation
+from .mutation import ReflectivePromptMutation
 from .reflection_strategy import (
     ReflectionStrategy,
     GEPAReflection, SimpleReflection, PrefixReflection

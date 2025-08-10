@@ -2,9 +2,9 @@
 
 import pytest
 import dspy
-from dspy.teleprompt.gepa.budget.lm_calls import LMCallsBudget
-from dspy.teleprompt.gepa.budget.iterations import IterationBudget
-from dspy.teleprompt.gepa.budget.adaptive import AdaptiveBudget
+from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
+from dspy.teleprompt.darwin.budget.iterations import IterationBudget
+from dspy.teleprompt.darwin.budget.adaptive import AdaptiveBudget
 
 
 class TestBudgetInterface:

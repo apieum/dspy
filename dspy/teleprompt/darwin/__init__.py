@@ -1,11 +1,11 @@
-"""GEPA: Genetic-Pareto optimizer for compound AI systems.
+"""Darwin - Extensible evolutionary optimization for language model programs.
 
-A well-structured module implementation of the GEPA optimization algorithm
-from "GEPA: Genetic-Pareto Optimization for Task-Specific Instruction Evolution".
+Darwin is a general-purpose toolkit for building evolutionary optimizers,
+with GEPA as the first "recipe" using the framework.
 """
 
-# Main GEPA implementation
-from .core import GEPA
+# Main Darwin implementation
+from .optimizer import Darwin, GEPA, GEPAMerge, GEPAMute
 from .data.candidate import Candidate
 from .data.cohort import Cohort
 
@@ -17,17 +17,19 @@ from .evaluation import Evaluator
 
 # Business step implementations
 from .budget import LMCallsBudget, IterationBudget, AdaptiveBudget
-from .selection import ParetoFrontier
-from .generation import ReflectivePromptMutation, SystemAwareMerge
-from .evaluation import GEPAEvaluator, FullTaskScores, ParentFastCompare
+from .selection.pareto import ParetoFrontier
+from .generation.mutation import ReflectivePromptMutation
+from .generation.system_aware_merge import SystemAwareMerge
+from .evaluation.gepa_evaluator import FullTaskScores, ParentFastCompare
 from .evaluation.trace_collector import EnhancedTraceCollector
 from .evaluation.feedback import FeedbackResult, EvaluationTrace, ModuleFeedback
 
-# Factory functions are now static methods on GEPA class
+# Factory functions are now static methods on Darwin class
 
 __all__ = [
     # Core classes
-    'GEPA',
+    'Darwin',
+    'GEPA', 'GEPAMerge', 'GEPAMute',
     'Candidate',
     'Cohort',
 
@@ -44,7 +46,6 @@ __all__ = [
     'ParetoFrontier',
     'ReflectivePromptMutation',
     'SystemAwareMerge',
-    'GEPAEvaluator',
     'FullTaskScores',
     'ParentFastCompare',
     'EnhancedTraceCollector',

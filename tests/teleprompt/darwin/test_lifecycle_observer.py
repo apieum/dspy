@@ -1,9 +1,9 @@
 """Test compilation lifecycle observer pattern."""
 
 import dspy
-from dspy.teleprompt.gepa.core import GEPA
-from dspy.teleprompt.gepa.budget.lm_calls import LMCallsBudget
-from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
+from dspy.teleprompt.darwin.optimizer import Darwin, GEPAMute
+from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
+from dspy.teleprompt.darwin.dataset_manager import DefaultDatasetManager
 from unittest.mock import Mock
 
 
@@ -14,13 +14,13 @@ def test_compilation_lifecycle_events():
         return 0.5
 
     # Create GEPA with lifecycle tracking
-    gepa = GEPA.create_basic(simple_metric, max_calls=5)
+    darwin = GEPAMute(simple_metric, max_calls=5)
 
     # Track lifecycle calls
     lifecycle_calls = []
 
     # Mock components to track lifecycle
-    for component in [gepa.budget, gepa.selector, gepa.generator, gepa.evaluator]:
+    for component in [darwin.budget, darwin.selector, darwin.generator, darwin.evaluator]:
         original_start = component.start_compilation
         original_finish = component.finish_compilation
 
@@ -47,7 +47,7 @@ def test_compilation_lifecycle_events():
 
     # Run compilation (should trigger lifecycle events)
     with dspy.context(lm=dspy.utils.DummyLM({"answer": "test"})):
-        result = gepa.compile(student, training_data)
+        result = darwin.compile(student, training_data)
 
     # Verify lifecycle events occurred
     assert any("start_compilation" in call for call in lifecycle_calls)
@@ -94,14 +94,14 @@ def test_components_opt_into_lifecycle_events():
         return 0.5
 
     # Create components
-    from dspy.teleprompt.gepa.generation.reflective_mutation import ReflectivePromptMutation
-    from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
-    from dspy.teleprompt.gepa.evaluation import GEPAEvaluator
-    from dspy.teleprompt.gepa.selection import ParetoFrontier
+    from dspy.teleprompt.darwin.generation.mutation import ReflectivePromptMutation
+    from dspy.teleprompt.darwin.generation.feedback import FeedbackProvider
+    from dspy.teleprompt.darwin.evaluation.gepa_evaluator import GEPATwoPhasesEval
+    from dspy.teleprompt.darwin.selection.pareto import ParetoFrontier
 
     feedback_provider = FeedbackProvider(metric=simple_metric)
     generator = ReflectivePromptMutation(feedback_provider)
-    evaluator = GEPAEvaluator(metric=simple_metric)
+    evaluator = GEPATwoPhasesEval(metric=simple_metric)
     selector = ParetoFrontier()
     budget = LMCallsBudget(10)
 

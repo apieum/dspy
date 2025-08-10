@@ -1,16 +1,16 @@
-"""Test simplified ReflectivePromptMutation generator."""
+"""Test Darwin mutation generators including reflective mutation."""
 
 import dspy
-from dspy.teleprompt.gepa.generation.reflective_mutation import ReflectivePromptMutation
-from dspy.teleprompt.gepa.generation.feedback import FeedbackProvider
-from dspy.teleprompt.gepa.data.cohort import Parents
-from dspy.teleprompt.gepa.data.candidate import Candidate
-from dspy.teleprompt.gepa.budget.lm_calls import LMCallsBudget
-from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
+from dspy.teleprompt.darwin.generation.mutation import ReflectivePromptMutation
+from dspy.teleprompt.darwin.generation.feedback import FeedbackProvider
+from dspy.teleprompt.darwin.data.cohort import Parents
+from dspy.teleprompt.darwin.data.candidate import Candidate
+from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
+from dspy.teleprompt.darwin.dataset_manager import DefaultDatasetManager
 from unittest.mock import Mock
 
 
-class TestSimplifiedReflectiveMutation:
+class TestMutation:
     """Test the simplified ReflectivePromptMutation implementation."""
 
     def test_basic_initialization(self):

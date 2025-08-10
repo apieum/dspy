@@ -1,12 +1,12 @@
-"""Test the simplified, self-contained SystemAwareMerge implementation."""
+"""Test Darwin crossover generators including SystemAwareMerge."""
 
 import pytest
 from unittest.mock import Mock, patch
 
 import dspy
-from dspy.teleprompt.gepa.data.candidate import Candidate
-from dspy.teleprompt.gepa.data.cohort import Parents, NewBorns
-from dspy.teleprompt.gepa.generation.crossover import SystemAwareMerge
+from dspy.teleprompt.darwin.data.candidate import Candidate
+from dspy.teleprompt.darwin.data.cohort import Parents, NewBorns
+from dspy.teleprompt.darwin.generation.system_aware_merge import SystemAwareMerge
 
 class TestSimplifiedSystemAwareMerge:
     """Test the simplified SystemAwareMerge implementation."""
@@ -94,7 +94,7 @@ class TestSimplifiedSystemAwareMerge:
 
     def test_create_merged_candidate(self):
         """Test _create_merged_candidate method."""
-        with patch('dspy.teleprompt.gepa.generation.crossover.set_signature') as mock_set_sig:
+        with patch('dspy.teleprompt.darwin.generation.system_aware_merge.set_signature') as mock_set_sig:
             ancestor = Candidate(module=self.mock_module1, generation_number=0)
             parent1 = Candidate(module=self.mock_module2, generation_number=1)
             parent2 = Candidate(module=self.mock_module3, generation_number=1)
@@ -168,7 +168,7 @@ class TestSimplifiedSystemAwareMerge:
         self.generator.attempted_merges.add((1, 2, 3))
         self.generator.merge_stats["success"] = 5
 
-        from dspy.teleprompt.gepa.dataset_manager import DefaultDatasetManager
+        from dspy.teleprompt.darwin.dataset_manager import DefaultDatasetManager
         training_data = [Mock(), Mock()]
         dataset_manager = DefaultDatasetManager(training_data, split_ratio=0.5)
 

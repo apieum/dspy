@@ -1,7 +1,7 @@
-"""System-Aware Merge generator implementing Algorithm 4 from the GEPA paper.
+"""System-Aware Merge - Context-aware evolutionary crossover from the GEPA paper.
 
-This is a self-contained implementation that integrates all necessary logic
-for ancestry, desirability checks, and history tracking.
+This implements Algorithm 4 from the GEPA paper with integrated logic for
+ancestry tracking, desirability analysis, and signature merging.
 """
 
 import logging
