@@ -6,14 +6,15 @@ These can be chained together to create a multi-phase evaluation pipeline.
 """
 
 import logging
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING, List, Dict
+import dspy
 from dspy import Module
 from .evaluator import Evaluator
 from ..data.cohort import NewBorns, Survivors
 from ..budget import Budget
 
 if TYPE_CHECKING:
-    from ..dataset_manager import DatasetManager
+    pass  # No forward references needed
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +36,13 @@ class ParentFastCompare(Evaluator):
         super().__init__()
         self.metric = metric
         self.minibatch_size = minibatch_size
-        self.dataset_manager: Optional["DatasetManager"] = None
+        self.split_strategy = None
+        self.verbose = False
 
-    def start_compilation(self, student: Module, dataset_manager: "DatasetManager") -> None:
-        """Prepares the evaluator with the dataset manager."""
-        self.dataset_manager = dataset_manager
+    def start_compilation(self, student: dspy.Module, split_strategy=None, verbose: bool=False) -> None:
+        """Prepares the evaluator with the split strategy from Darwin."""
+        self.split_strategy = split_strategy
+        self.verbose = verbose
 
     def evaluate(self, new_borns: NewBorns, budget: Budget) -> Survivors:
         """
@@ -70,30 +73,60 @@ class ParentFastCompare(Evaluator):
 
     def _validate_on_minibatch(self, child: 'Candidate') -> tuple[bool, int]:
         """Compares a child and parent on a random minibatch from the development set."""
-        validation_minibatch = self.dataset_manager.get_validation_minibatch(self.minibatch_size)
+        validation_minibatch = self._get_validation_minibatch(self.minibatch_size)
         if not validation_minibatch:
             return False, 0
 
         try:
-            # Use the efficient, parallel batch evaluation with dictionary (preserves task_ids)
-            child_scores = child.evaluate_on_batch(validation_minibatch, metric=self.metric)
+            # DEBUG: Check actual instructions before validation
+            from dspy.teleprompt.utils import get_signature
+            child_predictors = child.module.predictors()
+            if child_predictors:
+                child_instruction = get_signature(child_predictors[0]).instructions
+                logger.info(f"VALIDATION INSTRUCTION DEBUG: child instruction: {child_instruction}")
+
+            for i, parent in enumerate(child.parents):
+                parent_predictors = parent.module.predictors()
+                if parent_predictors:
+                    parent_instruction = get_signature(parent_predictors[0]).instructions
+                    logger.info(f"VALIDATION INSTRUCTION DEBUG: parent {i} instruction: {parent_instruction}")
+
+            # Phase 1: Validation on minibatch (n={len(validation_minibatch)} examples)
+            logger.debug(f"Validation phase: evaluating on {len(validation_minibatch)} examples from internal validation set")
+            child_scores = child.evaluate_on_batch(validation_minibatch, metric=self.metric, verbose=self.verbose)
+            parent_avg_scores = []
             parent_scores = []
             for parent in child.parents:
-                score = parent.evaluate_on_batch(validation_minibatch, metric=self.metric)
-                parent_scores.append(sum(score.values()) / len(score) if score else 0.0)
+                score = parent.evaluate_on_batch(validation_minibatch, metric=self.metric, verbose=self.verbose)
+                parent_scores.append(score)
+                parent_avg_scores.append(sum(score.values()) / len(score) if score else 0.0)
 
             avg_child = sum(child_scores.values()) / len(child_scores) if child_scores else 0
-            avg_parent = min(parent_scores) if parent_scores else 0.0
+            avg_parent = min(parent_avg_scores) if parent_avg_scores else 0.0 # get the weakest parent score for comparison
 
-            is_improved = avg_child > avg_parent
+            # Allow small tolerance for floating point precision and enable progression when equal
+            tolerance = 0.01  # 1% tolerance
+            is_improved = (avg_child >= avg_parent - tolerance)  # Accept equal or better scores
             cost = len(validation_minibatch) * len(child.parents)  # Cost for evaluating both child and parents
 
-            logger.debug(f"Minibatch validation: parent={avg_parent:.3f}, child={avg_child:.3f}, improved={is_improved}")
+            logger.info(f"Validation result: parent={avg_parent:.3f}, child={avg_child:.3f}, passes_filter={is_improved}")
+            logger.debug(f"Minibatch scores - child: {child_scores}, parents: {parent_scores}")
+            logger.debug(f"Evaluated on tasks: {list(validation_minibatch.keys())}")
             return is_improved, cost
 
         except Exception as e:
             logger.warning(f"Minibatch validation failed: {e}")
             return False, len(validation_minibatch) * len(child.parents)
+
+    def _get_validation_minibatch(self, size: int) -> Dict[int, dspy.Example]:
+        """Get a minibatch using split strategy for validation."""
+        if not self.split_strategy:
+            return {}
+
+        # Use split strategy to get evaluation minibatch (properly handles internal validation)
+        selected = self.split_strategy.get_evaluation_minibatch(None, size)
+        # Return as dict with task IDs as keys (for compatibility with existing code)
+        return {i: example for i, example in enumerate(selected)}
 
 
 class FullTaskScores(Evaluator):
@@ -112,31 +145,51 @@ class FullTaskScores(Evaluator):
         """
         super().__init__()
         self.metric = metric
-        self.dataset_manager: Optional["DatasetManager"] = None
+        self.split_strategy = None
+        self.verbose = False
 
-    def start_compilation(self, student: Module, dataset_manager: "DatasetManager") -> None:
-        """Prepares the evaluator with the dataset manager."""
-        self.dataset_manager = dataset_manager
+    def start_compilation(self, student: dspy.Module, split_strategy=None, verbose: bool=False) -> None:
+        """Prepares the evaluator with the split strategy from Darwin."""
+        self.split_strategy = split_strategy
+        self.verbose = verbose
 
     def evaluate(self, new_borns: NewBorns, budget: Budget) -> Survivors:
         """
         Computes and assigns task scores for every candidate in the cohort
         on the full evaluation set.
         """
-        if not self.dataset_manager:
-            raise ValueError("Dataset manager not initialized.")
+        if not self.split_strategy:
+            raise ValueError("Split strategy not initialized.")
 
-        evaluation_set = self.dataset_manager.get_eval_set()
+        # Phase 2: Comprehensive evaluation on full internal validation set
+        evaluation_examples = self.split_strategy.internal_validation_set
+        evaluation_set = {i: example for i, example in enumerate(evaluation_examples)}
+        logger.debug(f"Full evaluation phase: assessing {len(new_borns.candidates)} candidates on {len(evaluation_set)} examples")
 
         for candidate in new_borns.candidates:
-            # Use the efficient, parallel batch evaluation
-            candidate.batch_task_scores(evaluation_set, metric=self.metric)
+            # Comprehensive evaluation on complete internal validation set
+            candidate.batch_task_scores(evaluation_set, metric=self.metric, verbose=self.verbose)
+
+            # Report final candidate performance
+            avg_score = candidate.average_task_score()
+            logger.info(f"Comprehensive evaluation: candidate gen={candidate.generation_number} achieves μ={avg_score:.3f}")
+
+            # Technical details for reproducibility
+            predictors = candidate.module.predictors()
+            if predictors:
+                from dspy.teleprompt.utils import get_signature
+                instruction = get_signature(predictors[0]).instructions
+                module_id = id(candidate.module)
+                predictor_id = id(predictors[0])
+                logger.debug(f"Module ID={module_id}, Predictor ID={predictor_id}")
+                logger.debug(f"Instruction: {instruction[:100]}...")
+
             budget.spend_on_evaluation(
                 candidate.module,
                 {"phase": "full_evaluation", "examples": len(evaluation_set)}
             )
 
-        logger.info(f"FullTaskScores: Completed full evaluation for {len(new_borns.candidates)} candidates.")
+        logger.info(f"Comprehensive evaluation completed for {len(new_borns.candidates)} candidates on {len(evaluation_set)} tasks")
         # All candidates that get a full evaluation are considered "survivors" of this stage.
         return Survivors(*new_borns.to_list(), iteration=new_borns.iteration)
 

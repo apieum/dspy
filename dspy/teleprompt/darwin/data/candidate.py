@@ -38,52 +38,130 @@ class Candidate:
         """Calculate average score across all tasks."""
         return sum(self.task_scores.values()) / len(self.task_scores) if self.task_scores else 0.0
 
-    def evaluate_on_task(self, task: Example, metric: Callable) -> Tuple[float, Any]:
+    def evaluate_on_task(self, task: Example, metric: Callable) -> Tuple[float, Any, Any]:
         """Evaluate this candidate on a single example using provided metric."""
         try:
             prediction = self.module(**task.inputs())
-            score = float(metric(task, prediction))
-            return (score, prediction)
-        except Exception:
-            return (-1.0, None)  # Failed evaluation
+            result = metric(task, prediction)
+
+            # Handle both μf-compliant metrics (tuple) and regular metrics (float)
+            if isinstance(result, tuple):
+                score, feedback = result
+                score = float(score)
+            else:
+                score = float(result)  # Regular metric returning just score
+                feedback = ""
+
+            return (score, feedback, prediction)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Single task evaluation failed: {e}")
+            return (0.0, "", prediction)  # Failed evaluation
 
     def evaluate_on_batch(self, examples: Dict[int, Example], metric: Callable,
         num_threads=None,
         max_errors=None,
         provide_traceback=False,
-        disable_progress_bar=False) -> Dict[int, float]:
-        """Evaluate this candidate on a batch of examples."""
+        disable_progress_bar=False,
+        verbose=False) -> Dict[int, float]:
+        """Evaluate this candidate on a batch of examples using DSPy's native Evaluate class."""
         if not examples:
             return {}
 
-        num_threads = num_threads if num_threads is not None else settings.num_threads
-        max_errors = max_errors if max_errors is not None else settings.max_errors
         executor = ParallelExecutor(
-            num_threads=num_threads,
-            max_errors=max_errors,
+            num_threads=num_threads or settings.num_threads,
+            max_errors=max_errors or settings.max_errors,
             provide_traceback=provide_traceback,
             disable_progress_bar=disable_progress_bar,
         )
+
+        module = self.module.deepcopy()
+
         def process_example(example):
+            task_id, task = example
             try:
-                task_id, task = example
-                prediction = self.module(**task.inputs())
-                score = float(metric(task, prediction))
-                return (task_id, score)
-            except Exception:
-                return (task_id, -1.0)  # Failed evaluation
+                # Get instruction for verbose logging
+                instruction = "No instruction"
+                predictors = module.predictors()
+                if predictors:
+                    from dspy.teleprompt.utils import get_signature
+                    signature = get_signature(predictors[0])
+                    instruction = signature.instructions or "No instruction"
+
+                prediction = module(**task.inputs())
+                result = metric(task, prediction)
+
+                # Verbose logging: show instruction, question, and answer
+                if verbose:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    question = str(task.inputs().get('question', task.inputs()))[:200] + ("..." if len(str(task.inputs())) > 200 else "")
+
+                    # Extract the actual answer field from prediction
+                    answer_text = ""
+                    if hasattr(prediction, 'answer') and prediction.answer is not None:
+                        answer_text = str(prediction.answer)
+                    elif hasattr(prediction, 'response') and prediction.response is not None:
+                        answer_text = str(prediction.response)
+                    else:
+                        # Try to extract answer field dynamically
+                        prediction_attrs = [attr for attr in dir(prediction) if not attr.startswith('_') and not callable(getattr(prediction, attr))]
+                        output_fields = [attr for attr in prediction_attrs if attr not in ['reasoning', 'rationale', 'completions']]
+
+                        if output_fields:
+                            if 'answer' in output_fields:
+                                answer_text = str(getattr(prediction, 'answer'))
+                            else:
+                                answer_text = str(getattr(prediction, output_fields[0]))
+                        else:
+                            answer_text = str(prediction)
+
+                    answer = answer_text[:200] + ("..." if len(answer_text) > 200 else "")
+                    logger.info(f"EVALUATION [Task {task_id}]:")
+                    logger.info(f"  Instruction: {instruction}")
+                    logger.info(f"  Question: {question}")
+                    logger.info(f"  Given Answer: {answer}")
+                    logger.info(f"  Expected Answer: {task.get('answer')}")
+
+                # Handle both μf-compliant metrics (tuple) and regular metrics (float)
+                if isinstance(result, tuple):
+                    score, feedback = result
+                    score = float(score)
+                    if verbose:
+                        logger.info(f"  Score: {score:.3f}, Feedback: {feedback}")
+                else:
+                    score = float(result)  # Regular metric returning just score
+                    feedback = ""
+                    if verbose:
+                        logger.info(f"  Score: {score:.3f}")
+
+                return (task_id, score, feedback)
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Candidate evaluation failed for task {task_id}: {e}")
+                score = -1.0
+                feedback = ""
+            finally:
+                return (task_id, score, feedback)
 
         result = executor.execute(process_example, examples.items())
+
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Candidate evaluation done for tasks {examples}: {result}")
         if result:
-            return {task_id:score for task_id, score in result}
+            return {task_id:score for (task_id, score, feedback) in result}
         return {task_id:-1.0 for task_id in examples.keys()}
 
     def batch_task_scores(self, examples: Dict[int, Example], metric: Callable,
         num_threads=None,
         max_errors=None,
         provide_traceback=False,
-        disable_progress_bar=False) -> Dict[int, float]:
-            self.task_scores = self.evaluate_on_batch(examples, metric, num_threads, max_errors, provide_traceback, disable_progress_bar)
+        disable_progress_bar=False,
+        verbose=False) -> Dict[int, float]:
+            self.task_scores = self.evaluate_on_batch(examples, metric, num_threads, max_errors, provide_traceback, disable_progress_bar, verbose)
             return self.task_scores
 
     def best_overall(self, other: 'Candidate') -> 'Candidate':

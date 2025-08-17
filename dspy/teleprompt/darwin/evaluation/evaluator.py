@@ -3,13 +3,13 @@
 from abc import abstractmethod
 import inspect
 from typing import Callable, List, Type
-from ..compilation_observer import CompilationObserver
+import dspy
 from dspy import Module
 from ..data.cohort import Survivors, NewBorns
 from ..budget import Budget
 
 
-class Evaluator(CompilationObserver):
+class Evaluator:
     """Protocol for evaluating and filtering new candidates.
 
     This component owns a metric and decides which newly generated
@@ -33,6 +33,24 @@ class Evaluator(CompilationObserver):
             successfully promoted after passing evaluation.
         """
         ...
+
+    # Lifecycle methods (no-op implementations by default)
+    def start_compilation(self, student: dspy.Module, split_strategy=None, verbose: bool = False) -> None:
+        """Called when compilation begins. Components can prepare resources."""
+        pass
+
+    def finish_compilation(self, result: dspy.Module) -> None:
+        """Called when compilation ends. Components can cleanup/log results."""
+        pass
+
+    def start_iteration(self, iteration: int, cohort, budget) -> None:
+        """Called at start of each optimization iteration."""
+        pass
+
+    def finish_iteration(self, iteration: int, filtered_cohort, budget) -> None:
+        """Called after each optimization iteration completes."""
+        pass
+
     @classmethod
     def create_chain(cls, name: str, evaluator_classes: List[Type["Evaluator"]]) -> Type["Evaluator"]:
         """
@@ -68,7 +86,7 @@ class Evaluator(CompilationObserver):
 
         def __init__(self, *args, **kwargs):
             """Initializes the EvalChain, creating instances of all chained evaluators with their positional arguments"""
-            super(self.__class__, self).__init__(*args, **kwargs)
+            super(self.__class__, self).__init__()
             # Bind the provided arguments to the combined signature to handle both
             # positional and keyword arguments correctly.
             try:
@@ -81,7 +99,7 @@ class Evaluator(CompilationObserver):
             all_provided_args = bound_args.arguments
             all_provided_args.pop('self', None)
 
-            self.dataset_manager = None
+            # Dataset management is now handled via split strategy
             self.evaluators = []
             # eval_cls(**kwargs) for eval_cls in evaluator_classes
             for eval_cls in evaluator_classes:
@@ -115,10 +133,9 @@ class Evaluator(CompilationObserver):
 
             return survivors
 
-        def start_compilation(self, student: Module, dataset_manager) -> None:
-            self.dataset_manager = dataset_manager
+        def start_compilation(self, student: dspy.Module, split_strategy=None, verbose: bool=False) -> None:
             for evaluator in self.evaluators:
-                evaluator.start_compilation(student, dataset_manager)
+                evaluator.start_compilation(student, split_strategy=split_strategy, verbose=verbose)
 
         def finish_compilation(self, result: Module) -> None:
             for evaluator in self.evaluators:

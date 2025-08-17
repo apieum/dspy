@@ -76,7 +76,10 @@ class TestGEPABehavior:
             student = SimpleQA()
             optimizer = GEPAMute(simple_metric, max_calls=2)
 
-            result = optimizer.compile(student, simple_trainset)
+            # Split for Darwin interface: use most for dev, minimal for train
+            trainset = simple_trainset[:1]  # Minimal trainset for bootstrapping
+            devset = simple_trainset[1:]     # Rest for development/optimization
+            result = optimizer.compile(student, trainset=trainset, devset=devset)
 
             assert isinstance(result, Module)
             assert result is not student  # Should return a compiled copy
@@ -94,7 +97,10 @@ class TestGEPAAlgorithmStructure:
             optimizer = GEPAMute(simple_metric, max_calls=2)
 
             # Track the algorithm execution without mocking to avoid issues with reconfiguration
-            result = optimizer.compile(student, simple_trainset)
+            # Split for Darwin interface: use most for dev, minimal for train
+            trainset = simple_trainset[:1]  # Minimal trainset for bootstrapping
+            devset = simple_trainset[1:]     # Rest for development/optimization
+            result = optimizer.compile(student, trainset=trainset, devset=devset)
 
             # Verify that optimization completed successfully
             assert result is not None

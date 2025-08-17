@@ -12,18 +12,18 @@ Key Features:
 - Comprehensive Selection interface compatibility
 """
 
-import random
 import logging
-from typing import List, Set, Optional, Dict, Callable, TYPE_CHECKING
+from typing import List, Optional, Dict, TYPE_CHECKING
 from collections import defaultdict
 
+import dspy
 from .selector import Selector
 from ..data.candidate import Candidate
-from ..data.cohort import Cohort, Survivors, Parents
+from ..data.cohort import Survivors, Parents
 from ..budget import Budget
 
 if TYPE_CHECKING:
-    from ..dataset_manager import DatasetManager
+    pass  # No forward references needed
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +58,14 @@ class ParetoFrontier(Selector):
         self.task_best_candidates: Dict[int, List[Candidate]] = {}  # task_id -> all tied winners
         self.task_wins: Dict[Candidate, int] = defaultdict(int)  # candidate -> number of tasks won
 
-    def start_compilation(self, student, dataset_manager: "DatasetManager") -> None:
+    def start_compilation(self, student: dspy.Module, split_strategy=None, verbose: bool=False) -> None:
         """Called when compilation begins. Initialize task tracking structures."""
-        num_tasks = dataset_manager.num_eval_tasks
+        if split_strategy:
+            self.devset = split_strategy.internal_validation_set
+            num_tasks = len(self.devset)  # Each example in internal validation is a separate evaluation task
+        else:
+            self.devset = []
+            num_tasks = 0
 
         # Initialize task_best_candidates and task_scores for all tasks
         for task_id in range(num_tasks):
@@ -80,6 +85,14 @@ class ParetoFrontier(Selector):
         Returns:
             Parents cohort containing the Pareto frontier from the union of old and new
         """
+        # Report Pareto frontier promotion
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Pareto promotion: advancing {len(survivors.candidates)} candidates to generation {survivors.iteration + 1}")
+        for candidate in survivors.candidates:
+            score = candidate.average_task_score()
+            logger.debug(f"Candidate gen={candidate.generation_number}: μ={score:.3f}")
+
         # 1. Update scores for new survivors (adds them to internal tracking)
         self.update_scores_batch(survivors)
 
@@ -88,7 +101,7 @@ class ParetoFrontier(Selector):
         for task_winners in self.task_best_candidates.values():
             pareto_frontier.update(task_winners)
 
-        logger.debug(f"Promoting: {len(pareto_frontier)} total tracked candidates for Pareto filtering")
+        logger.debug(f"Pareto filtering: {len(pareto_frontier)} candidates in active frontier")
 
         # 4. Extract task_wins for the Pareto-filtered candidates
         relevant_task_wins = {
@@ -98,7 +111,7 @@ class ParetoFrontier(Selector):
 
         return Parents(
             *pareto_frontier,
-            iteration=survivors.iteration + 1,
+            iteration=survivors.iteration + 1,  # Each promote call is one iteration
             task_wins=relevant_task_wins
         )
 
@@ -109,7 +122,26 @@ class ParetoFrontier(Selector):
 
         # Get best candidates from task scores and select overall best
         best_candidates = self.task_wins.keys()
-        return max(best_candidates, key=lambda c: c.average_task_score())
+
+        # Report candidate pool and final selection
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Selection pool: {len(best_candidates)} candidates")
+        for candidate in best_candidates:
+            score = candidate.average_task_score()
+            logger.debug(f"Gen {candidate.generation_number}: μ={score:.3f}")
+
+        best = max(best_candidates, key=lambda c: c.average_task_score())
+        logger.info(f"Optimal candidate selected: gen={best.generation_number}, μ={best.average_task_score():.3f}")
+
+        # Report final optimized instruction
+        predictors = best.module.predictors()
+        if predictors:
+            from dspy.teleprompt.utils import get_signature
+            instruction = get_signature(predictors[0]).instructions
+            logger.debug(f"Final instruction: {instruction}")
+
+        return best
 
     def update_score(self, task_id: int, candidate: Candidate) -> None:
         """Update the task scores with a candidate for a specific task."""
@@ -128,10 +160,11 @@ class ParetoFrontier(Selector):
 
         if candidate_score > current_best_score:
         # New candidate is strictly better on this task → replace all current winners
+            for old_winner in current_winners:
+                self._update_old_winner(old_winner)
             self.task_best_candidates[task_id] = [candidate]
             self.task_scores[task_id] = candidate.task_score(task_id)
             self.task_wins[candidate] = self.task_wins.get(candidate, 0) + 1
-            (self._update_old_winner(old_winner) for old_winner in current_winners)
 
         elif candidate_score == current_best_score:
             # Tied performance → check domination across ALL tasks and ancestry
@@ -143,7 +176,8 @@ class ParetoFrontier(Selector):
                 dominated_winners = [w for w in current_winners if candidate.dominate(w)]
                 non_dominated = [w for w in current_winners if not candidate.dominate(w)]
                 # Update task_wins: subtract from dominated, add to new candidate
-                (self._update_old_winner(dominated) for dominated in dominated_winners)
+                for dominated in dominated_winners:
+                    self._update_old_winner(dominated)
                 self.task_wins[candidate] = self.task_wins.get(candidate, 0) + 1
 
                 self.task_best_candidates[task_id] = non_dominated + [candidate]

@@ -1,7 +1,7 @@
 """ReflectivePromptMutation - Evolutionary mutation using reflection on feedback."""
 
 import logging
-from typing import Any, List, Optional, TYPE_CHECKING
+from typing import Any, List, Optional, Dict
 import random
 
 import dspy
@@ -9,11 +9,9 @@ from .generator import Generator
 from .reflection_strategy import ReflectionStrategy, GEPAReflection
 from .evolvable_module import EvolvableModule
 from .prompt_mutator import ReflectivePromptMutator
+from .dspy_utils import get_predictors
 from ..data.candidate import Candidate
 from ..data.cohort import Parents, NewBorns
-
-if TYPE_CHECKING:
-    from ..dataset_manager import DatasetManager
 
 logger = logging.getLogger(__name__)
 
@@ -38,17 +36,18 @@ class ReflectivePromptMutation(Generator):
         self.minibatch_size = minibatch_size
         self.module_selection = module_selection
 
-        self.dataset_manager: Optional["DatasetManager"] = None
+        self.split_strategy = None
         self.next_module_idx = 0
 
-    def start_compilation(self, student: dspy.Module, dataset_manager: "DatasetManager") -> None:
-        """Initialize with dataset manager for reflection."""
-        self.dataset_manager = dataset_manager
+    def start_compilation(self, student: dspy.Module, split_strategy=None, verbose: bool=False) -> None:
+        """Initialize with split strategy for reflection."""
+        self.split_strategy = split_strategy
         self.next_module_idx = 0
+        self.verbose = verbose
 
     def generate(self, parents: Parents, budget=None) -> NewBorns:
         """Generate a new candidate without validation."""
-        if parents.is_empty() or not self.dataset_manager:
+        if parents.is_empty() or not self.split_strategy:
             if budget:
                 budget.spend_on_generation(None, {"type": "no_parents_or_data"})
             return NewBorns()
@@ -62,7 +61,7 @@ class ReflectivePromptMutation(Generator):
 
             parent = list(selected_parents)[0]
 
-            predictors = parent.module.predictors()
+            predictors = get_predictors(parent.module)
             if not predictors:
                 if budget:
                     budget.spend_on_generation(None, {"type": "no_predictors"})
@@ -70,7 +69,7 @@ class ReflectivePromptMutation(Generator):
 
             module_idx = self._select_target_module(len(predictors))
 
-            minibatch = self.dataset_manager.get_feedback_minibatch(self.minibatch_size)
+            minibatch = self._get_feedback_minibatch(self.minibatch_size)
             if not minibatch:
                 if budget:
                     budget.spend_on_generation(None, {"type": "no_minibatch"})
@@ -83,7 +82,7 @@ class ReflectivePromptMutation(Generator):
 
             # Evolve using a PromptMutator strategy
             mutator = ReflectivePromptMutator(self.reflection_strategy, self.reflection_lm)
-            child_module = mutator.mutate(evolvable, feedback, module_idx)
+            child_module = mutator.mutate(evolvable, feedback, module_idx, verbose=getattr(self, 'verbose', False))
 
             child_candidate = Candidate(
                 module=child_module,
@@ -117,6 +116,16 @@ class ReflectivePromptMutation(Generator):
         else:
             raise ValueError(f"Unknown module selection strategy: {self.module_selection}")
 
+
+    def _get_feedback_minibatch(self, size: int) -> Dict[int, dspy.Example]:
+        """Get a minibatch using split strategy for feedback generation."""
+        if not self.split_strategy:
+            return {}
+
+        # Use split strategy to get feedback minibatch (from internal validation set)
+        selected = self.split_strategy.get_feedback_minibatch(None, size)
+        # Return as dict with task IDs as keys (for compatibility with existing code)
+        return {i: example for i, example in enumerate(selected)}
 
     def _ensure_evolvable(self, module: dspy.Module) -> EvolvableModule:
         """Wrap DSPy module as EvolvableModule."""

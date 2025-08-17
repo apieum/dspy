@@ -46,12 +46,16 @@ class FeedbackProvider:
         """
         try:
             metric_result = self.metric(example, prediction, trace)
-            score, feedback_text = metric_result
-            score = float(score)
         except TypeError:
             metric_result = self.metric(example, prediction)
+        
+        # Handle both μf-compliant metrics (tuple) and regular metrics (float)
+        if isinstance(metric_result, tuple):
             score, feedback_text = metric_result
             score = float(score)
+        else:
+            score = float(metric_result)
+            feedback_text = f"Score: {score:.3f}"
 
         status = "SUCCESS" if score > 0.5 else "FAILURE"
         diagnostic = f"Score: {score:.2f} ({status}) | Evaluator Feedback: {feedback_text}"

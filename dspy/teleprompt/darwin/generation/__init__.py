@@ -13,11 +13,11 @@ from .enhanced_metrics import (
 from .mutation import ReflectivePromptMutation
 from .reflection_strategy import (
     ReflectionStrategy,
-    GEPAReflection, SimpleReflection, PrefixReflection
+    GEPAReflection
 )
 from .prompt_mutator import (
     PromptMutator,
-    ReflectivePromptMutator, SimplePromptMutator, NoOpMutator
+    ReflectivePromptMutator
 )
 from .evolvable_module import EvolvableModule
 from .config import ReflectiveMutationConfig, ModuleSelectionStrategy
@@ -40,8 +40,8 @@ __all__ = [
 
     # DSPy-native architectural components
     'ReflectionStrategy',
-    'GEPAReflection', 'SimpleReflection', 'PrefixReflection',
+    'GEPAReflection',
     'PromptMutator',
-    'ReflectivePromptMutator', 'SimplePromptMutator', 'NoOpMutator',
+    'ReflectivePromptMutator',
     'EvolvableModule'
 ]

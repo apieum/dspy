@@ -10,11 +10,10 @@ from typing import List, Optional, Tuple, Set, TYPE_CHECKING
 import dspy
 from dspy.teleprompt.utils import get_signature, set_signature
 from .generator import Generator
+from .mutation import ReflectivePromptMutation
 from ..data.candidate import Candidate
 from ..data.cohort import Parents, NewBorns
 
-if TYPE_CHECKING:
-    from ..dataset_manager import DatasetManager
 
 logger = logging.getLogger(__name__)
 
@@ -24,15 +23,27 @@ class SystemAwareMerge(Generator):
     System-Aware Merge generator implementing Algorithm 4 from the GEPA paper.
     """
 
-    def __init__(self):
+    def __init__(self, metric=None):
         # Integrated merge history tracking (replaces MergeHistoryTracker)
         self.attempted_merges: Set[Tuple[int, int, int]] = set()
         self.merge_stats = {"success": 0, "failure_not_desirable": 0, "failure_ancestry": 0}
+        self.verbose = False
+        self.metric = metric
+
+        # Initialize fallback mutation generator
+        self.fallback_generator = None
+        self.devset = None
 
     def generate(self, parents: Parents, budget=None) -> NewBorns:
         """Generate a new candidate using System-Aware Merge (Algorithm 4)."""
         if parents.size() < 2:
-            return NewBorns()
+            # Fall back to ReflectivePromptMutation when there aren't enough parents for merge
+            logger.debug(f"SystemAwareMerge: Only {parents.size()} parents available, falling back to ReflectivePromptMutation")
+            if self.fallback_generator and self.devset:
+                return self.fallback_generator.generate(parents, budget)
+            else:
+                logger.warning("SystemAwareMerge: Fallback generator not initialized")
+                return NewBorns()
 
         try:
             # Stochastic selection of two parent candidates
@@ -65,6 +76,10 @@ class SystemAwareMerge(Generator):
                 child_candidate = self._create_merged_candidate(
                     ancestor, parent1, parent2, parents.iteration, desirable_signatures
                 )
+
+                # Display merge evolution if verbose mode is enabled
+                if self.verbose:
+                    self._display_merge_evolution(ancestor, parent1, parent2, child_candidate, desirable_signatures)
 
                 self.merge_stats["success"] += 1
                 return NewBorns(child_candidate, iteration=parents.iteration)
@@ -112,6 +127,7 @@ class SystemAwareMerge(Generator):
                 π_p1 = sig_p1.signature if hasattr(sig_p1, 'signature') else str(sig_p1)
                 π_p2 = sig_p2.signature if hasattr(sig_p2, 'signature') else str(sig_p2)
 
+
                 # Condition 1: p1 innovated, p2 did not (πa = πp2 and πp1 ≠ πp2)
                 if π_a == π_p2 and π_a != π_p1:
                     selected_signatures.append((i, sig_p1))
@@ -135,6 +151,65 @@ class SystemAwareMerge(Generator):
 
         return selected_signatures
 
+    def _display_merge_evolution(self, ancestor: Candidate, parent1: Candidate, parent2: Candidate,
+                               child: Candidate, merged_signatures: List[Tuple[int, any]]) -> None:
+        """Display system-aware merge evolution in verbose mode with professional formatting."""
+
+        print(f"\n{'='*80}")
+        print("SYSTEM-AWARE MERGE EVOLUTION")
+        print(f"{'='*80}")
+        print(f"Ancestor Generation: {ancestor.generation_number}")
+        print(f"Parent 1 Generation: {parent1.generation_number} (Score: {parent1.average_task_score():.3f})")
+        print(f"Parent 2 Generation: {parent2.generation_number} (Score: {parent2.average_task_score():.3f})")
+        print(f"Child Generation: {child.generation_number}")
+        print(f"Modules Merged: {len(merged_signatures)}")
+        print()
+
+        # Display signature evolution for each merged module
+        try:
+            ancestor_predictors = ancestor.module.predictors()
+            parent1_predictors = parent1.module.predictors()
+            parent2_predictors = parent2.module.predictors()
+            child_predictors = child.module.predictors()
+
+            for module_idx, new_signature in merged_signatures:
+                if (module_idx < len(ancestor_predictors) and
+                    module_idx < len(parent1_predictors) and
+                    module_idx < len(parent2_predictors) and
+                    module_idx < len(child_predictors)):
+
+                    # Get instruction text from signatures
+                    ancestor_instr = get_signature(ancestor_predictors[module_idx]).instructions or "No instruction"
+                    parent1_instr = get_signature(parent1_predictors[module_idx]).instructions or "No instruction"
+                    parent2_instr = get_signature(parent2_predictors[module_idx]).instructions or "No instruction"
+                    child_instr = get_signature(child_predictors[module_idx]).instructions or "No instruction"
+
+                    print(f"MODULE {module_idx} SIGNATURE EVOLUTION:")
+                    print("-" * 50)
+                    print(f"Ancestor:  {ancestor_instr}")
+                    print(f"Parent 1:  {parent1_instr}")
+                    print(f"Parent 2:  {parent2_instr}")
+                    print(f"Child:     {child_instr}")
+
+                    # Determine merge decision logic
+                    if ancestor_instr == parent2_instr and ancestor_instr != parent1_instr:
+                        print("Decision:  Parent 1 innovated, selected Parent 1 signature")
+                    elif ancestor_instr == parent1_instr and ancestor_instr != parent2_instr:
+                        print("Decision:  Parent 2 innovated, selected Parent 2 signature")
+                    elif ancestor_instr != parent1_instr and ancestor_instr != parent2_instr and parent1_instr != parent2_instr:
+                        better_parent = "Parent 1" if parent1.average_task_score() > parent2.average_task_score() else "Parent 2"
+                        print(f"Decision:  Both parents innovated, selected {better_parent} signature")
+                    else:
+                        print("Decision:  Standard merge logic applied")
+
+                    print()
+
+        except Exception as e:
+            print(f"Error displaying signature details: {e}")
+
+        print("=" * 80)
+        print()
+
     def _create_merged_candidate(self, ancestor: Candidate, p1: Candidate, p2: Candidate,
                                iteration: int, signatures_to_apply: List[Tuple[int, any]]) -> Candidate:
         """Creates a new candidate by merging parent innovations onto an ancestor."""
@@ -144,8 +219,20 @@ class SystemAwareMerge(Generator):
 
             for module_idx, new_signature in signatures_to_apply:
                 if module_idx < len(child_predictors):
-                    set_signature(child_predictors[module_idx], new_signature)
-                    logger.debug(f"Applied selected signature to module {module_idx}")
+                    # Update both instructions and fields
+                    new_instruction = new_signature.instructions if hasattr(new_signature, 'instructions') else str(new_signature)
+                    current_signature = get_signature(child_predictors[module_idx])
+
+                    *_, last_key = current_signature.fields.keys()
+                    current_prefix = current_signature.fields[last_key].json_schema_extra.get("prefix", "")
+
+                    updated_signature = (
+                        current_signature
+                        .with_instructions(new_instruction)
+                        .with_updated_fields(last_key, prefix=current_prefix)
+                    )
+                    set_signature(child_predictors[module_idx], updated_signature)
+                    logger.debug(f"Applied selected signature to module {module_idx}: {new_instruction}")
 
             return Candidate(
                 module=child_module,
@@ -164,11 +251,24 @@ class SystemAwareMerge(Generator):
             logger.warning(f"Error creating merged candidate: {e}")
             return None
 
-    def start_compilation(self, student: dspy.Module, dataset_manager: "DatasetManager") -> None:
+    def start_compilation(self, student: dspy.Module, trainset: List[dspy.Example], devset: List[dspy.Example], verbose: bool=False) -> None:
         """Resets merge history for a new compilation run."""
         self.attempted_merges.clear()
         self.merge_stats = {"success": 0, "failure_not_desirable": 0, "failure_ancestry": 0}
-        logger.debug("Reset SystemAwareMerge for new compilation")
+        self.verbose = verbose
+        self.devset = devset
+
+        # Initialize fallback ReflectivePromptMutation generator
+        if self.metric:
+            from .feedback import FeedbackProvider
+            feedback_provider = FeedbackProvider(metric=self.metric)
+            self.fallback_generator = ReflectivePromptMutation(feedback_provider=feedback_provider)
+            self.fallback_generator.start_compilation(student, trainset, devset, verbose)
+            logger.debug("Initialized ReflectivePromptMutation fallback with provided metric")
+        else:
+            logger.warning("No metric provided for SystemAwareMerge fallback - mutation will not be available")
+
+        logger.debug("Reset SystemAwareMerge for new compilation with ReflectivePromptMutation fallback")
 
     def get_merge_statistics(self) -> dict:
         """Get statistics about merge attempts for debugging/monitoring."""

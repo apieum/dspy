@@ -67,13 +67,13 @@ class EvolvableModule(Module):
             logger.warning(f"Failed to copy some attributes: {e}")
     
     def collect_traces_and_evaluate(self, 
-                                  examples: List[dspy.Example], 
+                                  examples: Dict[int, dspy.Example], 
                                   feedback_provider,
                                   target_module_idx: int = 0) -> FeedbackResult:
         """Execute on examples and collect traces using DSPy's native system.
         
         Args:
-            examples: Examples to execute on
+            examples: Examples to execute on (Dict with example IDs as keys)
             feedback_provider: Provider for evaluation and feedback
             target_module_idx: Index of module to focus analysis on
             
@@ -84,7 +84,7 @@ class EvolvableModule(Module):
         diagnostics = []
         traces = []
         
-        for example in examples:
+        for example_id, example in examples.items():
             try:
                 # Use DSPy's native trace collection
                 with dspy.context(trace=[]):

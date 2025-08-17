@@ -1,16 +1,16 @@
 """Selection protocol for GEPA optimization."""
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List
 from typing_extensions import Optional
-from ..compilation_observer import CompilationObserver
+import dspy
 
 if TYPE_CHECKING:
     from ..data import Candidate, Survivors, Parents
     from ..budget import Budget
 
 
-class Selector(CompilationObserver):
+class Selector:
     """Protocol for filtering candidates based on performance data.
 
     This component uses scores and candidate data to decide which
@@ -43,3 +43,20 @@ class Selector(CompilationObserver):
             The best candidate.
         """
         ...
+
+    # Lifecycle methods (no-op implementations by default)
+    def start_compilation(self, student: dspy.Module, split_strategy=None, verbose: bool = False) -> None:
+        """Called when compilation begins. Components can prepare resources."""
+        pass
+
+    def finish_compilation(self, result: dspy.Module) -> None:
+        """Called when compilation ends. Components can cleanup/log results."""
+        pass
+
+    def start_iteration(self, iteration: int, cohort, budget) -> None:
+        """Called at start of each optimization iteration."""
+        pass
+
+    def finish_iteration(self, iteration: int, filtered_cohort, budget) -> None:
+        """Called after each optimization iteration completes."""
+        pass

@@ -17,7 +17,7 @@ from .generation import Generator
 from .evaluation import Evaluator
 from .data.candidate import Candidate
 from .data.cohort import Cohort,NewBorns, Survivors, Parents
-from .dataset_manager import DatasetManagerFactory, DatasetManager
+from .data.split_strategy import DefaultSplitStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,9 @@ class Darwin:
                  selector: Selector,
                  generator: Generator,
                  evaluator: Evaluator,
-                 dataset_manager_factory: "DatasetManagerFactory",
-                 patience: int = 3) -> None:
+                 split_strategy_factory: Callable = None,
+                 patience: int = 3,
+                 verbose: bool = False) -> None:
         """Initialize Darwin optimization with algorithms for each step.
 
         Args:
@@ -50,27 +51,34 @@ class Darwin:
             selector: Selects surviving candidates based on scores
             generator: Creates new candidates via genetic operations
             evaluator: Promotes worthy new candidates (owns metric)
-            dataset_manager_factory: Factory for creating dataset managers at compile time
+            split_strategy_factory: Factory function to create split strategy instances
             patience: Number of consecutive failed generations before termination (default: 3)
+            verbose: Enable detailed logging and instruction evolution display
         """
         self.budget = budget
         self.selector = selector
         self.generator = generator
         self.evaluator = evaluator
-        self.dataset_manager_factory = dataset_manager_factory
+        self.split_strategy_factory = split_strategy_factory or DefaultSplitStrategy
+        self.split_strategy = None  # Created dynamically in start_compilation
         self.current_iteration = 0
+        self.verbose = verbose
 
         # Patience mechanism for resilient termination
         self.patience = patience
         self.generations_without_progress = 0
 
-    def start_compilation(self, student: Module, dataset_manager: "DatasetManager") -> None:
+    def start_compilation(self, student: Module, trainset: List[dspy.Example], devset: List[dspy.Example]) -> None:
         logger.info("Starting Darwin framework compilation...")
-        # Pass the dataset manager to all components
-        self.generator.start_compilation(student, dataset_manager)
-        self.evaluator.start_compilation(student, dataset_manager)
-        self.selector.start_compilation(student, dataset_manager)
-        self.budget.start_compilation(student, dataset_manager)
+        
+        # Create a new split strategy instance using injected factory with the actual datasets
+        self.split_strategy = self.split_strategy_factory(trainset=trainset, devset=devset, verbose=self.verbose)
+        
+        # Pass split strategy to all components - they get data from the strategy, not parameters
+        self.generator.start_compilation(student, split_strategy=self.split_strategy, verbose=self.verbose)
+        self.evaluator.start_compilation(student, split_strategy=self.split_strategy, verbose=self.verbose)
+        self.selector.start_compilation(student, split_strategy=self.split_strategy, verbose=self.verbose)
+        self.budget.start_compilation(student, split_strategy=self.split_strategy, verbose=self.verbose)
 
     def finish_compilation(self, result: Module) -> None:
         logger.info("Terminating Darwin framework compilation.")
@@ -92,11 +100,19 @@ class Darwin:
         self.generator.finish_iteration(self.current_iteration, cohort, self.budget)
         self.evaluator.finish_iteration(self.current_iteration, cohort, self.budget)
 
-    def compile(self, student: Module, training_data: List[dspy.Example]) -> Module:
-        """Main compilation method - entry point for optimization."""
-        # Create dataset manager from factory with user's training data
-        dataset_manager = self.dataset_manager_factory.create(training_data)
-        self.start_compilation(student, dataset_manager)
+    def compile(self, student: Module, *, trainset: List[dspy.Example], devset: List[dspy.Example] = None) -> Module:
+        """Main compilation method - entry point for optimization.
+        
+        Args:
+            student: DSPy module to optimize
+            trainset: Training examples (will be split into train/validation internally)
+            devset: Optional test set for final evaluation (if None, uses part of trainset)
+        """
+        # If no devset provided, use the trainset for both training and final evaluation
+        if devset is None:
+            devset = trainset
+            
+        self.start_compilation(student, trainset, devset)
 
         # Bootstrap: Create the first candidate (Gen 0).
         initial_candidate = Candidate(student.deepcopy(), generation_number=0)
@@ -188,7 +204,7 @@ class Darwin:
         return compiled_module
 
 
-def GEPA(generator:Generator, metric: Callable, budget:Budget, minibatch_size: int = 3, patience: int = 3) -> "Darwin":
+def GEPA(generator:Generator, metric: Callable, budget:Budget, minibatch_size: int = 3, patience: int = 3, verbose: bool = False) -> "Darwin":
     """Create the default GEPA optimizer with ReflectivePromptMutator.
 
     This factory method assembles the specific components needed to reproduce
@@ -196,31 +212,31 @@ def GEPA(generator:Generator, metric: Callable, budget:Budget, minibatch_size: i
     """
     from .selection.pareto import ParetoFrontier
     from .evaluation.gepa_evaluator import GEPATwoPhasesEval
-    from .dataset_manager import DefaultDatasetManagerFactory
-
 
     return Darwin(
         budget=budget,
         selector=ParetoFrontier(),
         generator=generator,
         evaluator=GEPATwoPhasesEval(metric=metric, minibatch_size=minibatch_size),
-        dataset_manager_factory=DefaultDatasetManagerFactory(),
-        patience=patience
+        split_strategy_factory=DefaultSplitStrategy,
+        patience=patience,
+        verbose=verbose
     )
 
 
-def GEPAMute(metric: Callable, max_calls: int = 2, minibatch_size: int = 3, patience: int = 3) -> "Darwin":
+def GEPAMute(metric: Callable, max_calls: int = 2, minibatch_size: int = 3, patience: int = 3, verbose: bool = False) -> "Darwin":
     """Create a Darwin optimizer with ReflectivePromptMutation."""
-    from .budget import LMCallsBudget
+    from .budget.lm_calls import LMCallsBudget
     from .generation.mutation import ReflectivePromptMutation
     from .generation.feedback import FeedbackProvider
     generator=ReflectivePromptMutation(
         feedback_provider=FeedbackProvider(metric=metric)
     )
-    return GEPA(generator, metric, LMCallsBudget(max_calls), minibatch_size, patience)
+    return GEPA(generator, metric, LMCallsBudget(max_calls), minibatch_size, patience, verbose)
 
 
-def GEPAMerge(metric: Callable, max_calls: int = 2, minibatch_size: int = 3, patience: int = 3) -> "Darwin":
+def GEPAMerge(metric: Callable, max_calls: int = 2, minibatch_size: int = 3, patience: int = 3, verbose: bool = False) -> "Darwin":
     """Create Darwin optimizer with System-Aware Merge."""
+    from .budget.lm_calls import LMCallsBudget
     from .generation.system_aware_merge import SystemAwareMerge
-    return GEPA(SystemAwareMerge(), metric, LMCallsBudget(max_calls), minibatch_size, patience)
+    return GEPA(SystemAwareMerge(), metric, LMCallsBudget(max_calls), minibatch_size, patience, verbose)
