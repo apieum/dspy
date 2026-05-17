@@ -23,31 +23,30 @@ class ReflectivePromptMutation(Generator):
 
     def __init__(self,
                  feedback_provider,
+                 feedback_data: List[dspy.Example] = None,
                  reflection_strategy: Optional[ReflectionStrategy] = None,
                  reflection_lm: Optional[Any] = None,
-                 minibatch_size: int = 3,
                  module_selection: str = "round_robin"):
+        super().__init__()
         if feedback_provider is None:
             raise ValueError("ReflectivePromptMutation requires a FeedbackProvider")
 
         self.feedback_provider = feedback_provider
+        self.feedback_data = feedback_data or []
         self.reflection_strategy = reflection_strategy or GEPAReflection()
         self.reflection_lm = reflection_lm
-        self.minibatch_size = minibatch_size
         self.module_selection = module_selection
 
-        self.split_strategy = None
         self.next_module_idx = 0
 
-    def start_compilation(self, student: dspy.Module, split_strategy=None, verbose: bool=False) -> None:
-        """Initialize with split strategy for reflection."""
-        self.split_strategy = split_strategy
+    def start_compilation(self, student: dspy.Module, verbose: bool=False) -> None:
+        """Set verbose mode for the generator."""
         self.next_module_idx = 0
         self.verbose = verbose
 
     def generate(self, parents: Parents, budget=None) -> NewBorns:
         """Generate a new candidate without validation."""
-        if parents.is_empty() or not self.split_strategy:
+        if parents.is_empty() or not self.feedback_data:
             if budget:
                 budget.spend_on_generation(None, {"type": "no_parents_or_data"})
             return NewBorns()
@@ -69,7 +68,7 @@ class ReflectivePromptMutation(Generator):
 
             module_idx = self._select_target_module(len(predictors))
 
-            minibatch = self._get_feedback_minibatch(self.minibatch_size)
+            minibatch = self._get_feedback_minibatch()
             if not minibatch:
                 if budget:
                     budget.spend_on_generation(None, {"type": "no_minibatch"})
@@ -100,7 +99,7 @@ class ReflectivePromptMutation(Generator):
             return NewBorns(child_candidate, iteration=parents.iteration)
 
         except Exception as e:
-            logger.warning(f"Reflective prompt mutation failed: {e}")
+            self.publish('mutation_failure', None, {'reason': f'Reflective prompt mutation failed: {e}'})
             if budget:
                 budget.spend_on_generation(None, {"type": "failed_mutation", "error": str(e)})
             return NewBorns()
@@ -117,15 +116,13 @@ class ReflectivePromptMutation(Generator):
             raise ValueError(f"Unknown module selection strategy: {self.module_selection}")
 
 
-    def _get_feedback_minibatch(self, size: int) -> Dict[int, dspy.Example]:
-        """Get a minibatch using split strategy for feedback generation."""
-        if not self.split_strategy:
+    def _get_feedback_minibatch(self) -> Dict[int, dspy.Example]:
+        """Get the feedback data provided by strategy."""
+        if not self.feedback_data:
             return {}
 
-        # Use split strategy to get feedback minibatch (from internal validation set)
-        selected = self.split_strategy.get_feedback_minibatch(None, size)
-        # Return as dict with task IDs as keys (for compatibility with existing code)
-        return {i: example for i, example in enumerate(selected)}
+        # Use all feedback data provided by strategy (strategy already split it appropriately)
+        return {i: example for i, example in enumerate(self.feedback_data)}
 
     def _ensure_evolvable(self, module: dspy.Module) -> EvolvableModule:
         """Wrap DSPy module as EvolvableModule."""

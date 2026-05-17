@@ -1,8 +1,11 @@
 """Budget protocol for GEPA optimization."""
 
 from abc import abstractmethod
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, TYPE_CHECKING
 import dspy
+
+if TYPE_CHECKING:
+    from ..config import DarwinConfig
 
 
 class Budget:
@@ -92,20 +95,3 @@ class Budget:
     def get_remaining(self) -> dict:
         """Get remaining budget breakdown."""
         ...
-
-    # Lifecycle methods (no-op implementations by default)
-    def start_compilation(self, student: dspy.Module, split_strategy=None, verbose: bool = False) -> None:
-        """Called when compilation begins. Components can prepare resources."""
-        pass
-
-    def finish_compilation(self, result: dspy.Module) -> None:
-        """Called when compilation ends. Components can cleanup/log results."""
-        pass
-
-    def start_iteration(self, iteration: int, cohort, budget) -> None:
-        """Called at start of each optimization iteration."""
-        pass
-
-    def finish_iteration(self, iteration: int, filtered_cohort, budget) -> None:
-        """Called after each optimization iteration completes."""
-        pass

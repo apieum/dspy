@@ -23,12 +23,12 @@ class SystemAwareMerge(Generator):
     System-Aware Merge generator implementing Algorithm 4 from the GEPA paper.
     """
 
-    def __init__(self, metric=None):
+    def __init__(self, assessor=None):
         # Integrated merge history tracking (replaces MergeHistoryTracker)
         self.attempted_merges: Set[Tuple[int, int, int]] = set()
         self.merge_stats = {"success": 0, "failure_not_desirable": 0, "failure_ancestry": 0}
         self.verbose = False
-        self.metric = metric
+        self.assessor = assessor
 
         # Initialize fallback mutation generator
         self.fallback_generator = None
@@ -39,7 +39,7 @@ class SystemAwareMerge(Generator):
         if parents.size() < 2:
             # Fall back to ReflectivePromptMutation when there aren't enough parents for merge
             logger.debug(f"SystemAwareMerge: Only {parents.size()} parents available, falling back to ReflectivePromptMutation")
-            if self.fallback_generator and self.devset:
+            if self.fallback_generator and self.fallback_generator.feedback_data:
                 return self.fallback_generator.generate(parents, budget)
             else:
                 logger.warning("SystemAwareMerge: Fallback generator not initialized")
@@ -140,7 +140,7 @@ class SystemAwareMerge(Generator):
 
                 # Condition 3: Both innovated differently, pick from the better-performing parent
                 elif π_a != π_p1 and π_a != π_p2 and π_p1 != π_p2:
-                    best_parent = p1 if p1.average_task_score() > p2.average_task_score() else p2
+                    best_parent = p1 if p1.average_score() > p2.average_score() else p2
                     selected_signature = sig_p1 if best_parent == p1 else sig_p2
                     selected_signatures.append((i, selected_signature))
                     logger.debug(f"DESIRABLE: Module {i} - both innovated, using {'p1' if best_parent == p1 else 'p2'}'s signature")
@@ -159,8 +159,8 @@ class SystemAwareMerge(Generator):
         print("SYSTEM-AWARE MERGE EVOLUTION")
         print(f"{'='*80}")
         print(f"Ancestor Generation: {ancestor.generation_number}")
-        print(f"Parent 1 Generation: {parent1.generation_number} (Score: {parent1.average_task_score():.3f})")
-        print(f"Parent 2 Generation: {parent2.generation_number} (Score: {parent2.average_task_score():.3f})")
+        print(f"Parent 1 Generation: {parent1.generation_number} (Score: {parent1.average_score():.3f})")
+        print(f"Parent 2 Generation: {parent2.generation_number} (Score: {parent2.average_score():.3f})")
         print(f"Child Generation: {child.generation_number}")
         print(f"Modules Merged: {len(merged_signatures)}")
         print()
@@ -197,7 +197,7 @@ class SystemAwareMerge(Generator):
                     elif ancestor_instr == parent1_instr and ancestor_instr != parent2_instr:
                         print("Decision:  Parent 2 innovated, selected Parent 2 signature")
                     elif ancestor_instr != parent1_instr and ancestor_instr != parent2_instr and parent1_instr != parent2_instr:
-                        better_parent = "Parent 1" if parent1.average_task_score() > parent2.average_task_score() else "Parent 2"
+                        better_parent = "Parent 1" if parent1.average_score() > parent2.average_score() else "Parent 2"
                         print(f"Decision:  Both parents innovated, selected {better_parent} signature")
                     else:
                         print("Decision:  Standard merge logic applied")
@@ -251,22 +251,25 @@ class SystemAwareMerge(Generator):
             logger.warning(f"Error creating merged candidate: {e}")
             return None
 
-    def start_compilation(self, student: dspy.Module, trainset: List[dspy.Example], devset: List[dspy.Example], verbose: bool=False) -> None:
+    def start_compilation(self, student: dspy.Module, verbose: bool=False, feedback_data: List[dspy.Example] = None) -> None:
         """Resets merge history for a new compilation run."""
         self.attempted_merges.clear()
         self.merge_stats = {"success": 0, "failure_not_desirable": 0, "failure_ancestry": 0}
         self.verbose = verbose
-        self.devset = devset
+        self.devset = feedback_data or []
 
         # Initialize fallback ReflectivePromptMutation generator
-        if self.metric:
+        if self.assessor:
             from .feedback import FeedbackProvider
-            feedback_provider = FeedbackProvider(metric=self.metric)
-            self.fallback_generator = ReflectivePromptMutation(feedback_provider=feedback_provider)
-            self.fallback_generator.start_compilation(student, trainset, devset, verbose)
-            logger.debug("Initialized ReflectivePromptMutation fallback with provided metric")
+            feedback_provider = FeedbackProvider(assessor=self.assessor)
+            self.fallback_generator = ReflectivePromptMutation(
+                feedback_provider=feedback_provider,
+                feedback_data=self.devset,
+            )
+            self.fallback_generator.start_compilation(student, verbose=verbose)
+            logger.debug("Initialized ReflectivePromptMutation fallback with provided assessor")
         else:
-            logger.warning("No metric provided for SystemAwareMerge fallback - mutation will not be available")
+            logger.warning("No assessor provided for SystemAwareMerge fallback - mutation will not be available")
 
         logger.debug("Reset SystemAwareMerge for new compilation with ReflectivePromptMutation fallback")
 

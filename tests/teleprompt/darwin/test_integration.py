@@ -1,7 +1,11 @@
 """Integration tests for Darwin GEPA optimization."""
 
 import dspy
-from dspy.teleprompt.darwin import GEPAMute, GEPAMerge
+from dspy.teleprompt.darwin import (
+    Darwin, DarwinConfig, GEPAStrategy,
+    LMCallsBudget, ParetoFrontier, ReflectivePromptMutation,
+    FeedbackProvider, GEPATwoPhasesEval, SystemAwareMerge, ChannelContext, Success
+)
 from dspy.utils.dummies import DummyLM
 
 
@@ -36,27 +40,54 @@ class TestIntegration:
 
         dummy_lm = DummyLM([
             {"answer": "4"},
-            {"answer": "blue"}, 
+            {"answer": "blue"},
             {"answer": "Paris"},
             {"response": "Improved instruction: Answer questions accurately."}
         ])
 
         with dspy.context(lm=dummy_lm):
             student = SimpleQA()
-            optimizer = GEPAMute(simple_metric, max_calls=2)
-            
-            result = optimizer.compile(student, trainset=trainset)
 
-            assert isinstance(result, dspy.Module)
-            assert result._compiled is True
-            assert result is not student
+            # Create GEPA configuration
+            config = DarwinConfig(
+                max_lm_calls=2,
+                patience=3,
+                minibatch_size=3,
+                verbose=False
+            )
 
-    def test_gepa_factory_functions(self):
-        """Test GEPA factory functions can be created."""
-        # Test that factory functions work
-        mute_optimizer = GEPAMute(simple_metric, max_calls=2)
-        merge_optimizer = GEPAMerge(simple_metric, max_calls=2)
-        
+            optimizer = Darwin(GEPAStrategy, config)
+
+            compiled_module = optimizer.compile(student, trainset=trainset)
+            result = optimizer.get_last_result()
+
+            assert isinstance(result, Success)
+            assert isinstance(compiled_module, dspy.Module)
+            assert compiled_module._compiled is True
+            assert compiled_module is not student
+
+    def test_gepa_configurations(self):
+        """Test GEPA configurations can be created."""
+        # Test mutation-based configuration
+        mute_config = DarwinConfig(
+            max_lm_calls=2,
+            patience=3,
+            minibatch_size=3,
+            verbose=False
+        )
+
+        # Test merge-based configuration
+        merge_config = DarwinConfig(
+            mutation=SystemAwareMerge,
+            max_lm_calls=2,
+            patience=3,
+            minibatch_size=3,
+            verbose=False
+        )
+
+        mute_optimizer = Darwin(GEPAStrategy, mute_config)
+        merge_optimizer = Darwin(GEPAStrategy, merge_config)
+
         assert mute_optimizer is not None
         assert merge_optimizer is not None
 
@@ -77,11 +108,22 @@ class TestIntegration:
 
         with dspy.context(lm=dummy_lm):
             student = SimpleQA()
-            optimizer = GEPAMute(simple_metric, max_calls=2)
-            
-            result = optimizer.compile(student, trainset=trainset, devset=devset)
 
-            assert result._compiled is True
+            # Create GEPA configuration
+            config = DarwinConfig(
+                max_lm_calls=2,
+                patience=3,
+                minibatch_size=3,
+                verbose=False
+            )
+
+            optimizer = Darwin(GEPAStrategy, config)
+
+            compiled_module = optimizer.compile(student, trainset=trainset, devset=devset)
+            result = optimizer.get_last_result()
+
+            assert isinstance(result, Success)
+            assert compiled_module._compiled is True
 
 
 if __name__ == "__main__":

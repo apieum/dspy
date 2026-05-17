@@ -65,10 +65,11 @@ class Cohort:
         return self._iteration
 
     def __getattr__(self, name: str) -> Any:
-        """Get attribute from cohort."""
-        if name in self.weights:
-            return self.weights[name]
-        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+        # Let special methods (starting with __) fall through to normal AttributeError
+        if name.startswith('__') or name not in self.weights:
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+
+        return self.weights[name]
 
     def is_empty(self) -> bool:
         """Check if cohort has no candidates."""

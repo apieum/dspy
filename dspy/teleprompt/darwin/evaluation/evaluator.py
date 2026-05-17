@@ -2,14 +2,18 @@
 
 from abc import abstractmethod
 import inspect
-from typing import Callable, List, Type
+from typing import List, Type, TYPE_CHECKING
 import dspy
 from dspy import Module
-from ..data.cohort import Survivors, NewBorns
+from ..data.cohort import Survivors, NewBorns, Cohort
 from ..budget import Budget
+from ..observers import Channel
+
+if TYPE_CHECKING:
+    from ..config import DarwinConfig
 
 
-class Evaluator:
+class Evaluator(Channel):
     """Protocol for evaluating and filtering new candidates.
 
     This component owns a metric and decides which newly generated
@@ -17,15 +21,19 @@ class Evaluator:
     the two-phase evaluation logic from the GEPA paper.
     """
 
+    def __init__(self):
+        """Initialize evaluator with observer support."""
+        super().__init__()
+
     @abstractmethod
-    def evaluate(self, cohort: "NewBorns", budget: "Budget") -> "Survivors":
+    def evaluate(self, new_borns: "NewBorns", budget: "Budget") -> "Survivors":
         """
         Evaluates new candidates. If a candidate has parents, it undergoes
         two-phase validation. If it has no parents (the initial candidate),
         it is automatically promoted to full evaluation.
 
         Args:
-            cohort: The cohort of newly generated candidates to evaluate.
+            new_borns: The cohort of newly generated candidates to evaluate.
             budget: The budget manager to track evaluation costs.
 
         Returns:
@@ -33,23 +41,6 @@ class Evaluator:
             successfully promoted after passing evaluation.
         """
         ...
-
-    # Lifecycle methods (no-op implementations by default)
-    def start_compilation(self, student: dspy.Module, split_strategy=None, verbose: bool = False) -> None:
-        """Called when compilation begins. Components can prepare resources."""
-        pass
-
-    def finish_compilation(self, result: dspy.Module) -> None:
-        """Called when compilation ends. Components can cleanup/log results."""
-        pass
-
-    def start_iteration(self, iteration: int, cohort, budget) -> None:
-        """Called at start of each optimization iteration."""
-        pass
-
-    def finish_iteration(self, iteration: int, filtered_cohort, budget) -> None:
-        """Called after each optimization iteration completes."""
-        pass
 
     @classmethod
     def create_chain(cls, name: str, evaluator_classes: List[Type["Evaluator"]]) -> Type["Evaluator"]:
@@ -120,10 +111,10 @@ class Evaluator:
                     return getattr(evaluator, name)
             return default
 
-        def evaluate(self, cohort: "NewBorns", budget: "Budget") -> "Survivors":
+        def evaluate(self, new_borns: "NewBorns", budget: "Budget") -> "Survivors":
             """Executes the chain of evaluators sequentially."""
-            current_cohort = cohort
-            survivors = Survivors(*cohort.to_list(), iteration=cohort.iteration)
+            current_cohort = new_borns
+            survivors = Survivors(*new_borns.to_list(), iteration=new_borns.iteration)
             for i, evaluator in enumerate(self.evaluators):
                 survivors = evaluator.evaluate(current_cohort, budget)
 
@@ -133,9 +124,9 @@ class Evaluator:
 
             return survivors
 
-        def start_compilation(self, student: dspy.Module, split_strategy=None, verbose: bool=False) -> None:
+        def start_compilation(self, student: dspy.Module, verbose: bool=False) -> None:
             for evaluator in self.evaluators:
-                evaluator.start_compilation(student, split_strategy=split_strategy, verbose=verbose)
+                evaluator.start_compilation(student, verbose=verbose)
 
         def finish_compilation(self, result: Module) -> None:
             for evaluator in self.evaluators:

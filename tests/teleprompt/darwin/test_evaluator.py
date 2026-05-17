@@ -3,17 +3,19 @@
 import dspy
 from unittest.mock import Mock
 from dspy.teleprompt.darwin.evaluation.gepa_evaluator import GEPATwoPhasesEval
+from dspy.teleprompt.darwin.evaluation.metrics import Metric
 from dspy.teleprompt.darwin.data.candidate import Candidate
 from dspy.teleprompt.darwin.data.cohort import NewBorns
 from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
 from dspy.teleprompt.darwin.data.split_strategy import DefaultSplitStrategy
 
 
-def simple_metric(example: dspy.Example, prediction, trace=None) -> float:
-    """Simple metric for testing."""
+def simple_metric(example: dspy.Example, prediction, trace=None) -> Metric:
+    """Simple metric for testing that returns Metric objects."""
     if hasattr(example, 'answer') and hasattr(prediction, 'answer'):
-        return 1.0 if str(example.answer) == str(prediction.answer) else 0.0
-    return 0.0
+        value = 1.0 if str(example.answer) == str(prediction.answer) else 0.0
+        return Metric(value, feedback=f"Predicted: {prediction.answer}, Expected: {example.answer}", trace=trace)
+    return Metric(0.0, feedback="No answer attributes found", trace=trace)
 
 
 def mock_prediction(answer="test_answer"):
@@ -44,41 +46,53 @@ class TestEvaluator:
 
     def test_evaluator_initialization(self):
         """Test evaluator initialization."""
-        evaluator = GEPATwoPhasesEval(metric=simple_metric, minibatch_size=3)
+        validation_data = [dspy.Example(input="test", answer="correct").with_inputs("input")]
+        minibatch_data = [dspy.Example(input="mini", answer="correct").with_inputs("input")]
+        evaluator = GEPATwoPhasesEval(
+            assessor=simple_metric, 
+            minibatch_data=minibatch_data,
+            validation_data=validation_data
+        )
         
         assert hasattr(evaluator, 'evaluate')
         assert hasattr(evaluator, 'start_compilation')
-        assert evaluator.minibatch_size == 3
+        assert evaluator.validation_data == validation_data
 
     def test_evaluator_compilation(self):
         """Test evaluator compilation setup."""
-        evaluator = GEPATwoPhasesEval(metric=simple_metric, minibatch_size=2)
-
         training_data = [
             dspy.Example(input="test1", answer="answer1").with_inputs("input"),
             dspy.Example(input="test2", answer="answer2").with_inputs("input"),
             dspy.Example(input="test3", answer="answer3").with_inputs("input"),
         ]
+        minibatch_data = training_data[:1]  # Use subset for minibatch
+        evaluator = GEPATwoPhasesEval(
+            assessor=simple_metric, 
+            minibatch_data=minibatch_data,
+            validation_data=training_data
+        )
 
         student = dspy.Predict("input -> output")
-        split_strategy = DefaultSplitStrategy(trainset=training_data, verbose=False)
-        evaluator.start_compilation(student, split_strategy=split_strategy, verbose=False)
+        evaluator.start_compilation(student, verbose=False)
 
         assert len(evaluator.evaluators) > 0
-        assert evaluator.split_strategy is not None
+        assert evaluator.validation_data is not None
 
     def test_candidate_evaluation(self):
         """Test basic candidate evaluation."""
-        evaluator = GEPATwoPhasesEval(metric=simple_metric, minibatch_size=2)
-
         training_data = [
             dspy.Example(input="test1", answer="correct").with_inputs("input"),
             dspy.Example(input="test2", answer="correct").with_inputs("input"),
         ]
+        minibatch_data = training_data[:1]  # Use subset for minibatch
+        evaluator = GEPATwoPhasesEval(
+            assessor=simple_metric, 
+            minibatch_data=minibatch_data,
+            validation_data=training_data
+        )
 
         student = dspy.Predict("input -> output")
-        split_strategy = DefaultSplitStrategy(trainset=training_data, verbose=False)
-        evaluator.start_compilation(student, split_strategy=split_strategy, verbose=False)
+        evaluator.start_compilation(student, verbose=False)
 
         # Create test candidate
         module = mock_module_with_history(lambda **kwargs: mock_prediction("correct"))
@@ -90,16 +104,19 @@ class TestEvaluator:
         survivors = evaluator.evaluate(new_borns, budget)
         
         assert survivors.size() == 1
-        assert survivors.first().task_scores  # Should have scores
+        assert survivors.first().scores  # Should have Metric scores
+        assert len(survivors.first().scores) > 0
 
     def test_budget_tracking(self):
         """Test that evaluation tracks budget correctly."""
-        evaluator = GEPATwoPhasesEval(metric=simple_metric, minibatch_size=1)
-
         training_data = [dspy.Example(input="test", answer="correct").with_inputs("input")]
+        evaluator = GEPATwoPhasesEval(
+            assessor=simple_metric, 
+            minibatch_data=training_data, 
+            validation_data=training_data
+        )
         student = dspy.Predict("input -> output")
-        split_strategy = DefaultSplitStrategy(trainset=training_data, verbose=False)
-        evaluator.start_compilation(student, split_strategy=split_strategy, verbose=False)
+        evaluator.start_compilation(student, verbose=False)
 
         module = mock_module_with_history(lambda **kwargs: mock_prediction("correct"))
         candidate = Candidate(module, generation_number=0)

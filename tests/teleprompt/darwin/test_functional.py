@@ -1,7 +1,14 @@
 """Functional tests to ensure Darwin GEPA works in real scenarios."""
 
 import dspy
-from dspy.teleprompt.darwin import GEPAMute
+from dspy.teleprompt.darwin import Darwin, DarwinConfig, ChannelContext
+from dspy.teleprompt.darwin.strategy import GEPAStrategy
+from dspy.teleprompt.darwin.budget import LMCallsBudget
+from dspy.teleprompt.darwin.selection import ParetoFrontier
+from dspy.teleprompt.darwin.generation import ReflectivePromptMutation
+from dspy.teleprompt.darwin.generation.feedback import FeedbackProvider
+from dspy.teleprompt.darwin.evaluation import GEPATwoPhasesEval
+from dspy.teleprompt.darwin.result import Success
 from dspy.utils.dummies import DummyLM
 
 
@@ -14,24 +21,6 @@ class MultiStepQA(dspy.Module):
 
     def forward(self, question):
         return self.think(question=question)
-
-
-def accuracy_metric(example, prediction, trace=None):
-    """Realistic accuracy metric."""
-    if not hasattr(example, 'answer') or not hasattr(prediction, 'answer'):
-        return 0.0
-    expected = str(example.answer).lower().strip()
-    actual = str(prediction.answer).lower().strip()
-    return 1.0 if expected == actual else 0.0
-
-
-def contains_metric(example, prediction, trace=None):
-    """Metric that checks if answer contains expected content."""
-    if not hasattr(example, 'answer') or not hasattr(prediction, 'answer'):
-        return 0.0
-    expected = str(example.answer).lower()
-    actual = str(prediction.answer).lower()
-    return 1.0 if expected in actual else 0.0
 
 
 class TestFunctional:
@@ -47,7 +36,7 @@ class TestFunctional:
             dspy.Example(question="What is 7+7?", answer="14").with_inputs("question"),
             dspy.Example(question="What is 4+4?", answer="8").with_inputs("question"),
         ]
-        
+
         # Mock LM that can actually "improve" with better instructions
         improving_responses = [
             {"reasoning": "Adding numbers", "answer": "4"},  # Initial correct answers
@@ -59,19 +48,29 @@ class TestFunctional:
             {"reasoning": "Carefully adding", "answer": "10"},  # Better after reflection
             {"reasoning": "Carefully adding", "answer": "14"},
         ]
-        
+
         dummy_lm = DummyLM(improving_responses)
-        
+
         with dspy.context(lm=dummy_lm):
             student = MultiStepQA()
-            optimizer = GEPAMute(accuracy_metric, max_calls=10, patience=2)
-            
+
+            # Create GEPA configuration with new architecture
+            config = DarwinConfig(
+                max_lm_calls=10,
+                patience=2,
+                verbose=False
+            )
+
+            optimizer = Darwin(GEPAStrategy, config)
+
             # Test that optimization completes without error
-            result = optimizer.compile(student, trainset=trainset)
-            
-            assert isinstance(result, dspy.Module)
-            assert result._compiled is True
-            assert hasattr(result, 'think')  # Preserves original structure
+            compiled_module = optimizer.compile(student, trainset=trainset)
+            result = optimizer.get_last_result()
+
+            assert isinstance(result, Success)
+            assert isinstance(compiled_module, dspy.Module)
+            assert compiled_module._compiled is True
+            assert hasattr(compiled_module, 'think')  # Preserves original structure
 
     def test_optimization_with_difficult_metric(self):
         """Test optimization with a more challenging metric."""
@@ -80,7 +79,7 @@ class TestFunctional:
             dspy.Example(question="What is DNA?", answer="genetic").with_inputs("question"),
             dspy.Example(question="How does photosynthesis work?", answer="sunlight").with_inputs("question"),
         ]
-        
+
         # Responses that partially match the contains_metric
         responses = [
             {"reasoning": "Thinking about physics", "answer": "Gravity is a fundamental force in nature"},  # Contains "force"
@@ -90,16 +89,26 @@ class TestFunctional:
             {"reasoning": "Key concepts in physics", "answer": "force of attraction"},
             {"reasoning": "Key concepts in biology", "answer": "genetic code information"},
         ]
-        
+
         dummy_lm = DummyLM(responses)
-        
+
         with dspy.context(lm=dummy_lm):
             student = MultiStepQA()
-            optimizer = GEPAMute(contains_metric, max_calls=8, patience=2)
-            
-            result = optimizer.compile(student, trainset=trainset)
-            
-            assert result._compiled is True
+
+            # Create GEPA configuration with new architecture
+            config = DarwinConfig(
+                max_lm_calls=8,
+                patience=2,
+                verbose=False
+            )
+
+            optimizer = Darwin(GEPAStrategy, config)
+
+            compiled_module = optimizer.compile(student, trainset=trainset)
+            result = optimizer.get_last_result()
+
+            assert isinstance(result, Success)
+            assert compiled_module._compiled is True
 
     def test_optimization_with_small_dataset(self):
         """Test that optimization works with minimal data (edge case)."""
@@ -107,22 +116,30 @@ class TestFunctional:
         trainset = [
             dspy.Example(question="Test question", answer="test").with_inputs("question"),
         ]
-        
+
         responses = [
             {"reasoning": "Processing question", "answer": "test"},
             {"response": "Optimized instruction for single example."},
         ]
-        
+
         dummy_lm = DummyLM(responses)
-        
+
         with dspy.context(lm=dummy_lm):
             student = MultiStepQA()
-            optimizer = GEPAMute(accuracy_metric, max_calls=3, patience=1)
-            
+            # Create GEPA configuration with new architecture
+            config = DarwinConfig(
+                max_lm_calls=3,
+                patience=1,
+                verbose=False
+            )
+            optimizer = Darwin(GEPAStrategy, config)
+
             # Should handle small datasets gracefully
-            result = optimizer.compile(student, trainset=trainset)
-            
-            assert result._compiled is True
+            compiled_module = optimizer.compile(student, trainset=trainset)
+            result = optimizer.get_last_result()
+
+            assert isinstance(result, Success)
+            assert compiled_module._compiled is True
 
     def test_optimization_budget_exhaustion(self):
         """Test behavior when budget is exhausted."""
@@ -130,48 +147,64 @@ class TestFunctional:
             dspy.Example(question="What is AI?", answer="intelligence").with_inputs("question"),
             dspy.Example(question="What is ML?", answer="learning").with_inputs("question"),
         ]
-        
+
         # Very few responses to force budget exhaustion
         responses = [
             {"reasoning": "About AI", "answer": "artificial intelligence"},
             {"response": "Quick optimization due to budget."},
         ]
-        
+
         dummy_lm = DummyLM(responses)
-        
+
         with dspy.context(lm=dummy_lm):
             student = MultiStepQA()
-            optimizer = GEPAMute(contains_metric, max_calls=2, patience=1)  # Very tight budget
-            
+            # Create GEPA configuration with very tight budget
+            config = DarwinConfig(
+                max_lm_calls=2,
+                patience=1,
+                verbose=False
+            )
+            optimizer = Darwin(GEPAStrategy, config)
+
             # Should complete gracefully even with tight budget
-            result = optimizer.compile(student, trainset=trainset)
-            
-            assert result._compiled is True
+            compiled_module = optimizer.compile(student, trainset=trainset)
+            result = optimizer.get_last_result()
+
+            assert isinstance(result, Success)
+            assert compiled_module._compiled is True
 
     def test_optimization_preserves_module_structure(self):
         """Test that optimization preserves the original module structure."""
         trainset = [
             dspy.Example(question="Test", answer="result").with_inputs("question"),
         ]
-        
+
         responses = [
             {"reasoning": "Processing", "answer": "result"},
             {"response": "Structure-preserving optimization."},
         ]
-        
+
         dummy_lm = DummyLM(responses)
-        
+
         with dspy.context(lm=dummy_lm):
             original_student = MultiStepQA()
             original_predictors = original_student.predictors()
-            
-            optimizer = GEPAMute(accuracy_metric, max_calls=3)
-            result = optimizer.compile(original_student, trainset=trainset)
-            
+
+            # Create GEPA configuration with new architecture
+            config = DarwinConfig(
+                max_lm_calls=3,
+                patience=3,
+                verbose=False
+            )
+            optimizer = Darwin(GEPAStrategy, config)
+            compiled_module = optimizer.compile(original_student, trainset=trainset)
+            result = optimizer.get_last_result()
+
             # Structure should be preserved
-            assert hasattr(result, 'think')
-            assert len(result.predictors()) == len(original_predictors)
-            assert type(result.think) == type(original_student.think)
+            assert isinstance(result, Success)
+            assert hasattr(compiled_module, 'think')
+            assert len(compiled_module.predictors()) == len(original_predictors)
+            assert type(compiled_module.think) == type(original_student.think)
 
     def test_data_leakage_prevention(self):
         """Test that external devset is not used during training."""
@@ -179,31 +212,39 @@ class TestFunctional:
             dspy.Example(question="Train Q1", answer="A1").with_inputs("question"),
             dspy.Example(question="Train Q2", answer="A2").with_inputs("question"),
         ]
-        
+
         devset = [
             dspy.Example(question="Test Q1", answer="A1").with_inputs("question"),
             dspy.Example(question="Test Q2", answer="A2").with_inputs("question"),
         ]
-        
+
         responses = [
             {"reasoning": "Training phase", "answer": "A1"},
             {"reasoning": "Training phase", "answer": "A2"},
             {"response": "Optimized without test data leakage."},
         ]
-        
+
         dummy_lm = DummyLM(responses)
-        
+
         with dspy.context(lm=dummy_lm):
             student = MultiStepQA()
-            optimizer = GEPAMute(accuracy_metric, max_calls=5)
-            
+            # Create GEPA configuration with new architecture
+            config = DarwinConfig(
+                max_lm_calls=5,
+                patience=3,
+                verbose=False
+            )
+            optimizer = Darwin(GEPAStrategy, config)
+
             # External devset should be reserved for final evaluation only
-            result = optimizer.compile(student, trainset=trainset, devset=devset)
-            
-            assert result._compiled is True
-            # Verify split strategy correctly separates data
-            assert optimizer.split_strategy.external_devset == devset
-            assert len(optimizer.split_strategy.internal_validation_set) > 0
+            compiled_module = optimizer.compile(student, trainset=trainset, devset=devset)
+            result = optimizer.get_last_result()
+
+            assert isinstance(result, Success)
+            assert compiled_module._compiled is True
+            # Verify strategy correctly separates data
+            assert optimizer.strategy.devset == devset
+            assert len(optimizer.strategy.validation_data) > 0
 
 
 if __name__ == "__main__":

@@ -23,7 +23,9 @@ from ..data.cohort import Survivors, Parents
 from ..budget import Budget
 
 if TYPE_CHECKING:
-    pass  # No forward references needed
+    from ..config import DarwinConfig
+
+from ..evaluation import Metric
 
 logger = logging.getLogger(__name__)
 
@@ -40,37 +42,24 @@ class ParetoFrontier(Selector):
 
     **Advanced Features:**
     - Accumulator pattern for optimal task winner collection
-    - Frequency-weighted stochastic sampling for diversity
-    - Modern Cohort integration with efficient filtering algorithms
+    - Cohort integration with efficient filtering algorithms
     - Full Selection interface compatibility for system integration
     - Comprehensive logging and error handling
-
-    **Performance Optimizations:**
-    - Uses Cohort.filter() with pop-based domination removal
-    - Efficient task winner accumulation with O(1) lookups
-    - Lazy evaluation of Pareto frontier computation
     """
 
     def __init__(self):
         """Initialize the Pareto Frontier selector."""
-        # Internal candidate and task score management
-        self.task_scores: Dict[int, float] = {}  # task_id -> score for that task
-        self.task_best_candidates: Dict[int, List[Candidate]] = {}  # task_id -> all tied winners
-        self.task_wins: Dict[Candidate, int] = defaultdict(int)  # candidate -> number of tasks won
+        super().__init__()
+        # Internal candidate and score management using UUID-based identification
+        self.example_best_scores: Dict[str, List["Metric"]] = {}  # example_uuid -> best scores for that example
+        self.example_best_candidates: Dict[str, List[Candidate]] = {}  # example_uuid -> candidates with best scores
+        self.task_wins: Dict[Candidate, int] = defaultdict(int)  # candidate -> number of examples won
+        self.elitist_pruning = False
 
-    def start_compilation(self, student: dspy.Module, split_strategy=None, verbose: bool=False) -> None:
+    def start_compilation(self, student: dspy.Module, verbose: bool=False) -> None:
         """Called when compilation begins. Initialize task tracking structures."""
-        if split_strategy:
-            self.devset = split_strategy.internal_validation_set
-            num_tasks = len(self.devset)  # Each example in internal validation is a separate evaluation task
-        else:
-            self.devset = []
-            num_tasks = 0
-
-        # Initialize task_best_candidates and task_scores for all tasks
-        for task_id in range(num_tasks):
-            self.task_best_candidates[task_id] = []
-            self.task_scores[task_id] = 0.0
+        self.verbose = verbose
+        # Task structures will be initialized dynamically as we receive candidates with scores
 
 
     def promote(self, survivors: Survivors, budget: Optional[Budget] = None) -> Parents:
@@ -86,22 +75,17 @@ class ParetoFrontier(Selector):
             Parents cohort containing the Pareto frontier from the union of old and new
         """
         # Report Pareto frontier promotion
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"Pareto promotion: advancing {len(survivors.candidates)} candidates to generation {survivors.iteration + 1}")
-        for candidate in survivors.candidates:
-            score = candidate.average_task_score()
-            logger.debug(f"Candidate gen={candidate.generation_number}: μ={score:.3f}")
+        self.publish('promote', survivors)
 
         # 1. Update scores for new survivors (adds them to internal tracking)
         self.update_scores_batch(survivors)
 
         # 2. Get all candidates currently tracked
         pareto_frontier = set()
-        for task_winners in self.task_best_candidates.values():
-            pareto_frontier.update(task_winners)
+        for example_winners in self.example_best_candidates.values():
+            pareto_frontier.update(example_winners)
 
-        logger.debug(f"Pareto filtering: {len(pareto_frontier)} candidates in active frontier")
+        self.publish('pareto_filtering', {'frontier_size': len(pareto_frontier)})
 
         # 4. Extract task_wins for the Pareto-filtered candidates
         relevant_task_wins = {
@@ -109,11 +93,15 @@ class ParetoFrontier(Selector):
             for candidate in pareto_frontier
         }
 
-        return Parents(
+        result = Parents(
             *pareto_frontier,
             iteration=survivors.iteration + 1,  # Each promote call is one iteration
             task_wins=relevant_task_wins
         )
+
+        # Observer notification already handled above
+
+        return result
 
     def best_candidate(self) -> Candidate:
         """Return the best candidate from the pool."""
@@ -123,94 +111,89 @@ class ParetoFrontier(Selector):
         # Get best candidates from task scores and select overall best
         best_candidates = self.task_wins.keys()
 
-        # Report candidate pool and final selection
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.debug(f"Selection pool: {len(best_candidates)} candidates")
-        for candidate in best_candidates:
-            score = candidate.average_task_score()
-            logger.debug(f"Gen {candidate.generation_number}: μ={score:.3f}")
+        best = max(best_candidates, key=lambda c: c.average_score())
 
-        best = max(best_candidates, key=lambda c: c.average_task_score())
-        logger.info(f"Optimal candidate selected: gen={best.generation_number}, μ={best.average_task_score():.3f}")
+        # Report candidate pool and final selection
+        self.publish('best_candidate_selection', best, {'pool_size': len(best_candidates)})
 
         # Report final optimized instruction
         predictors = best.module.predictors()
         if predictors:
             from dspy.teleprompt.utils import get_signature
             instruction = get_signature(predictors[0]).instructions
-            logger.debug(f"Final instruction: {instruction}")
+            self.publish('final_instruction', {'instruction': instruction})
 
         return best
 
-    def update_score(self, task_id: int, candidate: Candidate) -> None:
-        """Update the task scores with a candidate for a specific task."""
-        current_winners = self.task_best_candidates.get(task_id, [])
+    def update_score(self, example_uuid: str, candidate: Candidate, score: "Metric") -> None:
+        """Update the example scores with a candidate for a specific example UUID."""
+        current_winners = self.example_best_candidates.get(example_uuid, [])
+        current_best_value = self.example_best_scores.get(example_uuid, [Metric(0.0)])[0]
 
         if not current_winners:
-            # First candidate for this task
-            self.task_best_candidates[task_id] = [candidate]
-            self.task_scores[task_id] = candidate.task_score(task_id)
-            self.task_wins[candidate] = self.task_wins.get(candidate, 0) + 1
-            return
-
-        # For task winners, we first check performance on THIS SPECIFIC TASK
-        candidate_score = candidate.task_score(task_id)
-        current_best_score = self.task_scores[task_id]
-
-        if candidate_score > current_best_score:
-        # New candidate is strictly better on this task → replace all current winners
-            for old_winner in current_winners:
-                self._update_old_winner(old_winner)
-            self.task_best_candidates[task_id] = [candidate]
-            self.task_scores[task_id] = candidate.task_score(task_id)
-            self.task_wins[candidate] = self.task_wins.get(candidate, 0) + 1
-
-        elif candidate_score == current_best_score:
-            # Tied performance → check domination across ALL tasks and ancestry
-            dominates_any = any(candidate.dominate(winner) for winner in current_winners)
-            dominated_by_any = any(winner.dominate(candidate) for winner in current_winners)
-
-            if dominates_any:
-                # New candidate dominates at least one winner → replace all dominated ones
-                dominated_winners = [w for w in current_winners if candidate.dominate(w)]
-                non_dominated = [w for w in current_winners if not candidate.dominate(w)]
-                # Update task_wins: subtract from dominated, add to new candidate
-                for dominated in dominated_winners:
-                    self._update_old_winner(dominated)
-                self.task_wins[candidate] = self.task_wins.get(candidate, 0) + 1
-
-                self.task_best_candidates[task_id] = non_dominated + [candidate]
-            elif dominated_by_any:
-                # New candidate is dominated → ignore it
-                return
+            self.example_best_candidates[example_uuid] = [candidate]
+            self.example_best_scores[example_uuid] = [score]
+            self.task_wins[candidate] += 1
+        elif score > current_best_value:
+            # New candidate is strictly better on this example → replace all current winners.
+            self._update_old_winners(current_winners)
+            self.example_best_candidates[example_uuid] = [candidate]
+            self.example_best_scores[example_uuid] = [score]
+            self.task_wins[candidate] += 1
+        elif score == current_best_value:
+            # Tied performance. Decide how to handle the tie.
+            if self.elitist_pruning:
+                # Elitist mode: Use dominance and ancestry to prune the winner set.
+                self._handle_tie_with_elitism(example_uuid, candidate, score, current_winners)
             else:
-                # Neither dominates → check ancestry
-                parents_in_winners = [w for w in current_winners if w.is_ancestor_of(candidate)]
+                # Official GEPA mode: Add the new candidate to the set of winners.
+                self.example_best_candidates[example_uuid].append(candidate)
+                self.example_best_scores[example_uuid].append(score)
+                self.task_wins[candidate] += 1
+        # else: score < current_best_value → ignore candidate
 
-                if parents_in_winners:
-                    # Remove all parents and add the evolved child
-                    for parent in parents_in_winners:
-                        current_winners.remove(parent)
-                        self._update_old_winner(parent)
-                    current_winners.append(candidate)
-                    self.task_wins[candidate] = self.task_wins.get(candidate, 0) + 1
-                elif not candidate.is_ancestor_of_any(current_winners):
-                    # No ancestry relationship → keep as genuinely different solution
-                    current_winners.append(candidate)
-                    self.task_wins[candidate] = self.task_wins.get(candidate, 0) + 1
-        # else: candidate_score < current_best_score → ignore candidate
+        self.publish('update_score', candidate, score)
 
-    def _update_old_winner(self, old_winner):
-        if self.task_wins[old_winner] <= 1:
-            del self.task_wins[old_winner]
-        else:
-            self.task_wins[old_winner] -= 1
+    def _handle_tie_with_elitism(self, example_uuid: str, candidate: Candidate, score: "Metric", current_winners: List[Candidate]):
+        """Handle a tie in scores using dominance and ancestry checks."""
+        dominates_any = any(candidate.dominate(winner) for winner in current_winners)
+        dominated_by_any = any(winner.dominate(candidate) for winner in current_winners)
+
+        if dominates_any and not dominated_by_any:
+            # New candidate dominates at least one winner and is not dominated itself.
+            dominated_winners = [w for w in current_winners if candidate.dominate(w)]
+            non_dominated = [w for w in current_winners if not candidate.dominate(w)]
+            self._update_old_winners(dominated_winners)
+            self.example_best_candidates[example_uuid] = non_dominated + [candidate]
+            self.example_best_scores[example_uuid].append(score)
+            self.task_wins[candidate] += 1
+        elif not dominated_by_any:
+            # Not dominated by any existing winner. Now check ancestry.
+            parents_in_winners = [w for w in current_winners if w.is_ancestor_of(candidate)]
+            if parents_in_winners:
+                # Child replaces its parents if it performs equally well.
+                self._update_old_winners(parents_in_winners)
+                self.example_best_candidates[example_uuid] = [w for w in current_winners if w not in parents_in_winners] + [candidate]
+                self.example_best_scores[example_uuid].append(score)
+                self.task_wins[candidate] += 1
+            elif not candidate.is_ancestor_of_any(current_winners):
+                # No ancestry relationship and not dominated, so it's a genuinely different solution.
+                self.example_best_candidates[example_uuid].append(candidate)
+                self.example_best_scores[example_uuid].append(score)
+                self.task_wins[candidate] += 1
+
+
+    def _update_old_winners(self, old_winners):
+        for old_winner in old_winners:
+            if self.task_wins[old_winner] <= 1:
+                del self.task_wins[old_winner]
+            else:
+                self.task_wins[old_winner] -= 1
 
     def update_scores_batch(self, candidates: Survivors) -> None:
-        """Update task scores for multiple candidates efficiently.
+        """Update fitness scores for multiple candidates efficiently.
 
-        This method processes all candidates and all their tasks in one go,
+        This method processes all candidates and all their scores in one go,
         avoiding redundant individual update_score calls.
 
         Args:
@@ -219,10 +202,33 @@ class ParetoFrontier(Selector):
         if not candidates:
             return
 
-        # Get all task IDs from all candidates
-        all_task_ids = set(self.task_scores.keys())
+        # Get all example UUIDs from all candidates being processed
+        all_example_uuids = set()
+        for candidate in candidates:
+            for score in candidate.scores:
+                if score.id:
+                    all_example_uuids.add(score.id)
 
-        # Process each task once
-        for task_id in all_task_ids:
+        # Process each example once
+        for example_uuid in all_example_uuids:
             for candidate in candidates:
-                self.update_score(task_id, candidate)
+                score = candidate.find_score_by_uuid(example_uuid)
+                if score is not None:
+                    self.update_score(example_uuid, candidate, score)
+
+
+        self.publish('update_scores_batch', candidates)
+
+    def configure(self, config: 'DarwinConfig') -> None:
+        """Configure the selector with observers and settings.
+
+        Args:
+            config: Configuration containing observers and settings
+        """
+        self.elitist_pruning = getattr(config, 'elitist_pruning', False)
+        # Subscribe all selector observers to our events using the Channel pattern
+        for observer in getattr(config, 'selector_observers', []):
+            # Use the modern Channel subscription pattern
+            for event_name in ['promote', 'update_score', 'update_scores_batch']:
+                if hasattr(observer, event_name):
+                    self.subscribe(observer, event_name)

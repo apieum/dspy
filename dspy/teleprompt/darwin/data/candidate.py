@@ -1,9 +1,13 @@
 """Candidate data structure for GEPA optimization."""
 from dataclasses import dataclass, field
-from typing import Dict, List, Callable, Tuple, Optional, Union
+from typing import Dict, List, Callable, Tuple, Optional, Union, TYPE_CHECKING
 from typing_extensions import Any
 
 from dspy import Module, Example, Prediction
+
+if TYPE_CHECKING:
+    from ..evaluation import Assessor, Metric
+from ..observers import Channel, NullChannel
 from dspy.dsp.utils.settings import settings
 #from dspy.primitives.example import Example
 from dspy.utils.parallelizer import ParallelExecutor
@@ -18,7 +22,7 @@ class Candidate:
     parents: List['Candidate'] = field(default_factory=list)  # Direct parent references
     generation_number: int = 0  # Which generation this belongs to
     creation_metadata: Dict[str, Any] = field(default_factory=dict)
-    task_scores: Dict[int, float] = field(default_factory=dict)  # task_scores[task_id] = score
+    scores: List["Metric"] = field(default_factory=list)  # List of fitness scores with full context
 
     def __hash__(self) -> int:
         """Make candidates hashable based on object identity."""
@@ -30,44 +34,43 @@ class Candidate:
             return False
         return self is other
 
-    def task_score(self, task_id: int, default: float = 0.0) -> float:
-        """Get score for a specific task."""
-        return self.task_scores.get(task_id, default)
+    def find_score_by_uuid(self, example_uuid: str) -> Optional["Metric"]:
+        """Find fitness score for a specific example UUID."""
+        for score in self.scores:
+            if score.id == example_uuid:
+                return score
+        return None
 
-    def average_task_score(self) -> float:
-        """Calculate average score across all tasks."""
-        return sum(self.task_scores.values()) / len(self.task_scores) if self.task_scores else 0.0
+    def average_score(self) -> float:
+        """Calculate average fitness score across all evaluations."""
+        if not self.scores:
+            return 0.0
+        return sum(float(score.value) for score in self.scores) / len(self.scores)
 
-    def evaluate_on_task(self, task: Example, metric: Callable) -> Tuple[float, Any, Any]:
+    def evaluate_on_task(self, task: Example, assessor: "Assessor", channel: Optional[Channel] = NullChannel) -> "Metric":
         """Evaluate this candidate on a single example using provided metric."""
+        from ..evaluation import Metric
+
+        trace:Dict[str, Any] = {'task': task}
         try:
             prediction = self.module(**task.inputs())
-            result = metric(task, prediction)
-
-            # Handle both μf-compliant metrics (tuple) and regular metrics (float)
-            if isinstance(result, tuple):
-                score, feedback = result
-                score = float(score)
-            else:
-                score = float(result)  # Regular metric returning just score
-                feedback = ""
-
-            return (score, feedback, prediction)
+            trace['prediction'] = prediction
+            return assessor(task, prediction, trace)
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Single task evaluation failed: {e}")
-            return (0.0, "", prediction)  # Failed evaluation
+            return Metric(0.0, "", errors={"evaluate_on_task":e}, trace=trace)  # Failed evaluation
 
-    def evaluate_on_batch(self, examples: Dict[int, Example], metric: Callable,
+    def evaluate_on_batch(self, examples: List[Example], assessor: "Assessor",
         num_threads=None,
         max_errors=None,
         provide_traceback=False,
         disable_progress_bar=False,
-        verbose=False) -> Dict[int, float]:
-        """Evaluate this candidate on a batch of examples using DSPy's native Evaluate class."""
+        channel: Optional[Channel] = NullChannel,
+        persist_scores: bool = True) -> List["Metric"]:
+        """Evaluate this candidate on a batch of examples and return rich Metric objects."""
+        from ..evaluation import Metric
+
         if not examples:
-            return {}
+            return []
 
         executor = ParallelExecutor(
             num_threads=num_threads or settings.num_threads,
@@ -77,96 +80,94 @@ class Candidate:
         )
 
         module = self.module.deepcopy()
+        # Get current instruction for trace context
+        instruction = "No instruction"
+        predictors = module.predictors()
+        if predictors:
+            from dspy.teleprompt.utils import get_signature
+            signature = get_signature(predictors[0])
+            instruction = signature.instructions or "No instruction"
 
-        def process_example(example):
-            task_id, task = example
+        def process_example(example: Example) -> "Metric":
+            """Process a single example and return a Metric with rich trace context."""
             try:
-                # Get instruction for verbose logging
-                instruction = "No instruction"
-                predictors = module.predictors()
-                if predictors:
-                    from dspy.teleprompt.utils import get_signature
-                    signature = get_signature(predictors[0])
-                    instruction = signature.instructions or "No instruction"
+                # Make prediction
+                prediction = module(**example.inputs())
 
-                prediction = module(**task.inputs())
-                result = metric(task, prediction)
+                # Create rich trace with example UUID and prediction context
+                trace = {
+                    'example': example,
+                    'prediction': prediction,
+                    'instruction': instruction,
+                    'candidate_id': id(self)
+                }
 
-                # Verbose logging: show instruction, question, and answer
-                if verbose:
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    question = str(task.inputs().get('question', task.inputs()))[:200] + ("..." if len(str(task.inputs())) > 200 else "")
-
-                    # Extract the actual answer field from prediction
-                    answer_text = ""
-                    if hasattr(prediction, 'answer') and prediction.answer is not None:
-                        answer_text = str(prediction.answer)
-                    elif hasattr(prediction, 'response') and prediction.response is not None:
-                        answer_text = str(prediction.response)
+                # Get assessment result
+                result = assessor(example, prediction, trace)
+                if not isinstance(result, Metric):
+                    if isinstance(result, tuple) and len(result) == 2:
+                        value, feedback = result
+                        result = Metric(value, id=getattr(example, "dspy_uuid", ""), feedback=str(feedback), trace=trace)
                     else:
-                        # Try to extract answer field dynamically
-                        prediction_attrs = [attr for attr in dir(prediction) if not attr.startswith('_') and not callable(getattr(prediction, attr))]
-                        output_fields = [attr for attr in prediction_attrs if attr not in ['reasoning', 'rationale', 'completions']]
+                        result = Metric(result, id=getattr(example, "dspy_uuid", ""), trace=trace)
 
-                        if output_fields:
-                            if 'answer' in output_fields:
-                                answer_text = str(getattr(prediction, 'answer'))
-                            else:
-                                answer_text = str(getattr(prediction, output_fields[0]))
-                        else:
-                            answer_text = str(prediction)
+                # Publish evaluation event to observers via channel
+                channel.publish('example_evaluated', {
+                    'candidate': self,
+                    'example': example,
+                    'prediction': prediction,
+                    'result': result,
+                    'instruction': instruction
+                })
+                return result
 
-                    answer = answer_text[:200] + ("..." if len(answer_text) > 200 else "")
-                    logger.info(f"EVALUATION [Task {task_id}]:")
-                    logger.info(f"  Instruction: {instruction}")
-                    logger.info(f"  Question: {question}")
-                    logger.info(f"  Given Answer: {answer}")
-                    logger.info(f"  Expected Answer: {task.get('answer')}")
-
-                # Handle both μf-compliant metrics (tuple) and regular metrics (float)
-                if isinstance(result, tuple):
-                    score, feedback = result
-                    score = float(score)
-                    if verbose:
-                        logger.info(f"  Score: {score:.3f}, Feedback: {feedback}")
-                else:
-                    score = float(result)  # Regular metric returning just score
-                    feedback = ""
-                    if verbose:
-                        logger.info(f"  Score: {score:.3f}")
-
-                return (task_id, score, feedback)
             except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Candidate evaluation failed for task {task_id}: {e}")
-                score = -1.0
-                feedback = ""
-            finally:
-                return (task_id, score, feedback)
+                # Create error metric with trace context
+                error_trace = {
+                    'example': example,
+                    'candidate_id': id(self),
+                    'error': str(e)
+                }
 
-        result = executor.execute(process_example, examples.items())
+                error_result = Metric(
+                    value=0.0,
+                    feedback=f"Evaluation failed: {str(e)}",
+                    errors={'evaluation_error': e},
+                    trace=error_trace
+                )
 
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.warning(f"Candidate evaluation done for tasks {examples}: {result}")
-        if result:
-            return {task_id:score for (task_id, score, feedback) in result}
-        return {task_id:-1.0 for task_id in examples.keys()}
+                # Publish error event to observers
+                channel.publish('evaluation_error', {
+                    'candidate': self,
+                    'example': example,
+                    'error': e
+                })
 
-    def batch_task_scores(self, examples: Dict[int, Example], metric: Callable,
-        num_threads=None,
-        max_errors=None,
-        provide_traceback=False,
-        disable_progress_bar=False,
-        verbose=False) -> Dict[int, float]:
-            self.task_scores = self.evaluate_on_batch(examples, metric, num_threads, max_errors, provide_traceback, disable_progress_bar, verbose)
-            return self.task_scores
+                if settings.max_errors == 0:
+                    raise e
+
+                return error_result
+
+        # Execute parallel evaluation and get scores
+        scores = executor.execute(process_example, examples)
+
+        # Store scores in candidate and publish batch completion
+        if scores:
+            batch_scores = [s for s in scores if isinstance(s, Metric)]
+            if persist_scores:
+                self.scores = batch_scores
+            if channel:
+                channel.publish('evaluate_on_batch', {
+                    'candidate': self,
+                    'scores': batch_scores,
+                    'examples_count': len(examples)
+                })
+
+        return batch_scores if scores else []
 
     def best_overall(self, other: 'Candidate') -> 'Candidate':
-        my_avg_score = self.average_task_score()
-        other_avg_score = other.average_task_score()
+        my_avg_score = self.average_score()
+        other_avg_score = other.average_score()
         if my_avg_score > other_avg_score:
             return self
         elif my_avg_score < other_avg_score:
@@ -176,52 +177,11 @@ class Candidate:
         else:
             return other
 
-    def best_for_task(self, task_id: int, other: 'Candidate') -> 'Candidate':
-        """Compare two candidates and return the best one for a specific task.
-
-        Considers both score and generation number (newer wins on ties).
-
-        Args:
-            task_id: The task to compare performance on
-            other: The other candidate to compare against
-
-        Returns:
-            The better candidate for the task (self or other)
-        """
-        my_score = self.task_score(task_id) or 0.0
-        other_score = other.task_score(task_id) or 0.0
-
-        # Better score wins
-        if my_score > other_score:
-            return self
-
-        # Same score - newer generation wins
-        if my_score == other_score and self.generation_number > other.generation_number:
-            return self
-
-        return other
-    def best_on_task(self, task_id, candidates:List['Candidate']) -> 'Candidate':
-        """Compare a candidate with a list of candidates and return the best one for a specific task.
-
-        Considers both score and generation number (newer wins on ties).
-
-        Args:
-            task_id: The task to compare performance on
-            candidates: The list of candidates to compare against
-
-        Returns:
-            The better candidate for the task (self or other)
-        """
-        best_candidate = self
-        for candidate in candidates:
-            best_candidate = best_candidate.best_for_task(task_id, candidate)
-        return best_candidate
-
     def dominate(self, other: 'Candidate') -> bool:
         """Check if this candidate Pareto-dominates another candidate.
 
-        Returns True if this candidate performs at least as well on all tasks
-        and strictly better on at least one task (Pareto dominance).
+        Returns True if this candidate performs at least as well on all examples
+        and strictly better on at least one example (Pareto dominance).
 
         Args:
             other: The other candidate to compare against
@@ -232,21 +192,25 @@ class Candidate:
         at_least_as_good_on_all = True
         strictly_better_on_one = False
 
-        # Use the task_scores keys from either candidate (they should have the same tasks)
-        all_task_ids = set(self.task_scores.keys()) | set(other.task_scores.keys())
+        my_example_uuids = {score.id for score in self.scores}
+        other_example_uuids = {score.id for score in other.scores}
+        all_example_uuids = my_example_uuids | other_example_uuids
 
-        for task_id in all_task_ids:
-            my_score = self.task_score(task_id) or 0.0
-            other_score = other.task_score(task_id) or 0.0
+        for example_uuid in all_example_uuids:
+            my_score = self.find_score_by_uuid(example_uuid)
+            other_score = other.find_score_by_uuid(example_uuid)
 
-            if my_score < other_score:
-                # I'm worse on this task → no domination possible
+            my_value = float(my_score.value) if my_score else 0.0
+            other_value = float(other_score.value) if other_score else 0.0
+
+            if my_value < other_value:
+                # I'm worse on this example → no domination possible
                 at_least_as_good_on_all = False
                 break
-            elif my_score > other_score:
-                # I'm strictly better on this task
+            elif my_value > other_value:
+                # I'm strictly better on this example
                 strictly_better_on_one = True
-            # else: equal scores → continue checking other tasks
+            # else: equal scores → continue checking other examples
 
         return at_least_as_good_on_all and strictly_better_on_one
 
