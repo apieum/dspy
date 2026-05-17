@@ -13,7 +13,6 @@ from functools import wraps
 from typing import Any, Dict, List, Optional, Tuple
 
 import pydantic
-from datamodel_code_generator import InputFileType, generate
 
 import dspy
 from tests.reliability.utils import assert_program_output_correct, judge_dspy_configuration
@@ -58,6 +57,15 @@ def generate_test_program(dst_path: str, additional_instructions: Optional[str] 
     """
 
     def generate_models(schema: dict[str, Any], class_name: str) -> str:
+        try:
+            from datamodel_code_generator import InputFileType, generate
+        except ImportError as e:
+            raise ImportError(
+                "Generating reliability test programs requires the optional "
+                "`datamodel-code-generator` package. Install the dev extra to use "
+                "tests.reliability.generate."
+            ) from e
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_schema_path = os.path.join(tmp_dir, "schema.json")
             tmp_model_path = os.path.join(tmp_dir, "model.py")
