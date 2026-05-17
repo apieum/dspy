@@ -1,7 +1,7 @@
 """Generator protocol for GEPA optimization."""
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 import dspy
 from ..observers import Channel
 
@@ -34,5 +34,12 @@ class Generator(Channel):
         """
         ...
 
-    # Lifecycle methods removed - strategy owns component lifecycle
-    # Components are called directly by strategy with specific data
+    def start_compilation(
+        self,
+        student: dspy.Module,
+        *,
+        feedback_data: Optional[List[dspy.Example]] = None,
+        verbose: bool = False,
+    ) -> None:
+        """Initialize generator state for a compilation run."""
+        self.verbose = verbose

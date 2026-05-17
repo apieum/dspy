@@ -1,8 +1,9 @@
 """Base class for all optimization strategies."""
 
 import logging
+import inspect
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, Callable, TYPE_CHECKING, TypeVar, Generic
+from typing import List, Optional, TYPE_CHECKING, TypeVar, Generic
 
 import dspy
 from ..data.candidate import Candidate
@@ -96,8 +97,7 @@ class BaseStrategy(ABC, Generic[R]):
     def budget(self) -> 'Budget':
         """Get budget component, instantiating if needed."""
         if self._budget is None:
-            from ..budget import Budget
-            self._budget = self.config.budget(max_calls=self.config.max_lm_calls)
+            self._budget = self._instantiate_budget()
         return self._budget
 
     @property
@@ -112,21 +112,7 @@ class BaseStrategy(ABC, Generic[R]):
     def generator(self) -> 'Generator':
         """Get mutation generator component, instantiating if needed."""
         if self._generator is None:
-            # Strategy decides what metric and data to pass to generator
-            from ..generation.feedback import FeedbackProvider
-            from ..generation import SystemAwareMerge
-
-            feedback_provider = FeedbackProvider(assessor=self.config.enhanced_feedback)
-            # Strategy provides intelligently sampled minibatch for feedback
-            feedback_data = self._create_minibatch(self.validation_data, self.config.minibatch_size)
-            if self.config.mutation is SystemAwareMerge:
-                self._generator = self.config.mutation(assessor=self.config.enhanced_feedback)
-                self._generator.start_compilation(self.student, verbose=self.config.verbose, feedback_data=feedback_data)
-            else:
-                self._generator = self.config.mutation(
-                    feedback_provider=feedback_provider,
-                    feedback_data=feedback_data
-                )
+            self._generator = self._instantiate_generator(self.config.mutation)
         return self._generator
 
     @property
@@ -154,3 +140,57 @@ class BaseStrategy(ABC, Generic[R]):
             return True
 
         return False
+
+    def _instantiate_budget(self) -> 'Budget':
+        budget_cls = self.config.budget
+        signature = inspect.signature(budget_cls)
+        kwargs = {}
+        if "max_calls" in signature.parameters:
+            kwargs["max_calls"] = self.config.max_lm_calls
+        elif "max_iterations" in signature.parameters:
+            kwargs["max_iterations"] = self.config.max_iterations
+        elif "total_budget" in signature.parameters:
+            kwargs["total_budget"] = self.config.max_lm_calls
+        return budget_cls(**kwargs)
+
+    def _instantiate_generator(self, generator_factory) -> 'Generator':
+        from ..generation.feedback import FeedbackProvider
+
+        mutation_config = self.config.mutation_config
+        feedback_assessor = (
+            mutation_config.feedback_provider.assessor
+            if mutation_config and mutation_config.feedback_provider is not None
+            else self.config.enhanced_feedback or self.config.fitness_function
+        )
+        feedback_function = mutation_config.enhanced_feedback_function if mutation_config else None
+        feedback_provider = (
+            mutation_config.feedback_provider
+            if mutation_config and mutation_config.feedback_provider is not None
+            else FeedbackProvider(assessor=feedback_assessor, feedback_function=feedback_function)
+        )
+        feedback_data = self._create_minibatch(
+            self.validation_data,
+            mutation_config.minibatch_size if mutation_config else self.config.minibatch_size,
+        )
+
+        kwargs = {
+            "feedback_provider": feedback_provider,
+            "feedback_data": feedback_data,
+            "assessor": feedback_assessor,
+            "config": mutation_config,
+        }
+        if mutation_config:
+            kwargs.update(
+                {
+                    "reflection_strategy": mutation_config.reflection_strategy,
+                    "module_selection": mutation_config.module_selection_strategy.value,
+                    "max_retries": mutation_config.max_retries,
+                }
+            )
+
+        generator = generator_factory(**kwargs)
+
+        student = getattr(self, "student", None)
+        if student is not None:
+            generator.start_compilation(student, feedback_data=feedback_data, verbose=self.config.verbose)
+        return generator

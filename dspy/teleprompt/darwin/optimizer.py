@@ -65,7 +65,7 @@ class Darwin(Teleprompter):
             self.latest_result = result_obj
 
             if isinstance(result_obj, Failure):
-                raise OptimizationFailureError(f"Optimization failed: {result_obj.message}")
+                raise OptimizationFailureError(f"Optimization failed: {result_obj.reason}")
 
             best_candidate = result_obj.get_best_generalist()
             if best_candidate and best_candidate.module:

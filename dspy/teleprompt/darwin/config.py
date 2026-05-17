@@ -1,16 +1,14 @@
 """Configuration classes for Darwin optimization framework."""
 
-from dataclasses import dataclass, field
-from typing import List, Type, Callable, Optional
-from abc import ABC
+from dataclasses import dataclass
+from typing import Type, Optional
 
 from .budget import Budget, LMCallsBudget
 from .selection import Selector, ParetoFrontier
 from .generation import Generator, SystemAwareMerge, ReflectivePromptMutation
+from .generation.config import ReflectiveMutationConfig
 from .evaluation import Evaluator, GEPATwoPhasesEval
 from .evaluation.metrics import Assessor, F1Score
-from .strategy import BaseStrategy
-from .observers import ChannelContext
 
 
 @dataclass
@@ -30,9 +28,11 @@ class DarwinConfig:
     # Optional strategic choices
     crossover: Optional[Type['Generator']] = SystemAwareMerge  # Optional crossover generator
     enhanced_feedback: Optional[Assessor] = F1Score()  # Optional feedback-generating metric
+    mutation_config: ReflectiveMutationConfig = None
 
     # System parameters we actually have
     max_lm_calls: int = 100
+    max_iterations: int = 100
     patience: int = 3
     validation_split: float = 0.2
     minibatch_size: int = 3  # Size of minibatch for quick validation
@@ -40,3 +40,7 @@ class DarwinConfig:
 
     # Logging
     verbose: bool = False
+
+    def __post_init__(self):
+        if self.mutation_config is None:
+            self.mutation_config = ReflectiveMutationConfig(minibatch_size=self.minibatch_size)

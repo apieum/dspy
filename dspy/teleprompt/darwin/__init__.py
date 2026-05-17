@@ -24,6 +24,17 @@ from .generation.feedback import FeedbackProvider
 from .evaluation.gepa_evaluator import FullTaskScores, ParentFastCompare, GEPATwoPhasesEval
 from .evaluation.trace_collector import EnhancedTraceCollector
 from .evaluation.feedback import FeedbackResult, EvaluationTrace, ModuleFeedback
+from .evaluation.metrics import (
+    Metric,
+    BaseAssessor,
+    ExactMatch,
+    Contains,
+    F1Score,
+    RougeL,
+    Bleu,
+    CustomMetric,
+    CompositeMetric,
+)
 
 # Visualization tools
 from .visualization.candidate_tree import CandidateTreeVisualizer
@@ -44,6 +55,7 @@ from .logging import (
 # Strategy and configuration
 from .strategy import BaseStrategy, GEPAStrategy
 from .config import DarwinConfig
+from .generation.config import ReflectiveMutationConfig, ModuleSelectionStrategy
 
 # GEPA convenience optimizers
 from .gepa_optimizers import GEPAMute, GEPAAdaptive
@@ -75,6 +87,15 @@ __all__ = [
     'FeedbackResult',
     'EvaluationTrace',
     'ModuleFeedback',
+    'Metric',
+    'BaseAssessor',
+    'ExactMatch',
+    'Contains',
+    'F1Score',
+    'RougeL',
+    'Bleu',
+    'CustomMetric',
+    'CompositeMetric',
 
     # Visualization tools
     'CandidateTreeVisualizer',
@@ -92,6 +113,8 @@ __all__ = [
     'BaseStrategy',
     'GEPAStrategy',
     'DarwinConfig',
+    'ReflectiveMutationConfig',
+    'ModuleSelectionStrategy',
     
     # GEPA convenience optimizers
     'GEPAMute', 'GEPAAdaptive',

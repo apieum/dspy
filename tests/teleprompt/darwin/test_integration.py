@@ -4,7 +4,8 @@ import dspy
 from dspy.teleprompt.darwin import (
     Darwin, DarwinConfig, GEPAStrategy,
     LMCallsBudget, ParetoFrontier, ReflectivePromptMutation,
-    FeedbackProvider, GEPATwoPhasesEval, SystemAwareMerge, ChannelContext, Success
+    FeedbackProvider, GEPATwoPhasesEval, SystemAwareMerge, ChannelContext, Success,
+    GEPAMute, GEPAAdaptive
 )
 from dspy.utils.dummies import DummyLM
 
@@ -124,6 +125,36 @@ class TestIntegration:
 
             assert isinstance(result, Success)
             assert compiled_module._compiled is True
+
+    def test_public_gepa_optimizers_use_custom_metric(self):
+        """Test public GEPA convenience classes compile with old-style metrics."""
+        trainset = [
+            dspy.Example(question="What is 2+2?", answer="4").with_inputs("question"),
+            dspy.Example(question="What color is the sky?", answer="blue").with_inputs("question"),
+            dspy.Example(question="What is the capital of France?", answer="Paris").with_inputs("question"),
+        ]
+
+        def two_arg_metric(example, prediction):
+            expected = example.answer.lower()
+            actual = prediction.answer.lower() if hasattr(prediction, "answer") else ""
+            return expected == actual
+
+        for optimizer_cls in (GEPAMute, GEPAAdaptive):
+            dummy_lm = DummyLM([
+                {"answer": "4"},
+                {"answer": "blue"},
+                {"answer": "Paris"},
+                {"answer": "4"},
+                {"answer": "blue"},
+                {"answer": "Paris"},
+            ])
+
+            with dspy.context(lm=dummy_lm):
+                optimizer = optimizer_cls(two_arg_metric, max_calls=5, patience=1, minibatch_size=1)
+                compiled_module = optimizer.compile(SimpleQA(), trainset=trainset)
+
+                assert compiled_module._compiled is True
+                assert isinstance(optimizer.get_last_result(), Success)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from .reflection_strategy import ReflectionStrategy, GEPAReflection
 from .evolvable_module import EvolvableModule
 from .prompt_mutator import ReflectivePromptMutator
 from .dspy_utils import get_predictors
+from .config import ReflectiveMutationConfig, ModuleSelectionStrategy
 from ..data.candidate import Candidate
 from ..data.cohort import Parents, NewBorns
 
@@ -22,12 +23,24 @@ class ReflectivePromptMutation(Generator):
     """
 
     def __init__(self,
-                 feedback_provider,
+                 feedback_provider=None,
                  feedback_data: List[dspy.Example] = None,
                  reflection_strategy: Optional[ReflectionStrategy] = None,
                  reflection_lm: Optional[Any] = None,
-                 module_selection: str = "round_robin"):
+                 module_selection: str = "round_robin",
+                 max_retries: int = 1,
+                 config: Optional[ReflectiveMutationConfig] = None,
+                 assessor=None):
         super().__init__()
+        if feedback_provider is None and assessor is not None:
+            from .feedback import FeedbackProvider
+            feedback_provider = FeedbackProvider(assessor=assessor)
+        if config is not None:
+            feedback_provider = config.feedback_provider or feedback_provider
+            reflection_strategy = config.reflection_strategy or reflection_strategy
+            module_selection = config.module_selection_strategy.value
+            max_retries = config.max_retries
+
         if feedback_provider is None:
             raise ValueError("ReflectivePromptMutation requires a FeedbackProvider")
 
@@ -36,11 +49,20 @@ class ReflectivePromptMutation(Generator):
         self.reflection_strategy = reflection_strategy or GEPAReflection()
         self.reflection_lm = reflection_lm
         self.module_selection = module_selection
+        self.max_retries = max(1, max_retries)
 
         self.next_module_idx = 0
 
-    def start_compilation(self, student: dspy.Module, verbose: bool=False) -> None:
+    def start_compilation(
+        self,
+        student: dspy.Module,
+        *,
+        feedback_data: Optional[List[dspy.Example]] = None,
+        verbose: bool = False,
+    ) -> None:
         """Set verbose mode for the generator."""
+        if feedback_data is not None:
+            self.feedback_data = feedback_data
         self.next_module_idx = 0
         self.verbose = verbose
 
@@ -66,37 +88,43 @@ class ReflectivePromptMutation(Generator):
                     budget.spend_on_generation(None, {"type": "no_predictors"})
                 return NewBorns()
 
-            module_idx = self._select_target_module(len(predictors))
-
             minibatch = self._get_feedback_minibatch()
             if not minibatch:
                 if budget:
                     budget.spend_on_generation(None, {"type": "no_minibatch"})
                 return NewBorns()
 
-            evolvable = self._ensure_evolvable(parent.module)
-            feedback = evolvable.collect_traces_and_evaluate(
-                minibatch, self.feedback_provider, module_idx
-            )
+            last_error = None
+            for _ in range(self.max_retries):
+                try:
+                    module_idx = self._select_target_module(len(predictors), parent=parent)
+                    evolvable = self._ensure_evolvable(parent.module)
+                    feedback = evolvable.collect_traces_and_evaluate(
+                        minibatch, self.feedback_provider, module_idx
+                    )
 
-            # Evolve using a PromptMutator strategy
-            mutator = ReflectivePromptMutator(self.reflection_strategy, self.reflection_lm)
-            child_module = mutator.mutate(evolvable, feedback, module_idx, verbose=getattr(self, 'verbose', False))
+                    # Evolve using a PromptMutator strategy
+                    mutator = ReflectivePromptMutator(self.reflection_strategy, self.reflection_lm)
+                    child_module = mutator.mutate(evolvable, feedback, module_idx, verbose=getattr(self, 'verbose', False))
 
-            child_candidate = Candidate(
-                module=child_module,
-                generation_number=parent.generation_number + 1,
-                parents=[parent],
-            )
+                    child_candidate = Candidate(
+                        module=child_module,
+                        generation_number=parent.generation_number + 1,
+                        parents=[parent],
+                    )
 
-            # Spend budget for the generation (reflection + mutations)
-            if budget:
-                budget.spend_on_generation(child_module, {
-                    "type": "reflective_mutation",
-                    "module_idx": module_idx
-                })
+                    # Spend budget for the generation (reflection + mutations)
+                    if budget:
+                        budget.spend_on_generation(child_module, {
+                            "type": "reflective_mutation",
+                            "module_idx": module_idx
+                        })
 
-            return NewBorns(child_candidate, iteration=parents.iteration)
+                    return NewBorns(child_candidate, iteration=parents.iteration)
+                except Exception as e:
+                    last_error = e
+
+            raise last_error
 
         except Exception as e:
             self.publish('mutation_failure', None, {'reason': f'Reflective prompt mutation failed: {e}'})
@@ -104,16 +132,39 @@ class ReflectivePromptMutation(Generator):
                 budget.spend_on_generation(None, {"type": "failed_mutation", "error": str(e)})
             return NewBorns()
 
-    def _select_target_module(self, num_modules: int) -> int:
+    def _select_target_module(self, num_modules: int, parent: Optional[Candidate] = None) -> int:
         """Select module to mutate."""
-        if self.module_selection == "round_robin":
+        if self.module_selection == ModuleSelectionStrategy.ROUND_ROBIN.value:
             module_idx = self.next_module_idx % num_modules
             self.next_module_idx = (self.next_module_idx + 1)
             return module_idx
-        elif self.module_selection == "random":
+        elif self.module_selection == ModuleSelectionStrategy.RANDOM.value:
             return random.randint(0, num_modules - 1)
+        elif self.module_selection == ModuleSelectionStrategy.ALL.value:
+            module_idx = self.next_module_idx % num_modules
+            self.next_module_idx = (self.next_module_idx + 1)
+            return module_idx
+        elif self.module_selection == ModuleSelectionStrategy.WORST_PERFORMING.value:
+            return self._select_worst_performing_module(parent, num_modules)
         else:
             raise ValueError(f"Unknown module selection strategy: {self.module_selection}")
+
+    def _select_worst_performing_module(self, parent: Candidate, num_modules: int) -> int:
+        if parent is None or not parent.scores:
+            module_idx = self.next_module_idx % num_modules
+            self.next_module_idx = (self.next_module_idx + 1)
+            return module_idx
+
+        module_errors = [0.0] * num_modules
+        for score in parent.scores:
+            trace = getattr(score, "trace", None) or {}
+            module_idx = trace.get("module_idx")
+            if isinstance(module_idx, int) and 0 <= module_idx < num_modules:
+                module_errors[module_idx] += 1.0 - float(score.value)
+
+        if sum(module_errors) == 0:
+            return self.next_module_idx % num_modules
+        return max(range(num_modules), key=lambda idx: module_errors[idx])
 
 
     def _get_feedback_minibatch(self) -> Dict[int, dspy.Example]:

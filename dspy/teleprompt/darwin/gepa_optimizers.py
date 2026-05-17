@@ -4,18 +4,49 @@ These are convenience classes that configure Darwin with specific GEPA strategie
 as described in the GEPA paper.
 """
 
-from typing import Optional, Callable, Any, List
-from dspy import Example
+import inspect
+from typing import Optional, Callable, Any
 from .optimizer import Darwin
-from .budget import LMCallsBudget
-from .selection.pareto import ParetoFrontier
 from .generation.mutation import ReflectivePromptMutation
 from .generation.adaptive_generator import GEPAAdaptiveGenerator
-from .generation.feedback import FeedbackProvider
-from .evaluation.gepa_evaluator import FullTaskScores
-from .evaluation.metrics import F1Score
+from .generation.config import ReflectiveMutationConfig
+from .evaluation.metrics import Metric
 from .config import DarwinConfig
 from .strategy import GEPAStrategy
+
+
+def _as_assessor(metric: Callable[[Any, Any, Optional[Any]], float]):
+    """Adapt old-style metric callables to Darwin's assessor signature."""
+    if isinstance(metric, type) or hasattr(metric, "__call__"):
+        try:
+            signature = inspect.signature(metric)
+            parameter_count = len(
+                [
+                    p
+                    for p in signature.parameters.values()
+                    if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+                    and p.default is p.empty
+                ]
+            )
+        except (TypeError, ValueError):
+            parameter_count = 3
+
+        def assessor(example, prediction, trace=None):
+            if parameter_count <= 2:
+                result = metric(example, prediction)
+            else:
+                result = metric(example, prediction, trace)
+
+            if isinstance(result, Metric):
+                return result
+            if isinstance(result, tuple) and len(result) == 2:
+                value, feedback = result
+                return Metric(value, id=getattr(example, "dspy_uuid", ""), feedback=str(feedback), trace=trace)
+            return Metric(result, id=getattr(example, "dspy_uuid", ""), trace=trace)
+
+        return assessor
+
+    raise TypeError("metric must be callable")
 
 
 class GEPAMute(Darwin):
@@ -44,20 +75,18 @@ class GEPAMute(Darwin):
             verbose: Enable detailed logging
             **kwargs: Additional arguments passed to Darwin
         """
-        # Create config with GEPA settings
+        assessor = _as_assessor(metric)
         config = DarwinConfig(
             max_lm_calls=max_calls,
             minibatch_size=minibatch_size,
             patience=patience,
-            verbose=verbose
+            verbose=verbose,
+            mutation=ReflectivePromptMutation,
+            fitness_function=assessor,
+            enhanced_feedback=assessor,
+            mutation_config=ReflectiveMutationConfig(minibatch_size=minibatch_size),
         )
-        
-        # Create feedback provider
-        feedback_provider = FeedbackProvider(F1Score())
-        
-        # Override generation component with feedback provider
-        config.mutation = lambda: ReflectivePromptMutation(feedback_provider)
-        
+
         super().__init__(GEPAStrategy, config, **kwargs)
 
 
@@ -87,15 +116,16 @@ class GEPAAdaptive(Darwin):
             verbose: Enable detailed logging
             **kwargs: Additional arguments passed to Darwin
         """
-        # Create config with GEPA settings
+        assessor = _as_assessor(metric)
         config = DarwinConfig(
             max_lm_calls=max_calls,
             minibatch_size=minibatch_size,
             patience=patience,
-            verbose=verbose
+            verbose=verbose,
+            mutation=GEPAAdaptiveGenerator,
+            fitness_function=assessor,
+            enhanced_feedback=assessor,
+            mutation_config=ReflectiveMutationConfig(minibatch_size=minibatch_size),
         )
-        
-        # Override generation component with adaptive generator
-        config.mutation = GEPAAdaptiveGenerator
-        
+
         super().__init__(GEPAStrategy, config, **kwargs)

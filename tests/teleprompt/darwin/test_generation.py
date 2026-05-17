@@ -1,6 +1,8 @@
 """Test Darwin generation components (mutation, reflection, merging)."""
 
 import dspy
+from dspy.teleprompt.darwin import Bleu, Contains, ExactMatch, ReflectiveMutationConfig, RougeL
+from dspy.teleprompt.darwin.generation.config import ModuleSelectionStrategy
 from dspy.teleprompt.darwin.generation.mutation import ReflectivePromptMutation
 from dspy.teleprompt.darwin.generation.feedback import FeedbackProvider
 from dspy.teleprompt.darwin.generation.system_aware_merge import SystemAwareMerge
@@ -108,6 +110,25 @@ class TestGeneration:
         for _ in range(10):
             module_idx = generator._select_target_module(3)
             assert 0 <= module_idx < 3
+
+    def test_reflective_mutation_config_restores_advanced_selection(self):
+        """Test restored mutation config is accepted by the new generator path."""
+        feedback_provider = FeedbackProvider(assessor=simple_metric)
+        config = ReflectiveMutationConfig(
+            module_selection_strategy=ModuleSelectionStrategy.RANDOM,
+            max_retries=2,
+        )
+        generator = ReflectivePromptMutation(feedback_provider=feedback_provider, config=config)
+
+        assert generator.module_selection == "random"
+        assert generator.max_retries == 2
+
+    def test_richer_metric_exports(self):
+        """Test advanced Darwin assessors remain available from the public package."""
+        assert ExactMatch is not None
+        assert Contains is not None
+        assert RougeL is not None
+        assert Bleu is not None
 
     def test_system_aware_merge_initialization(self):
         """Test system aware merge initialization."""

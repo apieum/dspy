@@ -83,7 +83,7 @@ class GEPAStrategy(BaseStrategy[Result]):
             )
         else:
             return Failure(
-                message="Compilation failed, no candidate was found."
+                reason="Compilation failed, no candidate was found."
             )
 
     def _evaluate_step(self):

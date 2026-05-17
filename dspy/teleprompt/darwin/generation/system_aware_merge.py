@@ -23,16 +23,18 @@ class SystemAwareMerge(Generator):
     System-Aware Merge generator implementing Algorithm 4 from the GEPA paper.
     """
 
-    def __init__(self, assessor=None):
+    def __init__(self, feedback_provider=None, feedback_data=None, assessor=None, config=None):
         # Integrated merge history tracking (replaces MergeHistoryTracker)
         self.attempted_merges: Set[Tuple[int, int, int]] = set()
         self.merge_stats = {"success": 0, "failure_not_desirable": 0, "failure_ancestry": 0}
         self.verbose = False
-        self.assessor = assessor
+        self.feedback_provider = feedback_provider
+        self.assessor = assessor or getattr(feedback_provider, "assessor", None)
+        self.config = config
 
         # Initialize fallback mutation generator
         self.fallback_generator = None
-        self.devset = None
+        self.devset = feedback_data or []
 
     def generate(self, parents: Parents, budget=None) -> NewBorns:
         """Generate a new candidate using System-Aware Merge (Algorithm 4)."""
@@ -251,7 +253,13 @@ class SystemAwareMerge(Generator):
             logger.warning(f"Error creating merged candidate: {e}")
             return None
 
-    def start_compilation(self, student: dspy.Module, verbose: bool=False, feedback_data: List[dspy.Example] = None) -> None:
+    def start_compilation(
+        self,
+        student: dspy.Module,
+        *,
+        feedback_data: Optional[List[dspy.Example]] = None,
+        verbose: bool = False,
+    ) -> None:
         """Resets merge history for a new compilation run."""
         self.attempted_merges.clear()
         self.merge_stats = {"success": 0, "failure_not_desirable": 0, "failure_ancestry": 0}
@@ -259,14 +267,16 @@ class SystemAwareMerge(Generator):
         self.devset = feedback_data or []
 
         # Initialize fallback ReflectivePromptMutation generator
-        if self.assessor:
-            from .feedback import FeedbackProvider
-            feedback_provider = FeedbackProvider(assessor=self.assessor)
+        if self.feedback_provider or self.assessor:
+            if self.feedback_provider is None:
+                from .feedback import FeedbackProvider
+                self.feedback_provider = FeedbackProvider(assessor=self.assessor)
             self.fallback_generator = ReflectivePromptMutation(
-                feedback_provider=feedback_provider,
+                feedback_provider=self.feedback_provider,
                 feedback_data=self.devset,
+                config=self.config,
             )
-            self.fallback_generator.start_compilation(student, verbose=verbose)
+            self.fallback_generator.start_compilation(student, feedback_data=self.devset, verbose=verbose)
             logger.debug("Initialized ReflectivePromptMutation fallback with provided assessor")
         else:
             logger.warning("No assessor provided for SystemAwareMerge fallback - mutation will not be available")

@@ -6,6 +6,7 @@ from .system_aware_merge import SystemAwareMerge
 
 # DSPy-native implementation (reuses DSPy's built-in systems)
 from .feedback import FeedbackProvider
+from .config import ReflectiveMutationConfig, ModuleSelectionStrategy
 from .enhanced_metrics import (
     CodeEvaluationAssessor
 )
@@ -27,6 +28,8 @@ __all__ = [
     'ReflectivePromptMutation',
     'FeedbackProvider',
     'SystemAwareMerge',
+    'ReflectiveMutationConfig',
+    'ModuleSelectionStrategy',
 
     # Enhanced μf-compliant assessors
     'CodeEvaluationAssessor',

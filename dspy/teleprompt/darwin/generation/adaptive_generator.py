@@ -33,7 +33,12 @@ class GEPAAdaptiveGenerator(Generator):
     
     def __init__(self, 
                  mutation_generator: Optional[ReflectivePromptMutation] = None,
-                 merge_generator: Optional[SystemAwareMerge] = None):
+                 merge_generator: Optional[SystemAwareMerge] = None,
+                 feedback_provider=None,
+                 feedback_data=None,
+                 assessor=None,
+                 config=None,
+                 **kwargs):
         """Initialize adaptive generator with mutation and merge strategies.
         
         Args:
@@ -44,6 +49,10 @@ class GEPAAdaptiveGenerator(Generator):
         # Create default generators if not provided
         self.mutation_gen = mutation_generator
         self.merge_gen = merge_generator
+        self.feedback_provider = feedback_provider
+        self.feedback_data = feedback_data or []
+        self.assessor = assessor
+        self.config = config
         
         # Track strategy usage for analysis
         self.strategy_stats = {
@@ -57,26 +66,38 @@ class GEPAAdaptiveGenerator(Generator):
         self.split_strategy = None
         self.verbose = False
     
-    def start_compilation(self, student: dspy.Module, verbose: bool = False) -> None:
+    def start_compilation(
+        self,
+        student: dspy.Module,
+        *,
+        feedback_data=None,
+        verbose: bool = False,
+    ) -> None:
         """Initialize generators with compilation context."""
         self.verbose = verbose
+        if feedback_data is not None:
+            self.feedback_data = feedback_data
         
         # Initialize mutation generator if not provided
         if self.mutation_gen is None:
-            from .feedback import FeedbackProvider
-            # Need to create a metric-compatible feedback provider
-            # This will be set up by the calling code
-            self.publish('mutation_failure', None, {'reason': 'Mutation generator not provided - will be initialized by parent optimizer'})
+            if self.feedback_provider is not None:
+                self.mutation_gen = ReflectivePromptMutation(
+                    feedback_provider=self.feedback_provider,
+                    feedback_data=self.feedback_data,
+                    config=self.config,
+                )
+            else:
+                self.publish('mutation_failure', None, {'reason': 'Mutation generator not provided'})
         
         # Initialize merge generator if not provided  
         if self.merge_gen is None:
-            self.merge_gen = SystemAwareMerge()
+            self.merge_gen = SystemAwareMerge(assessor=self.assessor)
         
         # Initialize child generators (now all use standard interface)
         if self.mutation_gen:
-            self.mutation_gen.start_compilation(student, split_strategy=split_strategy, verbose=verbose)
+            self.mutation_gen.start_compilation(student, feedback_data=self.feedback_data, verbose=verbose)
         if self.merge_gen:
-            self.merge_gen.start_compilation(student, split_strategy=split_strategy, verbose=verbose)
+            self.merge_gen.start_compilation(student, verbose=verbose, feedback_data=self.feedback_data)
     
     def finish_compilation(self, result: dspy.Module) -> None:
         """Clean up generators."""
@@ -166,13 +187,13 @@ class GEPAAdaptiveGenerator(Generator):
         """Set the mutation generator (used by factory functions)."""
         self.mutation_gen = mutation_gen
         if self.split_strategy:
-            self.mutation_gen.start_compilation(None, self.split_strategy, self.verbose)
+            self.mutation_gen.start_compilation(None, feedback_data=self.feedback_data, verbose=self.verbose)
     
     def set_merge_generator(self, merge_gen: SystemAwareMerge) -> None:
         """Set the merge generator (used by factory functions).""" 
         self.merge_gen = merge_gen
         if self.split_strategy:
-            self.merge_gen.start_compilation(None, self.split_strategy, self.verbose)
+            self.merge_gen.start_compilation(None, feedback_data=self.feedback_data, verbose=self.verbose)
     
     def _publish_strategy_statistics(self) -> None:
         """Publish statistics about strategy usage via observer notifications."""
