@@ -97,9 +97,11 @@ class SystemAwareMerge(Generator):
                 # Find common ancestors
                 common_ancestors = parent1.find_common_ancestors(parent2)
 
-                # Iterate through common ancestors to find a valid merge
-                # Sort by generation number (most recent first) for better results
-                for ancestor in sorted(list(common_ancestors), key=lambda c: c.generation_number, reverse=True):
+                # GEPA samples among admissible common ancestors with a
+                # preference for stronger ancestors.  Ordering the candidates
+                # this way preserves fallback attempts while avoiding a fixed
+                # newest-ancestor bias.
+                for ancestor in self._ancestor_order(common_ancestors, parent1, parent2):
 
                     # Official GEPA only merges descendants that have both
                     # genuinely surpassed their common ancestor. Otherwise a
@@ -147,6 +149,25 @@ class SystemAwareMerge(Generator):
                 logger.warning(f"System-Aware Merge attempt failed: {e}")
 
         return NewBorns()  # No successful merge found
+
+    def _ancestor_order(
+        self, ancestors, parent1: Candidate, parent2: Candidate
+    ) -> List[Candidate]:
+        """Return admissible common ancestors in score-weighted order."""
+        eligible = [
+            ancestor
+            for ancestor in ancestors
+            if ancestor.total_score() <= min(parent1.total_score(), parent2.total_score())
+        ]
+        ordered = []
+        while eligible:
+            weights = [max(ancestor.total_score(), 0.0) for ancestor in eligible]
+            if not any(weights):
+                weights = [1.0] * len(eligible)
+            ancestor = self.rng.choices(eligible, weights=weights, k=1)[0]
+            ordered.append(ancestor)
+            eligible.remove(ancestor)
+        return ordered
 
     def _find_desirable_signatures(self, ancestor: Candidate, p1: Candidate, p2: Candidate) -> List[Tuple[int, any]]:
         """

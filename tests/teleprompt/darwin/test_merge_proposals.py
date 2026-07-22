@@ -99,3 +99,20 @@ def test_system_aware_merge_selects_balanced_validation_support():
     selected = generator._select_merge_minibatch(first, second)
 
     assert {example.question for example in selected} == {"q-0", "q-1", "q-2"}
+
+
+def test_system_aware_merge_orders_ancestors_by_aggregate_score():
+    generator = SystemAwareMerge()
+    parent1 = Candidate(dspy.Predict("question -> answer"))
+    parent2 = Candidate(dspy.Predict("question -> answer"))
+    weak = Candidate(dspy.Predict("question -> answer"), generation_number=1)
+    strong = Candidate(dspy.Predict("question -> answer"), generation_number=2)
+    weak.scores = [Metric(0.1, id="task")]
+    strong.scores = [Metric(0.8, id="task")]
+    parent1.scores = [Metric(1.0, id="task")]
+    parent2.scores = [Metric(1.0, id="task")]
+
+    ordered = generator._ancestor_order({weak, strong}, parent1, parent2)
+
+    assert set(ordered) == {weak, strong}
+    assert ordered[0] is strong
