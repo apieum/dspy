@@ -12,7 +12,7 @@ import dspy
 from dspy.teleprompt.utils import get_signature, set_signature
 from .generator import Generator
 from .mutation import ReflectivePromptMutation
-from ..data.candidate import Candidate
+from ..data.candidate import Candidate, example_id
 from ..data.cohort import Parents, NewBorns
 
 
@@ -40,6 +40,7 @@ class SystemAwareMerge(Generator):
         # Initialize fallback mutation generator
         self.fallback_generator = None
         self.devset = feedback_data or []
+        self.validation_data = []
         if val_overlap_floor <= 0:
             raise ValueError("val_overlap_floor must be positive")
         self.val_overlap_floor = val_overlap_floor
@@ -112,6 +113,14 @@ class SystemAwareMerge(Generator):
                 if child_candidate is None:
                     continue
 
+                # GEPA evaluates a crossover on a balanced sample containing
+                # examples where either parent wins (and ties when available).
+                # Carry that sample with the proposal so the evaluator does
+                # not silently replace it with the ordinary mutation batch.
+                child_candidate.proposal_minibatch = self._select_merge_minibatch(
+                    parent1, parent2
+                )
+
                 # Display merge evolution if verbose mode is enabled
                 if self.verbose:
                     self._display_merge_evolution(ancestor, parent1, parent2, child_candidate, desirable_signatures)
@@ -181,6 +190,13 @@ class SystemAwareMerge(Generator):
                     selected_signatures.append((i, sig_p2))
                     logger.debug(f"DESIRABLE: Module {i} - p2 innovated, using p2's signature")
 
+                # Both branches made the same innovation.  This is still a
+                # desirable merge: retain the shared change rather than
+                # rebuilding the ancestor and losing it.
+                elif π_p1 == π_p2 and π_p1 != π_a:
+                    selected_signatures.append((i, sig_p1))
+                    logger.debug(f"DESIRABLE: Module {i} - shared innovation, keeping parent signature")
+
                 # Condition 3: Both innovated differently, pick from the better-performing parent
                 elif π_a != π_p1 and π_a != π_p2 and π_p1 != π_p2:
                     best_parent = p1 if p1.average_score() > p2.average_score() else p2
@@ -193,6 +209,47 @@ class SystemAwareMerge(Generator):
             return []
 
         return selected_signatures
+
+    def _select_merge_minibatch(
+        self, parent1: Candidate, parent2: Candidate
+    ) -> List[dspy.Example]:
+        """Select a balanced validation sample for a merge proposal.
+
+        The sample is balanced across parent-1 wins, parent-2 wins and ties,
+        matching GEPA's crossover comparison.  Missing IDs are ignored; this
+        keeps direct generator use valid when candidates were constructed
+        without scores or a dataset manager.
+        """
+        if not self.validation_data or not parent1.scores or not parent2.scores:
+            return []
+
+        by_id = {}
+        for key, example in self.validation_data:
+            by_id[str(key)] = example
+            by_id[example_id(example)] = example
+
+        first = {str(score.id): float(score.value) for score in parent1.scores}
+        second = {str(score.id): float(score.value) for score in parent2.scores}
+        common = [score_id for score_id in first.keys() & second.keys() if score_id in by_id]
+        if not common:
+            return []
+
+        wins_first = [score_id for score_id in common if first[score_id] > second[score_id]]
+        wins_second = [score_id for score_id in common if second[score_id] > first[score_id]]
+        ties = [score_id for score_id in common if first[score_id] == second[score_id]]
+        self.rng.shuffle(wins_first)
+        self.rng.shuffle(wins_second)
+        self.rng.shuffle(ties)
+
+        size = getattr(self.config, "minibatch_size", 5) or 5
+        buckets = [wins_first, wins_second, ties]
+        selected = []
+        # Round-robin makes the balance explicit and fills small datasets.
+        while len(selected) < min(size, len(common)) and any(buckets):
+            for bucket in buckets:
+                if bucket and len(selected) < min(size, len(common)):
+                    selected.append(bucket.pop())
+        return [by_id[score_id] for score_id in selected]
 
     def _display_merge_evolution(self, ancestor: Candidate, parent1: Candidate, parent2: Candidate,
                                child: Candidate, merged_signatures: List[Tuple[int, any]]) -> None:
@@ -313,6 +370,14 @@ class SystemAwareMerge(Generator):
         }
         self.verbose = verbose
         self.devset = feedback_data or []
+        if dataset_manager is not None:
+            self.validation_data = list(
+                dataset_manager.get_validation_minibatch(dataset_manager.num_dev_examples).items()
+            )
+        else:
+            self.validation_data = [
+                (example_id(example), example) for example in self.devset
+            ]
 
         # Initialize fallback ReflectivePromptMutation generator
         if self.feedback_provider or self.assessor:

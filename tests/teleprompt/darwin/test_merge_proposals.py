@@ -68,3 +68,34 @@ def test_system_aware_merge_requires_shared_validation_support():
     )
 
     assert merged.is_empty()
+
+
+def test_system_aware_merge_preserves_shared_innovation():
+    ancestor = Candidate(dspy.Predict("question -> answer"), generation_number=0)
+    shared_module_1 = ancestor.module.deepcopy()
+    shared_module_2 = ancestor.module.deepcopy()
+    instruction(shared_module_1, "The same useful innovation.")
+    instruction(shared_module_2, "The same useful innovation.")
+    first = Candidate(shared_module_1, parents=[ancestor], generation_number=1)
+    second = Candidate(shared_module_2, parents=[ancestor], generation_number=1)
+
+    generator = SystemAwareMerge()
+    desirable = generator._find_desirable_signatures(ancestor, first, second)
+
+    assert len(desirable) == 1
+    assert desirable[0][1].instructions == "The same useful innovation."
+
+
+def test_system_aware_merge_selects_balanced_validation_support():
+    examples = [dspy.Example(question=f"q-{idx}", answer=f"a-{idx}") for idx in range(3)]
+    ancestor = Candidate(dspy.Predict("question -> answer"), generation_number=0)
+    first = Candidate(ancestor.module.deepcopy(), parents=[ancestor], generation_number=1)
+    second = Candidate(ancestor.module.deepcopy(), parents=[ancestor], generation_number=1)
+    first.scores = [Metric(1.0, id=str(id(examples[0]))), Metric(0.0, id=str(id(examples[1]))), Metric(0.5, id=str(id(examples[2])))]
+    second.scores = [Metric(0.0, id=str(id(examples[0]))), Metric(1.0, id=str(id(examples[1]))), Metric(0.5, id=str(id(examples[2])))]
+
+    generator = SystemAwareMerge(feedback_data=examples)
+    generator.validation_data = [(str(id(example)), example) for example in examples]
+    selected = generator._select_merge_minibatch(first, second)
+
+    assert {example.question for example in selected} == {"q-0", "q-1", "q-2"}

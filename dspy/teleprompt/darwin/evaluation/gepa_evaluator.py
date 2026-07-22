@@ -122,11 +122,22 @@ class ParentFastCompare(Evaluator):
                 sum(child_values) - sum(values)
                 for values in parent_scores
             ]
-            is_improved = all(
-                self.acceptance_criterion.should_accept(child_values, values)
-                for values in parent_scores
-            )
-            improvement = min(deltas, default=float("-inf"))
+            is_merge = child.creation_metadata.get("merge_type") == "system_aware"
+            if is_merge:
+                # GEPA crossover is allowed to preserve a parent's score. A
+                # merge is accepted when it reaches the better parent, while
+                # ordinary mutations retain the configured strict criterion.
+                parent_totals = [sum(values) for values in parent_scores]
+                child_total = sum(child_values)
+                best_parent_total = max(parent_totals, default=float("-inf"))
+                is_improved = child_total >= best_parent_total
+                improvement = child_total - best_parent_total
+            else:
+                is_improved = all(
+                    self.acceptance_criterion.should_accept(child_values, values)
+                    for values in parent_scores
+                )
+                improvement = min(deltas, default=float("-inf"))
             avg_child = sum(child_values) / len(child_values) if child_values else 0.0
             avg_parent = min(
                 (sum(values) / len(values) for values in parent_scores if values),

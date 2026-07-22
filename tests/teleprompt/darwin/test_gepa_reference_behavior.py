@@ -7,10 +7,12 @@ import dspy
 from dspy.teleprompt.darwin import (
     Candidate,
     ImprovementOrEqualAcceptance,
+    ParentFastCompare,
     Metric,
     ParetoFrontier,
     StrictImprovementAcceptance,
 )
+from dspy.teleprompt.darwin.budget import LMCallsBudget
 from dspy.teleprompt.darwin.data.cohort import Survivors
 
 
@@ -64,3 +66,27 @@ def test_pareto_parent_frontier_removes_globally_dominated_candidate():
 
     assert dominant in parents
     assert dominated not in parents
+
+
+def test_merge_accepts_tie_with_best_parent_but_mutation_does_not():
+    ancestor = Candidate(dspy.Predict("question -> answer"))
+    parent1 = Candidate(ancestor.module.deepcopy(), parents=[ancestor])
+    parent2 = Candidate(ancestor.module.deepcopy(), parents=[ancestor])
+    merged = Candidate(
+        ancestor.module.deepcopy(),
+        parents=[parent1, parent2, ancestor],
+        creation_metadata={"merge_type": "system_aware", "ancestor_candidate": ancestor},
+    )
+    example = dspy.Example(question="q", answer="a")
+    evaluator = ParentFastCompare(assessor=lambda *_: Metric(0.0), minibatch_data=[example])
+    values = {id(merged): 0.8, id(parent1): 0.8, id(parent2): 0.7}
+    evaluator._evaluate = lambda candidate, examples, persist_scores=False: [
+        Metric(values[id(candidate)], id="example")
+    ]
+
+    accepted, _, improvement = evaluator._validate_on_minibatch(
+        merged, LMCallsBudget(max_calls=10)
+    )
+
+    assert accepted
+    assert improvement == 0.0
