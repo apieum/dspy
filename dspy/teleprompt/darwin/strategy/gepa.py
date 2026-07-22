@@ -197,10 +197,10 @@ class GEPAStrategy(BaseStrategy[Result]):
         """Return a JSON-safe snapshot of the current optimization state."""
         candidates = []
         tracked = set()
-        for role, cohort in (
-            ("newborns", self.current_newborns),
-            ("survivors", self.current_survivors),
-            ("parents", self.current_parents),
+        for attribute, cohort in (
+            (name, value)
+            for name, value in self.__dict__.items()
+            if isinstance(value, Cohort)
         ):
             if cohort is None:
                 continue
@@ -210,7 +210,7 @@ class GEPAStrategy(BaseStrategy[Result]):
                 tracked.add(id(candidate))
                 candidates.append({
                     "id": id(candidate),
-                    "roles": [role],
+                    "cohort_attributes": [attribute],
                     "cohort_type": (
                         f"{type(cohort).__module__}:{type(cohort).__qualname__}"
                         if cohort is not None else None
@@ -241,7 +241,7 @@ class GEPAStrategy(BaseStrategy[Result]):
                 # all roles without duplicating its serialized record.
                 if any(item["id"] == id(candidate) for item in candidates[:-1]):
                     existing = next(item for item in candidates if item["id"] == id(candidate))
-                    existing.setdefault("roles", []).append(role)
+                    existing.setdefault("cohort_attributes", []).append(attribute)
                     candidates.pop()
         remaining = self.budget.get_remaining()
         return OptimizationCheckpoint(
@@ -317,12 +317,14 @@ class GEPAStrategy(BaseStrategy[Result]):
                     0, budget.generation_max_calls - int(remaining.get("generation_calls", budget.generation_calls))
                 )
 
-        def restore_cohort(role):
-            records_for_role = [
-                record for record in records if role in record.get("roles", [])
-            ]
+        cohorts = {}
+        for record in records:
+            for attribute in record.get("cohort_attributes", []):
+                cohorts.setdefault(attribute, []).append(record)
+
+        def restore_cohort(attribute, records_for_cohort):
             cohort_type = next(
-                (record.get("cohort_type") for record in records_for_role
+                (record.get("cohort_type") for record in records_for_cohort
                  if record.get("cohort_type")),
                 "dspy.teleprompt.darwin.data.cohort:Cohort",
             )
@@ -332,23 +334,35 @@ class GEPAStrategy(BaseStrategy[Result]):
                 cohort_cls = getattr(cohort_cls, part)
             candidates_for_role = [
                 restored[record.get("id")]
-                for record in records_for_role
+                for record in records_for_cohort
             ]
             return cohort_cls(*candidates_for_role, iteration=self.current_generation)
 
-        # Restored state is a generic cohort snapshot. The strategy state
-        # machine receives the serialized concrete type, so custom algorithms
-        # retain their own cohort semantics after resume.
-        self.current_newborns = restore_cohort("newborns")
-        self.current_survivors = restore_cohort("survivors")
-        self.current_parents = restore_cohort("parents")
+        # Restore every serialized cohort attribute without knowing which
+        # algorithm owns it or what its state-machine vocabulary is.
+        for attribute, records_for_cohort in cohorts.items():
+            setattr(self, attribute, restore_cohort(attribute, records_for_cohort))
 
         # Rebuild the selector's per-task Pareto state from restored scores.
         self._selector = self.config.selection()
         configure = getattr(self._selector, "configure", None)
         if callable(configure):
             configure(self.config)
-        self._selector.update_scores_batch(Survivors(*restored.values(), iteration=self.current_generation))
+        selector_cohort = next(iter(cohorts.values()), None)
+        if selector_cohort:
+            selector_type = next(
+                record.get("cohort_type") for record in selector_cohort
+                if record.get("cohort_type")
+            )
+            module_name, qualname = selector_type.split(":", 1)
+            selector_cohort_cls = importlib.import_module(module_name)
+            for part in qualname.split("."):
+                selector_cohort_cls = getattr(selector_cohort_cls, part)
+        else:
+            selector_cohort_cls = Cohort
+        self._selector.update_scores_batch(
+            selector_cohort_cls(*restored.values(), iteration=self.current_generation)
+        )
         self.best_candidate = max(
             restored.values(), key=lambda candidate: candidate.average_score(), default=None
         )

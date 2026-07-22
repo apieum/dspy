@@ -25,6 +25,7 @@ def test_checkpoint_manifest_is_written_and_json_safe(tmp_path):
     assert "calls" in checkpoint.budget
     assert checkpoint.candidates
     assert "instructions" in checkpoint.candidates[0]
+    assert "cohort_attributes" in checkpoint.candidates[0]
     assert checkpoint.rng_state is not None
     assert "scores" in checkpoint.candidates[0]
 
