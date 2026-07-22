@@ -1,6 +1,7 @@
 """Tests for Darwin's centralized dataset management."""
 
 import dspy
+from dspy.teleprompt.darwin import GEPAConfig
 
 from dspy.teleprompt.darwin.dataset_manager import (
     DefaultDatasetManager,
@@ -67,11 +68,15 @@ def test_components_receive_the_dataset_manager():
     assessor = lambda example, prediction, trace=None: 0.5
 
     generator = ReflectivePromptMutation(
+        config=GEPAConfig(),
         feedback_provider=FeedbackProvider(assessor=assessor)
     )
     generator.start_compilation(student, manager)
 
-    evaluator = GEPATwoPhasesEval(assessor=assessor)
+    evaluator = GEPATwoPhasesEval(
+        config=GEPAConfig(fitness_function=assessor),
+        assessor=assessor,
+    )
     evaluator.start_compilation(student, manager)
 
     assert generator.dataset_manager is manager
@@ -81,11 +86,11 @@ def test_components_receive_the_dataset_manager():
 
 def test_strategy_exposes_full_training_pool_for_reflection_sampling():
     """GEPA must sample fresh reflection batches from all training examples."""
-    from dspy.teleprompt.darwin import DarwinConfig, GEPAStrategy
+    from dspy.teleprompt.darwin import GEPAConfig, GEPAStrategy
 
     student = dspy.Predict("question -> answer")
     examples = _examples(8)
-    strategy = GEPAStrategy(DarwinConfig(minibatch_size=2, max_lm_calls=1))
+    strategy = GEPAStrategy(GEPAConfig(minibatch_size=2, max_lm_calls=1))
     strategy.start_compilation(student, trainset=examples, devset=_examples(2))
 
     generator = strategy.generator
@@ -96,7 +101,7 @@ def test_strategy_exposes_full_training_pool_for_reflection_sampling():
 
 def test_strategy_accepts_preconfigured_factory_instance():
     """A factory instance should not be called as if it were a class."""
-    from dspy.teleprompt.darwin import Darwin, DarwinConfig, GEPAStrategy
+    from dspy.teleprompt.darwin import Darwin, GEPAConfig, GEPAStrategy
     from dspy.utils.dummies import DummyLM
 
     student = dspy.Predict("question -> answer")
@@ -105,6 +110,6 @@ def test_strategy_accepts_preconfigured_factory_instance():
     with dspy.context(lm=DummyLM([{"answer": "4"}])):
         optimizer = Darwin(
             GEPAStrategy,
-            DarwinConfig(max_lm_calls=1, dataset_manager_factory=factory),
+            GEPAConfig(max_lm_calls=1, dataset_manager_factory=factory),
         )
         optimizer.compile(student, trainset=_examples(4))

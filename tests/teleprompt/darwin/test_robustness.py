@@ -3,7 +3,7 @@
 import dspy
 import pytest
 from dspy.teleprompt.darwin import (
-    Darwin, DarwinConfig, GEPAStrategy,
+    Darwin, GEPAConfig, GEPAStrategy,
     LMCallsBudget, ParetoFrontier, ReflectivePromptMutation,
     FeedbackProvider, GEPATwoPhasesEval, ChannelContext, Success, Failure
 )
@@ -48,7 +48,7 @@ def error_prone_metric(example, prediction, trace=None):
 
 def create_robust_optimizer(metric, max_calls, patience=2):
     """Helper to create Darwin optimizer for robustness testing."""
-    config = DarwinConfig(
+    config = GEPAConfig(
         max_lm_calls=max_calls,
         patience=patience,
         fitness_function=metric,

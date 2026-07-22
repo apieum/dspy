@@ -2,7 +2,7 @@ import json
 
 import dspy
 
-from dspy.teleprompt.darwin import Darwin, DarwinConfig, GEPAStrategy, OptimizationCheckpoint
+from dspy.teleprompt.darwin import Darwin, GEPAConfig, GEPAStrategy, OptimizationCheckpoint
 from dspy.utils.dummies import DummyLM
 
 
@@ -14,7 +14,7 @@ def test_checkpoint_manifest_is_written_and_json_safe(tmp_path):
     with dspy.context(lm=DummyLM([{"answer": "a"}])):
         Darwin(
             GEPAStrategy,
-            DarwinConfig(max_lm_calls=1, checkpoint_path=str(checkpoint_path)),
+            GEPAConfig(max_lm_calls=1, checkpoint_path=str(checkpoint_path)),
         ).compile(student, trainset=data)
 
     payload = json.loads(checkpoint_path.read_text())
@@ -37,12 +37,12 @@ def test_completed_checkpoint_can_be_resumed(tmp_path):
     with dspy.context(lm=DummyLM([{"answer": "a"}])):
         Darwin(
             GEPAStrategy,
-            DarwinConfig(max_lm_calls=1, checkpoint_path=str(checkpoint_path)),
+            GEPAConfig(max_lm_calls=1, checkpoint_path=str(checkpoint_path)),
         ).compile(dspy.Predict("question -> answer"), trainset=data)
 
     resumed = Darwin(
         GEPAStrategy,
-        DarwinConfig(max_lm_calls=1, resume_from=str(checkpoint_path)),
+        GEPAConfig(max_lm_calls=1, resume_from=str(checkpoint_path)),
     )
     compiled = resumed.compile(dspy.Predict("question -> answer"), trainset=data)
 
@@ -59,7 +59,7 @@ def test_proposal_trace_is_opt_in_and_compact(tmp_path):
     with dspy.context(lm=DummyLM([{"answer": "a"}])):
         Darwin(
             GEPAStrategy,
-            DarwinConfig(
+            GEPAConfig(
                 max_lm_calls=1,
                 proposal_trace_path=str(trace_path),
             ),
@@ -75,7 +75,7 @@ def test_proposal_trace_is_opt_in_and_compact(tmp_path):
 def test_signal_handler_writes_interrupted_checkpoint(tmp_path):
     checkpoint_path = tmp_path / "signal-checkpoint.json"
     strategy = GEPAStrategy(
-        DarwinConfig(max_lm_calls=1, checkpoint_path=str(checkpoint_path))
+        GEPAConfig(max_lm_calls=1, checkpoint_path=str(checkpoint_path))
     )
     strategy._handle_signal(2, None)
 

@@ -3,7 +3,7 @@
 import time
 import dspy
 from dspy.teleprompt.darwin import (
-    Darwin, DarwinConfig, GEPAStrategy,
+    Darwin, GEPAConfig, GEPAStrategy,
     LMCallsBudget, ParetoFrontier, ReflectivePromptMutation,
     FeedbackProvider, GEPATwoPhasesEval, ChannelContext, Success
 )
@@ -26,7 +26,7 @@ def fast_metric(example, prediction, trace=None):
 
 def create_test_config(max_calls, patience=2):
     """Helper to create test configuration."""
-    return DarwinConfig(
+    return GEPAConfig(
         max_lm_calls=max_calls,
         patience=patience,
         minibatch_size=3,

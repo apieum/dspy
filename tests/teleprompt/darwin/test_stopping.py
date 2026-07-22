@@ -2,7 +2,7 @@ import dspy
 
 from dspy.teleprompt.darwin import (
     AnyStopper,
-    DarwinConfig,
+    GEPAConfig,
     FileStopper,
     ScoreThresholdStopper,
 )
@@ -12,7 +12,7 @@ from dspy.teleprompt.darwin.strategy.gepa import GEPAStrategy
 
 
 def test_score_threshold_stopper_uses_best_candidate():
-    strategy = GEPAStrategy(DarwinConfig(
+    strategy = GEPAStrategy(GEPAConfig(
         max_lm_calls=1,
         stoppers=(ScoreThresholdStopper(1.0),),
     ))
@@ -24,7 +24,7 @@ def test_score_threshold_stopper_uses_best_candidate():
 
 
 def test_file_and_composite_stoppers(tmp_path):
-    strategy = GEPAStrategy(DarwinConfig(max_lm_calls=1))
+    strategy = GEPAStrategy(GEPAConfig(max_lm_calls=1))
     control_file = tmp_path / "stop"
     stopper = AnyStopper(FileStopper(control_file))
     assert not stopper(strategy)

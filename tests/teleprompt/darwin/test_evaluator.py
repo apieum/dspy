@@ -8,6 +8,7 @@ from dspy.teleprompt.darwin.data.candidate import Candidate
 from dspy.teleprompt.darwin.data.cohort import NewBorns
 from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
 from dspy.teleprompt.darwin.data.split_strategy import DefaultSplitStrategy
+from dspy.teleprompt.darwin import GEPAConfig
 
 
 def simple_metric(example: dspy.Example, prediction, trace=None) -> Metric:
@@ -49,6 +50,7 @@ class TestEvaluator:
         validation_data = [dspy.Example(input="test", answer="correct").with_inputs("input")]
         minibatch_data = [dspy.Example(input="mini", answer="correct").with_inputs("input")]
         evaluator = GEPATwoPhasesEval(
+            config=GEPAConfig(fitness_function=simple_metric),
             assessor=simple_metric, 
             minibatch_data=minibatch_data,
             validation_data=validation_data
@@ -67,6 +69,7 @@ class TestEvaluator:
         ]
         minibatch_data = training_data[:1]  # Use subset for minibatch
         evaluator = GEPATwoPhasesEval(
+            config=GEPAConfig(fitness_function=simple_metric),
             assessor=simple_metric, 
             minibatch_data=minibatch_data,
             validation_data=training_data
@@ -86,6 +89,7 @@ class TestEvaluator:
         ]
         minibatch_data = training_data[:1]  # Use subset for minibatch
         evaluator = GEPATwoPhasesEval(
+            config=GEPAConfig(fitness_function=simple_metric),
             assessor=simple_metric, 
             minibatch_data=minibatch_data,
             validation_data=training_data
@@ -112,6 +116,7 @@ class TestEvaluator:
         """Test that evaluation tracks budget correctly."""
         training_data = [dspy.Example(input="test", answer="correct").with_inputs("input")]
         evaluator = GEPATwoPhasesEval(
+            config=GEPAConfig(fitness_function=simple_metric),
             assessor=simple_metric, 
             minibatch_data=training_data, 
             validation_data=training_data
@@ -140,6 +145,7 @@ class TestEvaluator:
                     for _, batch in jobs]
 
         evaluator = GEPATwoPhasesEval(
+            config=GEPAConfig(fitness_function=simple_metric, batch_evaluator=batch_evaluator),
             assessor=simple_metric,
             minibatch_data=examples,
             validation_data=examples,

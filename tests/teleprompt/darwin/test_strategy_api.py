@@ -11,7 +11,7 @@ from dspy.teleprompt.darwin import (
     Channel,
     Cohort,
     Darwin,
-    DarwinConfig,
+    GEPAConfig,
     Evaluator,
     Failure,
     FeedbackProvider,
@@ -72,7 +72,7 @@ def dummy_lm():
 def test_refactored_darwin_returns_compiled_program(simple_trainset, dummy_lm):
     with dspy.context(lm=dummy_lm):
         student = SimpleQA()
-        optimizer = Darwin(GEPAStrategy, DarwinConfig(max_lm_calls=2, minibatch_size=2))
+        optimizer = Darwin(GEPAStrategy, GEPAConfig(max_lm_calls=2, minibatch_size=2))
         compiled_module = optimizer.compile(student, trainset=simple_trainset[:1], devset=simple_trainset[1:])
         result = optimizer.get_last_result()
 
@@ -83,7 +83,7 @@ def test_refactored_darwin_returns_compiled_program(simple_trainset, dummy_lm):
 
 
 def test_refactored_darwin_exposes_strategy_components():
-    optimizer = Darwin(GEPAStrategy, DarwinConfig(max_lm_calls=2))
+    optimizer = Darwin(GEPAStrategy, GEPAConfig(max_lm_calls=2))
     assert isinstance(optimizer, Darwin)
     assert hasattr(optimizer.strategy, "budget")
     assert hasattr(optimizer.strategy, "selector")
@@ -94,18 +94,46 @@ def test_refactored_darwin_exposes_strategy_components():
 def test_gepa_mute_is_budget_driven_by_default():
     optimizer = GEPAMute(metric=simple_metric, max_calls=8)
     assert optimizer.config.patience is None
+    assert optimizer.config.use_merge is True
+
+    mutation_only = Darwin(GEPAStrategy, GEPAConfig(use_merge=False))
+    assert mutation_only.config.use_merge is False
 
 
 def test_darwin_config_is_budget_driven_by_default():
-    assert DarwinConfig().patience is None
-    assert DarwinConfig().use_merge is True
+    assert GEPAConfig().patience is None
+    assert GEPAConfig().use_merge is True
     with pytest.raises(ValueError):
-        DarwinConfig(patience=-1)
+        GEPAConfig(patience=-1)
+
+
+def test_strategy_injects_the_same_config_into_components():
+    config = GEPAConfig(
+        max_lm_calls=7,
+        use_merge=False,
+        frontier_type="hybrid",
+        reflection_lm="configured-reflection-lm",
+        reuse_parent_rollouts=False,
+        perfect_score=0.9,
+        skip_perfect_score=False,
+    )
+    strategy = GEPAStrategy(config)
+
+    assert strategy.budget.config is config
+    assert strategy.selector.frontier_type == "hybrid"
+    assert strategy.generator.config is config
+    assert strategy.generator.reflection_lm == "configured-reflection-lm"
+    assert strategy.generator.reuse_parent_rollouts is False
+    assert strategy.generator.perfect_score == 0.9
+    assert strategy.generator.skip_perfect_score is False
+    assert strategy.crossover_generator.config is config
+    assert strategy.crossover_generator.val_overlap_floor == config.merge_val_overlap_floor
+    assert strategy.crossover_generator.max_attempts == config.merge_pair_attempts
 
 
 def test_strategy_minibatch_sampling_uses_seeded_rng():
-    first = GEPAStrategy(DarwinConfig(seed=17))
-    second = GEPAStrategy(DarwinConfig(seed=17))
+    first = GEPAStrategy(GEPAConfig(seed=17))
+    second = GEPAStrategy(GEPAConfig(seed=17))
     data = list(range(10))
 
     assert first._create_minibatch(data, 4) == second._create_minibatch(data, 4)
@@ -115,7 +143,7 @@ def test_darwin_algorithm_phases(simple_trainset, dummy_lm):
     """The Darwin strategy should execute its optimization phases."""
     with dspy.context(lm=dummy_lm):
         student = SimpleQA()
-        optimizer = Darwin(GEPAStrategy, DarwinConfig(max_lm_calls=2, minibatch_size=2))
+        optimizer = Darwin(GEPAStrategy, GEPAConfig(max_lm_calls=2, minibatch_size=2))
         compiled_module = optimizer.compile(
             student,
             trainset=simple_trainset[:1],
@@ -133,7 +161,7 @@ def test_darwin_factory_configuration_creates_optimizer():
     """A Darwin configuration should construct a usable strategy instance."""
     optimizer = Darwin(
         GEPAStrategy,
-        DarwinConfig(max_lm_calls=2, patience=3, minibatch_size=2),
+        GEPAConfig(max_lm_calls=2, patience=3, minibatch_size=2),
     )
 
     assert isinstance(optimizer, Darwin)
@@ -147,7 +175,7 @@ def test_darwin_factory_configuration_creates_optimizer():
 def test_optimizer_can_be_reused_without_stale_compilation_state(simple_trainset, dummy_lm):
     reusable_lm = DummyLM([{"answer": "4"}] * 100)
     with dspy.context(lm=reusable_lm):
-        optimizer = Darwin(GEPAStrategy, DarwinConfig(max_lm_calls=2, max_iterations=1))
+        optimizer = Darwin(GEPAStrategy, GEPAConfig(max_lm_calls=2, max_iterations=1))
         first = optimizer.compile(SimpleQA(), trainset=simple_trainset[:1], devset=simple_trainset[1:])
         second = optimizer.compile(SimpleQA(), trainset=simple_trainset[:1], devset=simple_trainset[1:])
 
@@ -158,7 +186,7 @@ def test_optimizer_can_be_reused_without_stale_compilation_state(simple_trainset
 
 def test_gepa_result_uses_selector_final_candidate():
     """The final result should use accumulated Pareto state when available."""
-    strategy = GEPAStrategy(DarwinConfig(max_lm_calls=1))
+    strategy = GEPAStrategy(GEPAConfig(max_lm_calls=1))
     strategy.student = SimpleQA()
     generation_candidate = Candidate(strategy.student.deepcopy())
     selector_candidate = Candidate(strategy.student.deepcopy())
@@ -176,7 +204,7 @@ def test_gepa_result_uses_selector_final_candidate():
 
 
 def test_gepa_result_retains_pareto_candidates_and_lineage():
-    strategy = GEPAStrategy(DarwinConfig(max_lm_calls=1))
+    strategy = GEPAStrategy(GEPAConfig(max_lm_calls=1))
     strategy.student = SimpleQA()
     parent = Candidate(strategy.student.deepcopy())
     child = Candidate(strategy.student.deepcopy(), parents=[parent], generation_number=1)

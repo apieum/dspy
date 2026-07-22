@@ -12,7 +12,7 @@ from .generation.mutation import ReflectivePromptMutation
 from .generation.adaptive_generator import GEPAAdaptiveGenerator
 from .generation.config import ReflectiveMutationConfig
 from .evaluation.metrics import Metric
-from .config import DarwinConfig
+from .config import GEPAConfig
 from .strategy import GEPAStrategy
 
 
@@ -67,10 +67,10 @@ def _as_assessor(metric: Callable[[Any, Any, Optional[Any]], float]):
 
 
 class GEPAMute(Darwin):
-    """GEPA implementation with mutation-only generation strategy.
+    """GEPA implementation with reflective mutation generation.
     
-    This implements the standard GEPA algorithm using only reflective prompt
-    mutation for candidate generation, without opportunistic merging.
+    Reflective mutation is the primary generation strategy. Opportunistic
+    merging follows ``use_merge`` and is enabled by default for GEPA parity.
     """
     
     def __init__(
@@ -96,13 +96,12 @@ class GEPAMute(Darwin):
             **kwargs: Additional arguments passed to Darwin
         """
         assessor = _as_assessor(metric)
-        config = DarwinConfig(
+        config = GEPAConfig(
             max_lm_calls=max_calls,
             minibatch_size=minibatch_size,
             patience=patience,
             verbose=verbose,
             seed=seed,
-            use_merge=False,
             mutation=ReflectivePromptMutation,
             fitness_function=assessor,
             enhanced_feedback=assessor,
@@ -143,14 +142,11 @@ class GEPAAdaptive(Darwin):
             **kwargs: Additional arguments passed to Darwin
         """
         assessor = _as_assessor(metric)
-        config = DarwinConfig(
+        config = GEPAConfig(
             max_lm_calls=max_calls,
             minibatch_size=minibatch_size,
             patience=patience,
             verbose=verbose,
-            # GEPAAdaptiveGenerator owns its opportunistic merge decision.
-            # Do not schedule a second strategy-level merge opportunity.
-            use_merge=False,
             mutation=GEPAAdaptiveGenerator,
             fitness_function=assessor,
             enhanced_feedback=assessor,

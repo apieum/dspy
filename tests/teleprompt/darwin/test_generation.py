@@ -13,7 +13,7 @@ from dspy.teleprompt.darwin.data.cohort import Parents
 from dspy.teleprompt.darwin.data.candidate import Candidate
 from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
 from dspy.teleprompt.darwin.data.split_strategy import DefaultSplitStrategy
-from dspy.teleprompt.darwin.config import DarwinConfig
+from dspy.teleprompt.darwin.config import GEPAConfig
 from dspy.teleprompt.darwin.strategy.gepa import GEPAStrategy
 from unittest.mock import Mock, patch
 
@@ -48,6 +48,7 @@ class TestGeneration:
         feedback_provider = FeedbackProvider(assessor=simple_metric)
         feedback_data = [dspy.Example(question="q1", answer="a1").with_inputs("question")]
         generator = ReflectivePromptMutation(
+            config=GEPAConfig(),
             feedback_provider=feedback_provider,
             feedback_data=feedback_data
         )
@@ -89,6 +90,7 @@ class TestGeneration:
             dspy.Example(question="q2", answer="a2").with_inputs("question"),
         ]
         generator = ReflectivePromptMutation(
+            config=GEPAConfig(),
             feedback_provider=feedback_provider,
             feedback_data=training_data
         )
@@ -102,6 +104,7 @@ class TestGeneration:
         """Test mutation handles empty cases."""
         feedback_provider = FeedbackProvider(assessor=simple_metric)
         generator = ReflectivePromptMutation(
+            config=GEPAConfig(),
             feedback_provider=feedback_provider,
             feedback_data=[]  # Empty feedback data
         )
@@ -118,6 +121,7 @@ class TestGeneration:
         feedback_provider = FeedbackProvider(assessor=simple_metric)
         feedback_data = [dspy.Example(question="q1", answer="a1").with_inputs("question")]
         generator = ReflectivePromptMutation(
+            config=GEPAConfig(),
             feedback_provider=feedback_provider,
             feedback_data=feedback_data
         )
@@ -143,7 +147,7 @@ class TestGeneration:
     def test_round_robin_module_selection(self):
         """Test that the round robin module selection strategy works correctly."""
         feedback_provider = FeedbackProvider(assessor=simple_metric)
-        generator = ReflectivePromptMutation(feedback_provider=feedback_provider)
+        generator = ReflectivePromptMutation(config=GEPAConfig(), feedback_provider=feedback_provider)
         
         assert generator._select_target_module(3) == 0
         assert generator._select_target_module(3) == 1
@@ -164,8 +168,8 @@ class TestGeneration:
             task_wins={weaker: 10, stronger: 1},
         )
         generator = ReflectivePromptMutation(
+            config=GEPAConfig(candidate_selection_strategy="current_best"),
             feedback_provider=provider,
-            candidate_selection_strategy="current_best",
         )
 
         assert generator._select_parent(parents) is stronger
@@ -182,8 +186,8 @@ class TestGeneration:
             task_wins={candidate: 1 for candidate in candidates},
         )
         generator = ReflectivePromptMutation(
+            config=GEPAConfig(candidate_selection_strategy="top_k_pareto"),
             feedback_provider=provider,
-            candidate_selection_strategy="top_k_pareto",
         )
 
         selected = generator._select_parent(parents)
@@ -193,7 +197,7 @@ class TestGeneration:
     def test_random_module_selection(self):
         """Test that the random module selection strategy works correctly."""
         feedback_provider = FeedbackProvider(assessor=simple_metric)
-        generator = ReflectivePromptMutation(feedback_provider=feedback_provider, module_selection="random")
+        generator = ReflectivePromptMutation(config=GEPAConfig(), feedback_provider=feedback_provider, module_selection="random")
         
         for _ in range(10):
             module_idx = generator._select_target_module(3)
@@ -201,6 +205,7 @@ class TestGeneration:
 
     def test_failed_only_targets_predictor_with_failed_trace(self):
         generator = ReflectivePromptMutation(
+            config=GEPAConfig(),
             feedback_provider=FeedbackProvider(assessor=simple_metric),
             module_selection=ModuleSelectionStrategy.FAILED_ONLY.value,
         )
@@ -215,6 +220,9 @@ class TestGeneration:
     def test_all_selection_mutates_each_predictor_in_one_child(self, mutator_mock):
         provider = FeedbackProvider(assessor=simple_metric)
         generator = ReflectivePromptMutation(
+            config=GEPAConfig(mutation_config=ReflectiveMutationConfig(
+                module_selection_strategy=ModuleSelectionStrategy.ALL,
+            )),
             feedback_provider=provider,
             feedback_data=[dspy.Example(question="q", answer="a").with_inputs("question")],
             module_selection=ModuleSelectionStrategy.ALL.value,
@@ -240,7 +248,10 @@ class TestGeneration:
             module_selection_strategy=ModuleSelectionStrategy.RANDOM,
             max_retries=2,
         )
-        generator = ReflectivePromptMutation(feedback_provider=feedback_provider, config=config)
+        generator = ReflectivePromptMutation(
+            feedback_provider=feedback_provider,
+            config=GEPAConfig(mutation_config=config),
+        )
 
         assert generator.module_selection == "random"
         assert generator.max_retries == 2
@@ -248,6 +259,7 @@ class TestGeneration:
     def test_failed_retries_respect_generation_budget(self):
         feedback_provider = FeedbackProvider(assessor=simple_metric)
         generator = ReflectivePromptMutation(
+            config=GEPAConfig(),
             feedback_provider=feedback_provider,
             feedback_data=[dspy.Example(question="q", answer="a").with_inputs("question")],
             max_retries=5,
@@ -289,20 +301,20 @@ class TestGeneration:
 
     def test_system_aware_merge_initialization(self):
         """Test system aware merge initialization."""
-        generator = SystemAwareMerge()
+        generator = SystemAwareMerge(config=GEPAConfig())
         # Just test that it can be created
         assert generator is not None
 
     def test_reflection_lm_is_injected_from_darwin_config(self):
         marker = object()
-        strategy = GEPAStrategy(DarwinConfig(reflection_lm=marker))
+        strategy = GEPAStrategy(GEPAConfig(reflection_lm=marker))
 
         generator = strategy._instantiate_generator(ReflectivePromptMutation)
 
         assert generator.reflection_lm is marker
 
     def test_parent_rollout_reuse_is_configurable(self):
-        strategy = GEPAStrategy(DarwinConfig(reuse_parent_rollouts=False))
+        strategy = GEPAStrategy(GEPAConfig(reuse_parent_rollouts=False))
 
         generator = strategy._instantiate_generator(ReflectivePromptMutation)
 
@@ -371,6 +383,9 @@ class TestGeneration:
 
         example = dspy.Example(question="q", answer="second output").with_inputs("question")
         generator = ReflectivePromptMutation(
+            config=GEPAConfig(mutation_config=ReflectiveMutationConfig(
+                module_selection_strategy=ModuleSelectionStrategy.ALL,
+            )),
             feedback_provider=FeedbackProvider(assessor=metric),
             feedback_data=[example],
             module_selection=ModuleSelectionStrategy.ALL.value,

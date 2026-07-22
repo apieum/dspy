@@ -8,7 +8,12 @@ from .budget import Budget
 class AdaptiveBudget(Budget):
     """Budget that adapts allocation based on progress."""
     
-    def __init__(self, total_budget: int, adaptation_factor: float = 1.2):
+    def __init__(self, total_budget: Optional[int] = None, adaptation_factor: float = 1.2, config=None):
+        if config is not None:
+            total_budget = config.max_lm_calls
+        if total_budget is None:
+            raise TypeError("AdaptiveBudget requires GEPAConfig or total_budget")
+        self.config = config
         self.total_budget = total_budget
         self.consumed_budget = 0
         self.adaptation_factor = adaptation_factor

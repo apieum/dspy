@@ -1,6 +1,6 @@
 import dspy
 
-from dspy.teleprompt.darwin import Darwin, DarwinConfig, GEPAStrategy
+from dspy.teleprompt.darwin import Darwin, GEPAConfig, GEPAStrategy
 from dspy.utils.dummies import DummyLM
 
 
@@ -35,7 +35,7 @@ def test_compilation_observer_receives_candidate_lifecycle_events():
     with dspy.context(lm=DummyLM([{"answer": "a"}])):
         Darwin(
             GEPAStrategy,
-            DarwinConfig(max_lm_calls=1, observers=(observer,)),
+            GEPAConfig(max_lm_calls=1, observers=(observer,)),
         ).compile(student, trainset=data)
 
     assert observer.events[0] == "start_compilation"

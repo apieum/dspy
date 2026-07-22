@@ -49,7 +49,7 @@ class ParetoFrontier(Selector):
     - Comprehensive logging and error handling
     """
 
-    def __init__(self):
+    def __init__(self, config: "DarwinConfig"):
         """Initialize the Pareto Frontier selector."""
         super().__init__()
         # Internal candidate and score management using UUID-based identification
@@ -58,9 +58,7 @@ class ParetoFrontier(Selector):
         self.task_wins: Dict[Candidate, int] = defaultdict(int)  # candidate -> number of examples won
         self.elitist_pruning = False
         self.diversity_archive = None
-        self.frontier_type = "instance"
-    def configure(self, config: "DarwinConfig") -> None:
-        self.frontier_type = getattr(config, "frontier_type", self.frontier_type)
+        self.configure(config)
 
     def start_compilation(self, student: dspy.Module, verbose: bool=False) -> None:
         """Reset all selection state at the beginning of a compilation."""

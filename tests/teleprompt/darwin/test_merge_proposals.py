@@ -1,6 +1,6 @@
 import dspy
 
-from dspy.teleprompt.darwin import Candidate, SystemAwareMerge
+from dspy.teleprompt.darwin import Candidate, GEPAConfig, SystemAwareMerge
 from dspy.teleprompt.darwin.data.cohort import Parents
 from dspy.teleprompt.utils import get_signature, set_signature
 from dspy.teleprompt.darwin.evaluation import Metric
@@ -23,7 +23,7 @@ def test_system_aware_merge_combines_divergent_lineages():
     first.scores = []
     second.scores = []
 
-    merged = SystemAwareMerge().generate(Parents(first, second, iteration=1))
+    merged = SystemAwareMerge(config=GEPAConfig()).generate(Parents(first, second, iteration=1))
 
     assert len(merged) == 1
     child = merged.first()
@@ -32,7 +32,7 @@ def test_system_aware_merge_combines_divergent_lineages():
 
 
 def test_system_aware_merge_is_observable():
-    assert hasattr(SystemAwareMerge(), "subscribe")
+    assert hasattr(SystemAwareMerge(config=GEPAConfig()), "subscribe")
 
 
 def test_system_aware_merge_does_not_reintroduce_better_ancestor():
@@ -47,7 +47,7 @@ def test_system_aware_merge_does_not_reintroduce_better_ancestor():
     first.scores = [Metric(0.5, id="task")]
     second.scores = [Metric(0.5, id="task")]
 
-    merged = SystemAwareMerge().generate(Parents(first, second, iteration=1))
+    merged = SystemAwareMerge(config=GEPAConfig()).generate(Parents(first, second, iteration=1))
 
     assert merged.is_empty()
 
@@ -63,7 +63,9 @@ def test_system_aware_merge_requires_shared_validation_support():
     first.scores = [Metric(1.0, id="task-1")]
     second.scores = [Metric(1.0, id="task-2")]
 
-    merged = SystemAwareMerge(val_overlap_floor=1).generate(
+    merged = SystemAwareMerge(
+        config=GEPAConfig(merge_val_overlap_floor=1)
+    ).generate(
         Parents(first, second, iteration=1)
     )
 
@@ -79,7 +81,7 @@ def test_system_aware_merge_preserves_shared_innovation():
     first = Candidate(shared_module_1, parents=[ancestor], generation_number=1)
     second = Candidate(shared_module_2, parents=[ancestor], generation_number=1)
 
-    generator = SystemAwareMerge()
+    generator = SystemAwareMerge(config=GEPAConfig())
     desirable = generator._find_desirable_signatures(ancestor, first, second)
 
     assert len(desirable) == 1
@@ -94,7 +96,7 @@ def test_system_aware_merge_selects_balanced_validation_support():
     first.scores = [Metric(1.0, id=str(id(examples[0]))), Metric(0.0, id=str(id(examples[1]))), Metric(0.5, id=str(id(examples[2])))]
     second.scores = [Metric(0.0, id=str(id(examples[0]))), Metric(1.0, id=str(id(examples[1]))), Metric(0.5, id=str(id(examples[2])))]
 
-    generator = SystemAwareMerge(feedback_data=examples)
+    generator = SystemAwareMerge(config=GEPAConfig(), feedback_data=examples)
     generator.validation_data = [(str(id(example)), example) for example in examples]
     selected = generator._select_merge_minibatch(first, second)
 
@@ -102,7 +104,7 @@ def test_system_aware_merge_selects_balanced_validation_support():
 
 
 def test_system_aware_merge_orders_ancestors_by_aggregate_score():
-    generator = SystemAwareMerge()
+    generator = SystemAwareMerge(config=GEPAConfig())
     parent1 = Candidate(dspy.Predict("question -> answer"))
     parent2 = Candidate(dspy.Predict("question -> answer"))
     weak = Candidate(dspy.Predict("question -> answer"), generation_number=1)

@@ -1,6 +1,6 @@
 import dspy
 
-from dspy.teleprompt.darwin import Darwin, DarwinConfig, GEPAStrategy
+from dspy.teleprompt.darwin import Darwin, GEPAConfig, GEPAStrategy
 from dspy.utils.dummies import DummyLM
 
 
@@ -9,7 +9,7 @@ def test_max_iterations_is_enforced():
     with dspy.context(lm=DummyLM([{"answer": "a"}, {"response": "improve"}] * 4)):
         optimizer = Darwin(
             GEPAStrategy,
-            DarwinConfig(max_lm_calls=50, max_iterations=0),
+            GEPAConfig(max_lm_calls=50, max_iterations=0),
         )
         optimizer.compile(dspy.Predict("question -> answer"), trainset=data)
 

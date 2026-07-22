@@ -8,7 +8,12 @@ from .budget import Budget
 class IterationBudget(Budget):
     """Budget that limits by number of iterations."""
     
-    def __init__(self, max_iterations: int):
+    def __init__(self, max_iterations: Optional[int] = None, config=None):
+        if config is not None:
+            max_iterations = config.max_iterations
+        if max_iterations is None:
+            raise TypeError("IterationBudget requires GEPAConfig or max_iterations")
+        self.config = config
         self.max_iterations = max_iterations
         self.current_iteration = 0
         

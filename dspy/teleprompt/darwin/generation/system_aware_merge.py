@@ -4,6 +4,8 @@ This implements Algorithm 4 from the GEPA paper with integrated logic for
 ancestry tracking, desirability analysis, and signature merging.
 """
 
+from __future__ import annotations
+
 import logging
 import random
 from typing import List, Optional, Tuple, Set, TYPE_CHECKING
@@ -14,6 +16,10 @@ from .generator import Generator
 from .mutation import ReflectivePromptMutation
 from ..data.candidate import Candidate, example_id
 from ..data.cohort import Parents, NewBorns
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..config import DarwinConfig
 
 
 logger = logging.getLogger(__name__)
@@ -24,8 +30,8 @@ class SystemAwareMerge(Generator):
     System-Aware Merge generator implementing Algorithm 4 from the GEPA paper.
     """
 
-    def __init__(self, feedback_provider=None, feedback_data=None, assessor=None,
-                 config=None, val_overlap_floor: int = 5, max_attempts: int = 10):
+    def __init__(self, *, config: DarwinConfig, feedback_provider=None,
+                 feedback_data=None, assessor=None, rng=None):
         super().__init__()
         # Integrated merge history tracking (replaces MergeHistoryTracker)
         self.attempted_merges: Set[Tuple[int, int, int]] = set()
@@ -35,7 +41,9 @@ class SystemAwareMerge(Generator):
         self.feedback_provider = feedback_provider
         self.assessor = assessor or getattr(feedback_provider, "assessor", None)
         self.config = config
-        self.rng = random.Random(0)
+        val_overlap_floor = config.merge_val_overlap_floor
+        max_attempts = config.merge_pair_attempts
+        self.rng = rng or random.Random(config.seed)
 
         # Initialize fallback mutation generator
         self.fallback_generator = None
@@ -417,7 +425,10 @@ class SystemAwareMerge(Generator):
         if self.feedback_provider or self.assessor:
             if self.feedback_provider is None:
                 from .feedback import FeedbackProvider
-                self.feedback_provider = FeedbackProvider(assessor=self.assessor)
+                self.feedback_provider = FeedbackProvider(
+                    assessor=self.assessor,
+                    failure_score=self.config.failure_score,
+                )
             self.fallback_generator = ReflectivePromptMutation(
                 feedback_provider=self.feedback_provider,
                 feedback_data=self.devset,

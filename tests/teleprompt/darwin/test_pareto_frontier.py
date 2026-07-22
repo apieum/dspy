@@ -18,7 +18,7 @@ from dspy.teleprompt.darwin.data.candidate import Candidate
 from dspy.teleprompt.darwin.data.cohort import Survivors, Parents
 from dspy.teleprompt.darwin.evaluation.metrics import Metric
 from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
-from dspy.teleprompt.darwin import DarwinConfig
+from dspy.teleprompt.darwin import GEPAConfig
 
 
 class TestParetoFrontierCore:
@@ -26,7 +26,7 @@ class TestParetoFrontierCore:
 
     def setup_method(self):
         """Setup fresh selector for each test."""
-        self.selector = ParetoFrontier()
+        self.selector = ParetoFrontier(GEPAConfig())
         self.selector.start_compilation(None, verbose=False)
 
     def create_candidate_with_scores(self, scores_dict, generation=0, candidate_id=None):
@@ -48,7 +48,7 @@ class TestParetoFrontierCore:
 
     def test_initialization(self):
         """Test ParetoFrontier initialization."""
-        selector = ParetoFrontier()
+        selector = ParetoFrontier(GEPAConfig())
         
         assert selector.example_best_scores == {}
         assert selector.example_best_candidates == {}
@@ -61,7 +61,7 @@ class TestParetoFrontierCore:
         self.selector.update_scores_batch(Survivors(candidate, iteration=0))
         assert self.selector.size() == 1
 
-        self.selector.configure(DarwinConfig(preserve_diversity=True, archive_capacity=4))
+        self.selector = ParetoFrontier(GEPAConfig(preserve_diversity=True, archive_capacity=4))
         self.selector.diversity_archive.add(candidate)
         self.selector.start_compilation(None, verbose=False)
 
@@ -346,7 +346,7 @@ class TestParetoFrontierGEPAModes:
     """Test Official GEPA mode vs Elitist pruning mode behavior differences."""
 
     def setup_method(self):
-        self.selector = ParetoFrontier()
+        self.selector = ParetoFrontier(GEPAConfig())
         self.selector.start_compilation(None, verbose=False)
 
     def create_candidate_with_scores(self, scores_dict, generation=0):
@@ -463,7 +463,7 @@ class TestParetoFrontierEdgeCases:
     """Test edge cases and error conditions."""
 
     def setup_method(self):
-        self.selector = ParetoFrontier()
+        self.selector = ParetoFrontier(GEPAConfig())
         self.selector.start_compilation(None, verbose=False)
 
     def create_candidate_with_scores(self, scores_dict, generation=0):
@@ -588,7 +588,7 @@ class TestParetoFrontierObserverIntegration:
     """Test observer pattern integration (simplified to avoid async complexity)."""
 
     def setup_method(self):
-        self.selector = ParetoFrontier()
+        self.selector = ParetoFrontier(GEPAConfig())
         self.selector.start_compilation(None, verbose=False)
 
     def create_candidate_with_scores(self, scores_dict, generation=0):
@@ -652,7 +652,7 @@ class TestParetoFrontierBudgetIntegration:
     """Test budget integration (if applicable)."""
 
     def setup_method(self):
-        self.selector = ParetoFrontier()
+        self.selector = ParetoFrontier(GEPAConfig())
         self.selector.start_compilation(None, verbose=False)
 
     def create_candidate_with_scores(self, scores_dict, generation=0):
@@ -692,7 +692,7 @@ class TestParetoFrontierAlgorithmCompliance:
     """Test compliance with GEPA Algorithm 2 specification."""
 
     def setup_method(self):
-        self.selector = ParetoFrontier()
+        self.selector = ParetoFrontier(GEPAConfig())
         self.selector.start_compilation(None, verbose=False)
 
     def create_candidate_with_scores(self, scores_dict, generation=0):

@@ -6,7 +6,7 @@ These can be chained together to create a multi-phase evaluation pipeline.
 """
 
 import logging
-from typing import List
+from typing import List, TYPE_CHECKING
 import dspy
 from .evaluator import Evaluator
 from .metrics import Assessor
@@ -20,6 +20,9 @@ from .batching import resolve_batch_evaluator
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from ..config import DarwinConfig
+
 
 class ParentFastCompare(Evaluator):
     """
@@ -29,20 +32,29 @@ class ParentFastCompare(Evaluator):
     This corresponds to Phase 1 of the original GEPA evaluation logic.
     """
 
-    def __init__(self, assessor: Assessor, minibatch_data: List[dspy.Example] = None,
-                 acceptance_criterion=None, proposal_selection=None,
+    def __init__(self, *, config: "DarwinConfig", minibatch_data: List[dspy.Example] = None,
                  evaluation_cache=None, **kwargs):
         """
         Args:
-            assessor: The assessor to evaluate predictions against examples.
             minibatch_data: Small validation dataset for quick parent-child comparison.
         """
         super().__init__()
-        self.assessor = assessor
+        self.config = config
+        self.assessor = config.fitness_function
         self.minibatch_data = minibatch_data or []
-        self.acceptance_criterion = acceptance_criterion or StrictImprovementAcceptance()
+        configured_acceptance = config.acceptance_criterion
+        acceptance_criterion = configured_acceptance
+        self.acceptance_criterion = (
+            acceptance_criterion() if isinstance(acceptance_criterion, type)
+            else acceptance_criterion or StrictImprovementAcceptance()
+        )
         self.evaluation_cache = evaluation_cache or EvaluationCache()
-        self.proposal_selection = proposal_selection or AllImprovements()
+        configured_selection = config.proposal_selection
+        proposal_selection = configured_selection
+        self.proposal_selection = (
+            proposal_selection() if isinstance(proposal_selection, type)
+            else proposal_selection or AllImprovements()
+        )
         self.verbose = False
         self.last_proposal_records = []
 
@@ -209,19 +221,24 @@ class FullTaskScores(Evaluator):
     that the candidates it receives have already been validated as promising.
     """
 
-    def __init__(self, assessor: Assessor, validation_data: List[dspy.Example] = None,
-                 evaluation_cache=None, validation_policy=None, batch_evaluator=None, **kwargs):
+    def __init__(self, *, config: "DarwinConfig", validation_data: List[dspy.Example] = None,
+                 evaluation_cache=None, **kwargs):
         """
         Args:
-            assessor: The assessor to evaluate predictions against examples.
             validation_data: Full validation dataset for comprehensive evaluation.
         """
         super().__init__()
-        self.assessor = assessor
+        self.config = config
+        self.assessor = config.fitness_function
         self.validation_data = validation_data or []
         self.evaluation_cache = evaluation_cache or EvaluationCache()
-        self.validation_policy = validation_policy or FullEvaluationPolicy()
-        self.batch_evaluator = resolve_batch_evaluator(batch_evaluator)
+        configured_policy = config.validation_policy
+        self.validation_policy = (
+            configured_policy() if isinstance(configured_policy, type)
+            else configured_policy or FullEvaluationPolicy()
+        )
+        configured_batch_evaluator = config.batch_evaluator
+        self.batch_evaluator = resolve_batch_evaluator(configured_batch_evaluator)
         self._iteration = 0
         self.verbose = False
 

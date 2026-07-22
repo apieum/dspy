@@ -1,7 +1,6 @@
 """Evaluator protocol for GEPA optimization."""
 
 from abc import abstractmethod
-import inspect
 from typing import List, Type, TYPE_CHECKING
 import dspy
 from dspy import Module
@@ -65,46 +64,14 @@ class Evaluator(Channel):
         Returns:
             A new class that inherits from the calling class (cls).
         """
-        # --- Step 1 & 2: Inspect and Combine __init__ Signatures ---
-        params = {}
-        combined = {}
-        for eval_cls in evaluator_classes:
-            sig = inspect.signature(eval_cls.__init__)
-            params[eval_cls] = []
-            for param in sig.parameters.values():
-                if param.name not in ("self", "args", "kwargs"):
-                    params[eval_cls].append(param.name)
-                    combined[param.name] = param
-
-        # Create the new signature object for introspection
-        new_signature = inspect.Signature(
-            parameters=[inspect.Parameter('self', inspect.Parameter.POSITIONAL_OR_KEYWORD)] + list(combined.values())
-        )
-
-        def __init__(self, *args, **kwargs):
-            """Initializes the EvalChain, creating instances of all chained evaluators with their positional arguments"""
-            super(self.__class__, self).__init__()
-            # Bind the provided arguments to the combined signature to handle both
-            # positional and keyword arguments correctly.
-            try:
-                bound_args = new_signature.bind(self, *args, **kwargs)
-            except TypeError as e:
-                raise TypeError(f"Error calling {name}.__init__(): {e}") from e
-
-            bound_args.apply_defaults()
-            # This dictionary now contains all arguments, correctly mapped.
-            all_provided_args = bound_args.arguments
-            all_provided_args.pop('self', None)
-
-            # Dataset management is now handled via split strategy
-            self.evaluators = []
-            # eval_cls(**kwargs) for eval_cls in evaluator_classes
-            for eval_cls in evaluator_classes:
-                init_kwargs = { key: value for key, value in all_provided_args.items() if key in params[eval_cls]}
-                self.evaluators.append(eval_cls(**init_kwargs))
-
-        # Attach the dynamic signature for introspection tools (help(), IDEs)
-        __init__.__signature__ = new_signature
+        def __init__(self, *, config: "DarwinConfig", **kwargs):
+            """Create every evaluator with the same explicit Darwin configuration."""
+            cls.__init__(self)
+            self.config = config
+            self.evaluators = [
+                eval_cls(config=config, **kwargs)
+                for eval_cls in evaluator_classes
+            ]
 
         # --- Add __getattr__ for delegation ---
         def __getattr__(self, name, default=None):

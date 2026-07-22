@@ -1,7 +1,7 @@
 """Functional tests to ensure Darwin GEPA works in real scenarios."""
 
 import dspy
-from dspy.teleprompt.darwin import Darwin, DarwinConfig, ChannelContext
+from dspy.teleprompt.darwin import Darwin, GEPAConfig, ChannelContext
 from dspy.teleprompt.darwin.strategy import GEPAStrategy
 from dspy.teleprompt.darwin.budget import LMCallsBudget
 from dspy.teleprompt.darwin.selection import ParetoFrontier
@@ -103,7 +103,7 @@ class TestFunctional:
             student = MultiStepQA()
 
             # Create GEPA configuration with new architecture
-            config = DarwinConfig(
+            config = GEPAConfig(
                 max_lm_calls=10,
                 patience=2,
                 verbose=False
@@ -131,7 +131,7 @@ class TestFunctional:
                 trace=trace,
             )
 
-        config = DarwinConfig(
+        config = GEPAConfig(
             mutation=ImprovingGenerator,
             fitness_function=exact_assessor,
             enhanced_feedback=exact_assessor,
@@ -178,7 +178,7 @@ class TestFunctional:
             student = MultiStepQA()
 
             # Create GEPA configuration with new architecture
-            config = DarwinConfig(
+            config = GEPAConfig(
                 max_lm_calls=8,
                 patience=2,
                 verbose=False
@@ -209,7 +209,7 @@ class TestFunctional:
         with dspy.context(lm=dummy_lm):
             student = MultiStepQA()
             # Create GEPA configuration with new architecture
-            config = DarwinConfig(
+            config = GEPAConfig(
                 max_lm_calls=3,
                 patience=1,
                 verbose=False
@@ -241,7 +241,7 @@ class TestFunctional:
         with dspy.context(lm=dummy_lm):
             student = MultiStepQA()
             # Create GEPA configuration with very tight budget
-            config = DarwinConfig(
+            config = GEPAConfig(
                 max_lm_calls=2,
                 patience=1,
                 verbose=False
@@ -273,7 +273,7 @@ class TestFunctional:
             original_predictors = original_student.predictors()
 
             # Create GEPA configuration with new architecture
-            config = DarwinConfig(
+            config = GEPAConfig(
                 max_lm_calls=3,
                 patience=3,
                 verbose=False
@@ -311,7 +311,7 @@ class TestFunctional:
         with dspy.context(lm=dummy_lm):
             student = MultiStepQA()
             # Create GEPA configuration with new architecture
-            config = DarwinConfig(
+            config = GEPAConfig(
                 max_lm_calls=5,
                 patience=3,
                 verbose=False

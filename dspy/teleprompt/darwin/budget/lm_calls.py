@@ -11,8 +11,15 @@ logger = logging.getLogger(__name__)
 class LMCallsBudget(Budget):
     """Budget that tracks LLM API calls."""
 
-    def __init__(self, max_calls: int, evaluation_max_calls: Optional[int] = None,
-                 generation_max_calls: Optional[int] = None):
+    def __init__(self, max_calls: Optional[int] = None, evaluation_max_calls: Optional[int] = None,
+                 generation_max_calls: Optional[int] = None, config=None):
+        self.config = config
+        if config is not None:
+            max_calls = config.max_lm_calls
+            evaluation_max_calls = config.max_evaluation_calls
+            generation_max_calls = config.max_generation_calls
+        if max_calls is None:
+            raise TypeError("LMCallsBudget requires GEPAConfig or max_calls")
         self.max_calls = max_calls
         self.evaluation_max_calls = evaluation_max_calls if evaluation_max_calls is not None else max_calls
         self.generation_max_calls = generation_max_calls if generation_max_calls is not None else max_calls

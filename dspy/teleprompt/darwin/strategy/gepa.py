@@ -22,7 +22,7 @@ from ..evaluation import EvaluationCache
 from ..evaluation import Metric
 
 if TYPE_CHECKING:
-    from ..config import DarwinConfig
+    from ..config import GEPAConfig
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class GEPAStrategy(BaseStrategy[Result]):
     5. Repeat until termination criteria met
     """
 
-    def __init__(self, config: 'DarwinConfig'):
+    def __init__(self, config: 'GEPAConfig'):
         super().__init__(config)
         self.algorithm_state = "initialize"  # initialize -> evaluate -> select -> generate -> repeat
         self.current_newborns: Optional[NewBorns] = None
@@ -442,10 +442,7 @@ class GEPAStrategy(BaseStrategy[Result]):
             setattr(self, attribute, restore_cohort(attribute, records_for_cohort))
 
         # Rebuild the selector's per-task Pareto state from restored scores.
-        self._selector = self.config.selection()
-        configure = getattr(self._selector, "configure", None)
-        if callable(configure):
-            configure(self.config)
+        self._selector = self.config.selection(config=self.config)
         selector_cohort = next(iter(cohorts.values()), None)
         if selector_cohort:
             selector_type = next(

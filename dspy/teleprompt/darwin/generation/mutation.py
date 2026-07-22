@@ -1,5 +1,7 @@
 """ReflectivePromptMutation - Evolutionary mutation using reflection on feedback."""
 
+from __future__ import annotations
+
 import logging
 from typing import Any, List, Optional, Dict
 import random
@@ -11,6 +13,10 @@ from .evolvable_module import EvolvableModule
 from .prompt_mutator import ReflectivePromptMutator
 from .dspy_utils import get_predictors
 from .config import ReflectiveMutationConfig, ModuleSelectionStrategy
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..config import DarwinConfig
 from ..data.candidate import Candidate
 from ..data.cohort import Parents, NewBorns
 
@@ -23,6 +29,8 @@ class ReflectivePromptMutation(Generator):
     """
 
     def __init__(self,
+                 *,
+                 config: DarwinConfig,
                  feedback_provider=None,
                  feedback_data: List[dspy.Example] = None,
                  reflection_strategy: Optional[ReflectionStrategy] = None,
@@ -30,36 +38,45 @@ class ReflectivePromptMutation(Generator):
                  module_selection: str = "round_robin",
                  candidate_selection_strategy: Any = "pareto",
                  max_retries: int = 1,
-                 config: Optional[ReflectiveMutationConfig] = None,
                  assessor=None,
                  rng=None):
         super().__init__()
+        self.config = config
+        mutation_config = config.mutation_config
         if feedback_provider is None and assessor is not None:
             from .feedback import FeedbackProvider
-            feedback_provider = FeedbackProvider(assessor=assessor)
-        if config is not None:
-            feedback_provider = config.feedback_provider or feedback_provider
-            reflection_strategy = config.reflection_strategy or reflection_strategy
-            module_selection = config.module_selection_strategy.value
-            max_retries = config.max_retries
+            feedback_provider = FeedbackProvider(
+                assessor=assessor,
+                failure_score=config.failure_score,
+            )
+        feedback_provider = mutation_config.feedback_provider or feedback_provider
+        reflection_strategy = mutation_config.reflection_strategy or reflection_strategy
+        module_selection = mutation_config.module_selection_strategy.value
+        max_retries = mutation_config.max_retries
+        reflection_lm = config.reflection_lm or reflection_lm
+        candidate_selection_strategy = config.candidate_selection_strategy
 
         if feedback_provider is None:
             raise ValueError("ReflectivePromptMutation requires a FeedbackProvider")
 
         self.feedback_provider = feedback_provider
         self.feedback_data = feedback_data or []
-        self.minibatch_size = config.minibatch_size if config is not None else 5
+        self.minibatch_size = mutation_config.minibatch_size
         self.reflection_strategy = reflection_strategy or GEPAReflection()
         self.reflection_lm = reflection_lm
-        self.reuse_parent_rollouts = True
+        self.reuse_parent_rollouts = (
+            config.reuse_parent_rollouts
+        )
         self.module_selection = module_selection
         self.candidate_selection_strategy = candidate_selection_strategy
         self.max_retries = max(1, max_retries)
-        self.use_abstract_feedback = config.use_abstract_feedback if config is not None else False
-        self.perfect_score = getattr(config, "perfect_score", 1.0) if config is not None else 1.0
+        self.use_abstract_feedback = mutation_config.use_abstract_feedback
+        self.perfect_score = config.perfect_score
         # Direct generator users historically expect a proposal even for a
         # perfect toy metric; strategy-owned GEPA runs use the reference skip.
-        self.skip_perfect_score = getattr(config, "skip_perfect_score", False) if config is not None else False
+        self.skip_perfect_score = (
+            config.skip_perfect_score
+        )
 
         self.next_module_idx = 0
         self.rng = rng or random.Random()

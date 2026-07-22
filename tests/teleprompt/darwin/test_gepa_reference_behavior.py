@@ -10,6 +10,7 @@ from dspy.teleprompt.darwin import (
     ParentFastCompare,
     Metric,
     ParetoFrontier,
+    GEPAConfig,
     StrictImprovementAcceptance,
 )
 from dspy.teleprompt.darwin.budget import LMCallsBudget
@@ -38,7 +39,7 @@ def test_equal_acceptance_is_explicitly_available():
 
 
 def test_pareto_selection_is_seeded_and_frequency_weighted():
-    selector = ParetoFrontier()
+    selector = ParetoFrontier(GEPAConfig())
     frequent = candidate([1.0, 1.0, 1.0])
     specialist = candidate([1.0, 0.0, 0.0])
     selector.update_score("example-0", frequent, Metric(1.0, id="example-0"))
@@ -54,7 +55,7 @@ def test_pareto_selection_is_seeded_and_frequency_weighted():
 
 
 def test_pareto_parent_frontier_removes_globally_dominated_candidate():
-    selector = ParetoFrontier()
+    selector = ParetoFrontier(GEPAConfig())
     dominant = candidate([1.0, 1.0])
     dominated = candidate([1.0, 0.0])
     selector.update_score("example-0", dominant, Metric(1.0, id="example-0"))
@@ -78,7 +79,11 @@ def test_merge_accepts_tie_with_best_parent_but_mutation_does_not():
         creation_metadata={"merge_type": "system_aware", "ancestor_candidate": ancestor},
     )
     example = dspy.Example(question="q", answer="a")
-    evaluator = ParentFastCompare(assessor=lambda *_: Metric(0.0), minibatch_data=[example])
+    evaluator = ParentFastCompare(
+        config=GEPAConfig(fitness_function=lambda *_: Metric(0.0)),
+        assessor=lambda *_: Metric(0.0),
+        minibatch_data=[example],
+    )
     values = {id(merged): 0.8, id(parent1): 0.8, id(parent2): 0.7}
     evaluator._evaluate = lambda candidate, examples, persist_scores=False: [
         Metric(values[id(candidate)], id="example")

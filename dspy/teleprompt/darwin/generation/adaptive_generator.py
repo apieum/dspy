@@ -16,6 +16,7 @@ from ..data.cohort import Parents, NewBorns
 
 if TYPE_CHECKING:
     from ..budget import Budget
+    from ..config import DarwinConfig
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +33,13 @@ class GEPAAdaptiveGenerator(Generator):
     """
     
     def __init__(self, 
+                 *,
+                 config: "DarwinConfig",
                  mutation_generator: Optional[ReflectivePromptMutation] = None,
                  merge_generator: Optional[SystemAwareMerge] = None,
                  feedback_provider=None,
                  feedback_data=None,
                  assessor=None,
-                 config=None,
                  **kwargs):
         """Initialize adaptive generator with mutation and merge strategies.
         
@@ -53,6 +55,7 @@ class GEPAAdaptiveGenerator(Generator):
         self.feedback_data = feedback_data or []
         self.assessor = assessor
         self.config = config
+        self.use_merge = config.use_merge
         
         # Track strategy usage for analysis
         self.strategy_stats = {
@@ -92,7 +95,10 @@ class GEPAAdaptiveGenerator(Generator):
         
         # Initialize merge generator if not provided  
         if self.merge_gen is None:
-            self.merge_gen = SystemAwareMerge(assessor=self.assessor)
+            self.merge_gen = SystemAwareMerge(
+                assessor=self.assessor,
+                config=self.config,
+            )
         
         # Initialize child generators (now all use standard interface)
         if self.mutation_gen:
@@ -155,7 +161,7 @@ class GEPAAdaptiveGenerator(Generator):
             return NewBorns()
         
         # Strategy 1: Try opportunistic merging if we have enough parents
-        if parents.size() >= 2 and self.merge_gen:
+        if self.use_merge and parents.size() >= 2 and self.merge_gen:
             self.strategy_stats["merge_attempts"] += 1
             
             self.publish('mutation_attempt', None, {'attempt': self.strategy_stats["merge_attempts"], 'max_attempts': None})

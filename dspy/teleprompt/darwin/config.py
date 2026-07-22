@@ -1,6 +1,7 @@
 """Configuration classes for Darwin optimization framework."""
 
 from dataclasses import dataclass, field
+from abc import ABC, abstractmethod
 from typing import Type, Optional, Tuple, Any
 
 from .budget import Budget, LMCallsBudget
@@ -17,12 +18,32 @@ from .evaluation.policy import FullEvaluationPolicy
 from .evaluation.batching import PerCandidateBatchEvaluator
 
 
+class DarwinConfig(ABC):
+    """Abstract configuration contract shared by Darwin components.
+
+    Darwin operators receive a configuration object but must not depend on a
+    particular strategy's concrete settings type. Concrete strategies provide
+    the fields their components need; ``GEPAConfig`` is the first such
+    implementation.
+    """
+
+    def __getattr__(self, name: str) -> Any:
+        raise AttributeError(name)
+
+    @property
+    @abstractmethod
+    def seed(self) -> int:
+        """Seed shared by deterministic Darwin components."""
+        ...
+
+
 @dataclass
-class DarwinConfig:
-    """Minimal configuration with only component classes and strategic choices.
+class GEPAConfig(DarwinConfig):
+    """Configuration for the GEPA strategy implemented by Darwin.
 
     Strategy owns all tactical decisions and instantiates components with appropriate data.
-    Config only specifies which classes to use and key strategic choices like metrics.
+    The concrete configuration specifies which classes to use and key
+    strategic choices such as metrics.
     """
     # Strategic components for strategy to instantiate (required)
     budget: Type['Budget'] = LMCallsBudget

@@ -2,7 +2,7 @@
 
 import dspy
 from dspy.teleprompt.darwin import (
-    Darwin, DarwinConfig, GEPAStrategy,
+    Darwin, GEPAConfig, GEPAStrategy,
     LMCallsBudget, ParetoFrontier, ReflectivePromptMutation,
     FeedbackProvider, GEPATwoPhasesEval, SystemAwareMerge, ChannelContext, Success,
     GEPAMute, GEPAAdaptive
@@ -58,7 +58,7 @@ class TestIntegration:
         with dspy.context(lm=dummy_lm):
             optimizer = Darwin(
                 GEPAStrategy,
-                DarwinConfig(max_lm_calls=2, observers=(observer,), seed=17),
+                GEPAConfig(max_lm_calls=2, observers=(observer,), seed=17),
             )
             compiled = optimizer.compile(SimpleQA(), trainset=trainset, devset=devset)
 
@@ -88,7 +88,7 @@ class TestIntegration:
             student = SimpleQA()
 
             # Create GEPA configuration
-            config = DarwinConfig(
+            config = GEPAConfig(
                 max_lm_calls=2,
                 patience=3,
                 minibatch_size=3,
@@ -108,7 +108,7 @@ class TestIntegration:
     def test_gepa_configurations(self):
         """Test GEPA configurations can be created."""
         # Test mutation-based configuration
-        mute_config = DarwinConfig(
+        mute_config = GEPAConfig(
             max_lm_calls=2,
             patience=3,
             minibatch_size=3,
@@ -116,7 +116,7 @@ class TestIntegration:
         )
 
         # Test merge-based configuration
-        merge_config = DarwinConfig(
+        merge_config = GEPAConfig(
             mutation=SystemAwareMerge,
             max_lm_calls=2,
             patience=3,
@@ -149,7 +149,7 @@ class TestIntegration:
             student = SimpleQA()
 
             # Create GEPA configuration
-            config = DarwinConfig(
+            config = GEPAConfig(
                 max_lm_calls=2,
                 patience=3,
                 minibatch_size=3,

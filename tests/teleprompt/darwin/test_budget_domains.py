@@ -1,6 +1,6 @@
 import pytest
 
-from dspy.teleprompt.darwin import DarwinConfig, GEPAStrategy, LMCallsBudget
+from dspy.teleprompt.darwin import GEPAConfig, GEPAStrategy, LMCallsBudget
 
 
 def test_lm_budget_tracks_evaluation_and_generation_domains():
@@ -39,7 +39,7 @@ def test_non_billable_generation_failure_does_not_consume_budget():
 
 
 def test_strategy_stops_when_the_active_budget_domain_is_exhausted():
-    strategy = GEPAStrategy(DarwinConfig(max_lm_calls=10))
+    strategy = GEPAStrategy(GEPAConfig(max_lm_calls=10))
     strategy._budget = LMCallsBudget(
         max_calls=10, evaluation_max_calls=2, generation_max_calls=8
     )

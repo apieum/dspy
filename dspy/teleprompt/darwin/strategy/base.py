@@ -120,10 +120,7 @@ class BaseStrategy(ABC, Generic[R]):
         """Get selection component, instantiating if needed."""
         if self._selector is None:
             from ..selection import Selector
-            self._selector = self.config.selection()
-            configure = getattr(self._selector, "configure", None)
-            if callable(configure):
-                configure(self.config)
+            self._selector = self.config.selection(config=self.config)
         return self._selector
 
     @property
@@ -149,26 +146,10 @@ class BaseStrategy(ABC, Generic[R]):
             # Strategy creates appropriate data splits for different evaluation phases
             minibatch_data = self._create_minibatch(self.validation_data, self.config.minibatch_size)
             self._evaluator = self.config.evaluation(
-                assessor=self.config.fitness_function,
+                config=self.config,
                 minibatch_data=minibatch_data,         # Intelligently sampled minibatch for quick validation
                 validation_data=self.validation_data,  # Full set for comprehensive evaluation
-                acceptance_criterion=(
-                    self.config.acceptance_criterion()
-                    if isinstance(self.config.acceptance_criterion, type)
-                    else self.config.acceptance_criterion
-                ),
                 evaluation_cache=self.evaluation_cache,
-                proposal_selection=(
-                    self.config.proposal_selection()
-                    if isinstance(self.config.proposal_selection, type)
-                    else self.config.proposal_selection
-                ),
-                validation_policy=(
-                    self.config.validation_policy()
-                    if isinstance(self.config.validation_policy, type)
-                    else self.config.validation_policy
-                ),
-                batch_evaluator=self.config.batch_evaluator,
             )
             self._evaluator.start_compilation(
                 getattr(self, "student", None),
@@ -237,20 +218,7 @@ class BaseStrategy(ABC, Generic[R]):
         return False
 
     def _instantiate_budget(self) -> 'Budget':
-        budget_cls = self.config.budget
-        signature = inspect.signature(budget_cls)
-        kwargs = {}
-        if "max_calls" in signature.parameters:
-            kwargs["max_calls"] = self.config.max_lm_calls
-            if "evaluation_max_calls" in signature.parameters:
-                kwargs["evaluation_max_calls"] = self.config.max_evaluation_calls
-            if "generation_max_calls" in signature.parameters:
-                kwargs["generation_max_calls"] = self.config.max_generation_calls
-        elif "max_iterations" in signature.parameters:
-            kwargs["max_iterations"] = self.config.max_iterations
-        elif "total_budget" in signature.parameters:
-            kwargs["total_budget"] = self.config.max_lm_calls
-        return budget_cls(**kwargs)
+        return self.config.budget(config=self.config)
 
     def _instantiate_generator(self, generator_factory) -> 'Generator':
         from ..generation.feedback import FeedbackProvider
@@ -284,42 +252,16 @@ class BaseStrategy(ABC, Generic[R]):
             "feedback_provider": feedback_provider,
             "feedback_data": feedback_data,
             "assessor": feedback_assessor,
-            "config": mutation_config,
+            "config": self.config,
+            "rng": self.rng,
         }
-        # Keep strategy-level merge policy available to merge generators while
-        # preserving the open generator interface for unrelated components.
-        try:
-            if "val_overlap_floor" in inspect.signature(generator_factory).parameters:
-                kwargs["val_overlap_floor"] = self.config.merge_val_overlap_floor
-            if "max_attempts" in inspect.signature(generator_factory).parameters:
-                kwargs["max_attempts"] = self.config.merge_pair_attempts
-            if "reflection_lm" in inspect.signature(generator_factory).parameters:
-                kwargs["reflection_lm"] = self.config.reflection_lm
-            if "candidate_selection_strategy" in inspect.signature(generator_factory).parameters:
-                kwargs["candidate_selection_strategy"] = self.config.candidate_selection_strategy
-        except (TypeError, ValueError):
-            pass
-        if mutation_config:
-            kwargs.update(
-                {
-                    "reflection_strategy": mutation_config.reflection_strategy,
-                    "module_selection": mutation_config.module_selection_strategy.value,
-                    "max_retries": mutation_config.max_retries,
-                }
-            )
 
         generator = generator_factory(**kwargs)
         # Keep the initial minibatch for compatibility with direct generator
         # use, while exposing the complete training pool to GEPA's epoch
         # sampler.  Reflection minibatches must change across generations.
         generator.feedback_pool = list(self.training_data)
-        generator.rng = self.rng
         generator.evaluation_cache = self.evaluation_cache
-        if hasattr(generator, "reuse_parent_rollouts"):
-            generator.reuse_parent_rollouts = self.config.reuse_parent_rollouts
-        if hasattr(generator, "perfect_score"):
-            generator.perfect_score = self.config.perfect_score
-            generator.skip_perfect_score = self.config.skip_perfect_score
 
         student = getattr(self, "student", None)
         if student is not None:
