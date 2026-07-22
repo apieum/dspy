@@ -98,6 +98,7 @@ def test_gepa_mute_is_budget_driven_by_default():
 
 def test_darwin_config_is_budget_driven_by_default():
     assert DarwinConfig().patience is None
+    assert DarwinConfig().use_merge is True
     with pytest.raises(ValueError):
         DarwinConfig(patience=-1)
 

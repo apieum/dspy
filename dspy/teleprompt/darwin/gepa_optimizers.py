@@ -102,6 +102,7 @@ class GEPAMute(Darwin):
             patience=patience,
             verbose=verbose,
             seed=seed,
+            use_merge=False,
             mutation=ReflectivePromptMutation,
             fitness_function=assessor,
             enhanced_feedback=assessor,
@@ -147,6 +148,9 @@ class GEPAAdaptive(Darwin):
             minibatch_size=minibatch_size,
             patience=patience,
             verbose=verbose,
+            # GEPAAdaptiveGenerator owns its opportunistic merge decision.
+            # Do not schedule a second strategy-level merge opportunity.
+            use_merge=False,
             mutation=GEPAAdaptiveGenerator,
             fitness_function=assessor,
             enhanced_feedback=assessor,

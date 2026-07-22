@@ -33,7 +33,9 @@ class DarwinConfig:
 
     # Optional strategic choices
     crossover: Optional[Type['Generator']] = SystemAwareMerge  # Optional crossover generator
-    use_merge: bool = False
+    # The complete GEPA strategy enables opportunistic merging by default.
+    # Mutation-only optimizers can opt out explicitly.
+    use_merge: bool = True
     max_merge_invocations: int = 5
     # Official GEPA only attempts a merge when the two branches share enough
     # validation support to make the merge comparison meaningful.
