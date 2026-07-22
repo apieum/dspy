@@ -24,6 +24,7 @@ class SystemAwareMerge(Generator):
     """
 
     def __init__(self, feedback_provider=None, feedback_data=None, assessor=None, config=None):
+        super().__init__()
         # Integrated merge history tracking (replaces MergeHistoryTracker)
         self.attempted_merges: Set[Tuple[int, int, int]] = set()
         self.merge_stats = {"success": 0, "failure_not_desirable": 0, "failure_ancestry": 0}
@@ -78,6 +79,8 @@ class SystemAwareMerge(Generator):
                 child_candidate = self._create_merged_candidate(
                     ancestor, parent1, parent2, parents.iteration, desirable_signatures
                 )
+                if child_candidate is None:
+                    continue
 
                 # Display merge evolution if verbose mode is enabled
                 if self.verbose:
@@ -124,10 +127,18 @@ class SystemAwareMerge(Generator):
                 pred_a, pred_p1, pred_p2 = ancestor_predictors[i], p1_predictors[i], p2_predictors[i]
                 sig_a, sig_p1, sig_p2 = get_signature(pred_a), get_signature(pred_p1), get_signature(pred_p2)
 
-                # Get signature strings for comparison
-                π_a = sig_a.signature if hasattr(sig_a, 'signature') else str(sig_a)
-                π_p1 = sig_p1.signature if hasattr(sig_p1, 'signature') else str(sig_p1)
-                π_p2 = sig_p2.signature if hasattr(sig_p2, 'signature') else str(sig_p2)
+                # GEPA compares complete prompt signatures. Comparing only
+                # the input/output signature misses the instruction changes
+                # that reflective mutation is intended to merge.
+                def signature_key(signature):
+                    return (
+                        getattr(signature, "signature", str(signature)),
+                        getattr(signature, "instructions", ""),
+                    )
+
+                π_a = signature_key(sig_a)
+                π_p1 = signature_key(sig_p1)
+                π_p2 = signature_key(sig_p2)
 
 
                 # Condition 1: p1 innovated, p2 did not (πa = πp2 and πp1 ≠ πp2)
