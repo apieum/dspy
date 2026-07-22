@@ -240,7 +240,11 @@ class BaseStrategy(ABC, Generic[R]):
         feedback_provider = (
             mutation_config.feedback_provider
             if mutation_config and mutation_config.feedback_provider is not None
-            else FeedbackProvider(assessor=feedback_assessor, feedback_function=feedback_function)
+            else FeedbackProvider(
+                assessor=feedback_assessor,
+                feedback_function=feedback_function,
+                failure_score=self.config.failure_score,
+            )
         )
         # GEPA reflects on training examples and reserves validation examples
         # for candidate acceptance/full scoring.  Mixing these sets makes the

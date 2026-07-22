@@ -66,6 +66,7 @@ class DarwinConfig:
     # LM-call budget as their primary stopping condition.
     max_iterations: Optional[int] = 100
     perfect_score: Optional[float] = 1.0
+    failure_score: float = 0.0
     skip_perfect_score: bool = True
     patience: int = 3
     validation_split: float = 0.2
@@ -84,6 +85,8 @@ class DarwinConfig:
     verbose: bool = False
 
     def __post_init__(self):
+        if not isinstance(self.failure_score, (int, float)):
+            raise TypeError("failure_score must be numeric")
         if self.mutation_config is None:
             self.mutation_config = ReflectiveMutationConfig(minibatch_size=self.minibatch_size)
         if self.candidate_selection_strategy not in {

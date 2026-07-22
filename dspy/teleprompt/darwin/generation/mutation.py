@@ -145,17 +145,33 @@ class ReflectivePromptMutation(Generator):
                 try:
                     module_idx = self._select_target_module(len(predictors), parent=parent)
                     evolvable = self._ensure_evolvable(parent.module)
-                    feedback = evolvable.collect_traces_and_evaluate(
-                        minibatch, self.feedback_provider, module_idx
+                    if self.module_selection in {
+                        ModuleSelectionStrategy.ALL.value,
+                        ModuleSelectionStrategy.FAILED_ONLY.value,
+                    }:
+                        feedback_targets = list(range(len(predictors)))
+                    else:
+                        feedback_targets = [module_idx]
+
+                    # Capture one parent rollout, then ask for predictor-level
+                    # feedback from that shared trace.  This keeps ALL and
+                    # FAILED_ONLY from reusing predictor-0 diagnostics while
+                    # avoiding one extra program execution per predictor.
+                    feedback_by_module = evolvable.collect_traces_and_evaluate_many(
+                        minibatch,
+                        self.feedback_provider,
+                        feedback_targets,
                     )
-                    if self.module_selection == ModuleSelectionStrategy.ALL.value:
-                        target_modules = list(range(len(predictors)))
-                    elif self.module_selection == ModuleSelectionStrategy.FAILED_ONLY.value:
+                    if self.module_selection == ModuleSelectionStrategy.FAILED_ONLY.value:
+                        trace_feedback = feedback_by_module[feedback_targets[0]]
                         target_modules = [self._select_failed_module(
-                            feedback.traces, len(predictors), parent
+                            trace_feedback.traces, len(predictors), parent
                         )]
+                    elif self.module_selection == ModuleSelectionStrategy.ALL.value:
+                        target_modules = feedback_targets
                     else:
                         target_modules = [module_idx]
+                    feedback = feedback_by_module[target_modules[0]]
 
                     # Reuse the parent rollout for acceptance when an
                     # evaluation cache is attached by the strategy.  This is
@@ -188,9 +204,10 @@ class ReflectivePromptMutation(Generator):
                     )
                     child_module = evolvable
                     for target_module in target_modules:
+                        target_feedback = feedback_by_module[target_module]
                         child_module = mutator.mutate(
                             child_module,
-                            feedback,
+                            target_feedback,
                             target_module,
                             verbose=getattr(self, "verbose", False),
                         )

@@ -24,6 +24,7 @@ class FeedbackProvider:
         assessor: Optional[Assessor] = None,
         feedback_function: Optional[Callable] = None,
         metric: Optional[Callable] = None,
+        failure_score: float = 0.0,
     ):
         """Initialize feedback provider.
 
@@ -40,6 +41,7 @@ class FeedbackProvider:
 
         self.assessor = assessor
         self.feedback_function = feedback_function
+        self.failure_score = float(failure_score)
 
     @staticmethod
     def _call_feedback(function: Callable, *args):

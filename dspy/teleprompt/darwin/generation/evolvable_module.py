@@ -1,7 +1,7 @@
 """EvolvableModule using DSPy's native capabilities with PromptMutator separation."""
 
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Iterable
 
 import dspy
 from dspy import Module
@@ -57,84 +57,177 @@ class EvolvableModule(Module):
         """Execute the wrapped DSPy module through its public call API."""
         return self._base_module(*args, **kwargs)
     
-    def collect_traces_and_evaluate(self, 
-                                  examples: Dict[int, dspy.Example], 
-                                  feedback_provider,
-                                  target_module_idx: int = 0) -> FeedbackResult:
-        """Execute on examples and collect traces using DSPy's native system.
-        
-        Args:
-            examples: Examples to execute on (Dict with example IDs as keys)
-            feedback_provider: Provider for evaluation and feedback
-            target_module_idx: Index of module to focus analysis on
-            
-        Returns:
-            FeedbackResult with scores, diagnostics, and traces
+    def _named_predictors(self) -> List[tuple[str, Any]]:
+        """Return the wrapped program's predictor names and objects.
+
+        ``EvolvableModule`` is only an execution wrapper.  Calling
+        ``self.named_predictors()`` exposes the wrapper itself as an extra
+        module path (for example ``_base_module``), which is not the name a
+        GEPA metric sees when it is called on the original DSPy program.
         """
-        scores = []
-        diagnostics = []
-        traces = []
-        metrics = []
-        
-        for example_id, example in examples.items():
+        module = getattr(self, "_base_module", None)
+        if module is None:
+            module = self
+        return list(module.named_predictors())
+
+    @staticmethod
+    def _trace_matches_predictor(entry: Any, predictor: Any) -> bool:
+        """Check whether a DSPy trace entry belongs to ``predictor``."""
+        if not isinstance(entry, (tuple, list)) or len(entry) < 3:
+            return False
+        traced_predictor = entry[0]
+        if traced_predictor is predictor:
+            return True
+
+        traced_signature = getattr(traced_predictor, "signature", None)
+        target_signature = getattr(predictor, "signature", None)
+        if traced_signature is None or target_signature is None:
+            return False
+        equals = getattr(traced_signature, "equals", None)
+        if callable(equals):
             try:
-                # Use DSPy's native trace collection
+                return bool(equals(target_signature))
+            except Exception:
+                return False
+        return traced_signature == target_signature
+
+    def _predictor_context(
+        self,
+        trace: List,
+        target_module_idx: int,
+    ) -> tuple[str, Any, List]:
+        """Resolve the named predictor and its invocation sub-trace.
+
+        A predictor can occur more than once in a trace, so the returned
+        ``pred_trace`` is a DSPy trace list containing the matching invocation,
+        rather than an invocation selected by positional index.
+        """
+        named_predictors = self._named_predictors()
+        if not 0 <= target_module_idx < len(named_predictors):
+            return str(target_module_idx), None, []
+
+        pred_name, predictor = named_predictors[target_module_idx]
+        matching_entries = [
+            entry for entry in trace
+            if self._trace_matches_predictor(entry, predictor)
+        ]
+        # GEPA's metric contract expects DSPyTrace (a list of invocations).
+        # Selecting the first invocation is deterministic; the full trace is
+        # still retained separately for the proposer and evaluator.
+        return pred_name, predictor, matching_entries[:1]
+
+    def collect_traces_and_evaluate_many(
+        self,
+        examples: Dict[int, dspy.Example],
+        feedback_provider,
+        target_module_indices: Iterable[int],
+    ) -> Dict[int, FeedbackResult]:
+        """Run the parent once and create feedback for each target predictor.
+
+        GEPA captures one rollout and then asks the metric for predictor-level
+        feedback using the relevant invocation from that rollout.  Keeping the
+        rollout shared is important for multi-predictor programs: it avoids
+        changing the search budget while ensuring ``all`` and ``failed_only``
+        do not reuse predictor-0 diagnostics for every component.
+        """
+        target_indices = list(dict.fromkeys(target_module_indices))
+        if not target_indices:
+            return {}
+
+        per_target = {
+            index: {
+                "scores": [],
+                "diagnostics": [],
+                "traces": [],
+                "metrics": [],
+            }
+            for index in target_indices
+        }
+        rollouts = []
+
+        for example in examples.values():
+            try:
                 with dspy.context(trace=[]):
                     prediction = self(**example.inputs())
-                    trace = dspy.settings.trace.copy() if hasattr(dspy.settings, 'trace') else []
-                
-                # Use feedback provider for evaluation
-                predictors = self.predictors()
-                target_predictor = (
-                    predictors[target_module_idx]
-                    if 0 <= target_module_idx < len(predictors) else None
-                )
-                evaluate = getattr(feedback_provider, "evaluate_rich", None)
-                evaluator = evaluate or feedback_provider.evaluate
-                evaluation = evaluator(
-                    example, prediction, trace, target_module_idx,
-                    pred_name=getattr(target_predictor, "name", None),
-                    pred_trace=(
-                        trace[target_module_idx]
-                        if target_module_idx < len(trace) else None
-                    ),
-                )
-                if len(evaluation) == 3:
-                    score, diagnostic, side_info = evaluation
-                else:
-                    score, diagnostic = evaluation
+                    trace = dspy.settings.trace.copy() if hasattr(dspy.settings, "trace") else []
+                rollouts.append((example, prediction, trace, None))
+            except Exception as error:
+                rollouts.append((example, None, [], error))
+
+        evaluate = getattr(feedback_provider, "evaluate_rich", None)
+        evaluator = evaluate or feedback_provider.evaluate
+        failure_score = float(getattr(feedback_provider, "failure_score", 0.0))
+
+        for target_module_idx in target_indices:
+            values = per_target[target_module_idx]
+            for example, prediction, trace, execution_error in rollouts:
+                if execution_error is not None:
+                    score = failure_score
+                    diagnostic = f"ERROR: {execution_error}"
                     side_info = None
-                
-                scores.append(score)
-                diagnostics.append(diagnostic)
-                traces.append(trace)
-                metrics.append(Metric(
-                    score,
-                    id=task_id(example),
-                    feedback=str(diagnostic or ""),
-                    trace=trace,
-                    side_info=side_info,
-                ))
-                
-            except Exception as e:
-                scores.append(0.0)
-                diagnostics.append(f"ERROR: {str(e)}")
-                traces.append([])
-                metrics.append(Metric(
-                    0.0,
-                    id=task_id(example),
-                    feedback=f"ERROR: {str(e)}",
-                    trace=[],
-                ))
-        
-        return FeedbackResult(
-            scores=scores,
-            diagnostics=diagnostics,
-            traces=traces,
-            examples=list(examples.values()),
-            metrics=metrics,
-        )
-    
+                    metric_trace = []
+                else:
+                    pred_name, _, pred_trace = self._predictor_context(
+                        trace, target_module_idx
+                    )
+                    try:
+                        evaluation = evaluator(
+                            example,
+                            prediction,
+                            trace,
+                            target_module_idx,
+                            pred_name=pred_name,
+                            pred_trace=pred_trace,
+                        )
+                        if len(evaluation) == 3:
+                            score, diagnostic, side_info = evaluation
+                        else:
+                            score, diagnostic = evaluation
+                            side_info = None
+                        metric_trace = trace
+                    except Exception as error:
+                        score = failure_score
+                        diagnostic = f"ERROR: {error}"
+                        side_info = None
+                        metric_trace = trace
+
+                values["scores"].append(float(score))
+                values["diagnostics"].append(str(diagnostic or ""))
+                values["traces"].append(metric_trace)
+                values["metrics"].append(
+                    Metric(
+                        float(score),
+                        id=task_id(example),
+                        feedback=str(diagnostic or ""),
+                        trace=metric_trace,
+                        side_info=side_info,
+                    )
+                )
+
+        return {
+            target_module_idx: FeedbackResult(
+                scores=values["scores"],
+                diagnostics=values["diagnostics"],
+                traces=values["traces"],
+                examples=list(examples.values()),
+                metrics=values["metrics"],
+            )
+            for target_module_idx, values in per_target.items()
+        }
+
+    def collect_traces_and_evaluate(
+        self,
+        examples: Dict[int, dspy.Example],
+        feedback_provider,
+        target_module_idx: int = 0,
+    ) -> FeedbackResult:
+        """Execute on examples and collect target-predictor feedback."""
+        return self.collect_traces_and_evaluate_many(
+            examples,
+            feedback_provider,
+            [target_module_idx],
+        )[target_module_idx]
+
     def evolve(self, 
                feedback: FeedbackResult, 
                target_module_idx: int = 0,

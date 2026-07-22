@@ -22,6 +22,24 @@ def simple_metric(example, prediction, trace=None):
     return 0.5
 
 
+class TraceableTwoPredictorModule(dspy.Module):
+    """Small deterministic module exposing two DSPy predictor traces."""
+
+    def __init__(self):
+        super().__init__()
+        self.first = dspy.Predict("question -> first")
+        self.second = dspy.Predict("question -> second")
+
+    def forward(self, question):
+        first = dspy.Prediction(first="first output")
+        second = dspy.Prediction(second="second output")
+        trace = getattr(dspy.settings, "trace", None)
+        if trace is not None:
+            trace.append((self.first, {"question": question}, first))
+            trace.append((self.second, {"question": question}, second))
+        return dspy.Prediction(answer=second.second)
+
+
 class TestGeneration:
     """Test all generation components."""
 
@@ -273,11 +291,59 @@ class TestGeneration:
         score, _ = provider.evaluate(
             dspy.Example(question="q", answer="a"),
             Mock(), trace, module_idx=0,
+            pred_name="answer",
+            pred_trace=[trace[0]],
         )
 
         assert score == 0.25
-        assert received["pred_name"] == "0"
-        assert received["pred_trace"] == trace[0]
+        assert received["pred_name"] == "answer"
+        assert received["pred_trace"] == [trace[0]]
+
+    def test_feedback_uses_named_predictor_and_matching_subtrace(self):
+        calls = []
+
+        def metric(gold, pred, trace, pred_name, pred_trace):
+            calls.append((pred_name, pred_trace))
+            return 0.5, f"feedback for {pred_name}"
+
+        provider = FeedbackProvider(assessor=metric)
+        example = dspy.Example(question="q", answer="second output").with_inputs("question")
+        evolvable = EvolvableModule(base_module=TraceableTwoPredictorModule())
+
+        feedback = evolvable.collect_traces_and_evaluate_many(
+            {0: example}, provider, [0, 1]
+        )
+
+        assert [name for name, _ in calls] == ["first", "second"]
+        assert all(len(pred_trace) == 1 for _, pred_trace in calls)
+        assert feedback[0].diagnostics == ["Score: 0.50 (FAILURE) | Feedback: feedback for first"]
+        assert feedback[1].diagnostics == ["Score: 0.50 (FAILURE) | Feedback: feedback for second"]
+
+    @patch("dspy.teleprompt.darwin.generation.mutation.ReflectivePromptMutator")
+    def test_all_selection_passes_predictor_specific_feedback(self, mutator_mock):
+        calls = []
+
+        def metric(gold, pred, trace, pred_name, pred_trace):
+            calls.append(pred_name)
+            return 0.5, f"feedback for {pred_name}"
+
+        example = dspy.Example(question="q", answer="second output").with_inputs("question")
+        generator = ReflectivePromptMutation(
+            feedback_provider=FeedbackProvider(assessor=metric),
+            feedback_data=[example],
+            module_selection=ModuleSelectionStrategy.ALL.value,
+        )
+        parent = Candidate(TraceableTwoPredictorModule())
+        mutator_mock.return_value.mutate.side_effect = lambda module, feedback, *_args, **_kwargs: module
+
+        result = generator.generate(Parents(parent))
+
+        assert not result.is_empty()
+        assert calls == ["first", "second"]
+        mutation_calls = mutator_mock.return_value.mutate.call_args_list
+        assert len(mutation_calls) == 2
+        assert "feedback for first" in mutation_calls[0].args[1].diagnostics[0]
+        assert "feedback for second" in mutation_calls[1].args[1].diagnostics[0]
 
     def test_feedback_side_information_is_preserved(self):
         def metric(example, prediction, trace=None):
