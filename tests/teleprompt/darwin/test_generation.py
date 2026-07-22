@@ -13,6 +13,8 @@ from dspy.teleprompt.darwin.data.cohort import Parents
 from dspy.teleprompt.darwin.data.candidate import Candidate
 from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
 from dspy.teleprompt.darwin.data.split_strategy import DefaultSplitStrategy
+from dspy.teleprompt.darwin.config import DarwinConfig
+from dspy.teleprompt.darwin.strategy.gepa import GEPAStrategy
 from unittest.mock import Mock, patch
 
 
@@ -225,6 +227,14 @@ class TestGeneration:
         generator = SystemAwareMerge()
         # Just test that it can be created
         assert generator is not None
+
+    def test_reflection_lm_is_injected_from_darwin_config(self):
+        marker = object()
+        strategy = GEPAStrategy(DarwinConfig(reflection_lm=marker))
+
+        generator = strategy._instantiate_generator(ReflectivePromptMutation)
+
+        assert generator.reflection_lm is marker
 
     def test_feedback_provider(self):
         """Test feedback provider basic functionality."""

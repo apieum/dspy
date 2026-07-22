@@ -37,6 +37,9 @@ class DarwinConfig:
     # Official GEPA only attempts a merge when the two branches share enough
     # validation support to make the merge comparison meaningful.
     merge_val_overlap_floor: int = 5
+    # Optional LM dedicated to reflective prompt proposals. When omitted,
+    # reflection uses DSPy's active task LM, preserving the existing default.
+    reflection_lm: Optional[Any] = None
     enhanced_feedback: Optional[Assessor] = F1Score()  # Optional feedback-generating metric
     acceptance_criterion: Any = StrictImprovementAcceptance
     proposal_selection: Any = AllImprovements
