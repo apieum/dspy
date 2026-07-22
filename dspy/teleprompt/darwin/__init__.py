@@ -24,6 +24,7 @@ from .generation.feedback import FeedbackProvider
 from .evaluation.gepa_evaluator import FullTaskScores, ParentFastCompare, GEPATwoPhasesEval
 from .evaluation.acceptance import StrictImprovementAcceptance, ImprovementOrEqualAcceptance
 from .evaluation.cache import EvaluationCache
+from .evaluation.proposal_selection import AllImprovements, BestImprovement, TopKImprovements
 from .evaluation.trace_collector import EnhancedTraceCollector
 from .evaluation.feedback import FeedbackResult, EvaluationTrace, ModuleFeedback
 from .evaluation.metrics import (
@@ -94,6 +95,9 @@ __all__ = [
     'StrictImprovementAcceptance',
     'ImprovementOrEqualAcceptance',
     'EvaluationCache',
+    'AllImprovements',
+    'BestImprovement',
+    'TopKImprovements',
     'GEPATwoPhasesEval',
     'EnhancedTraceCollector',
     'FeedbackResult',

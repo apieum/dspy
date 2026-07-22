@@ -14,6 +14,7 @@ from ..data.cohort import NewBorns, Survivors
 from ..budget import Budget
 from .acceptance import StrictImprovementAcceptance
 from .cache import EvaluationCache
+from .proposal_selection import AllImprovements
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,8 @@ class ParentFastCompare(Evaluator):
     """
 
     def __init__(self, assessor: Assessor, minibatch_data: List[dspy.Example] = None,
-                 acceptance_criterion=None, evaluation_cache=None, **kwargs):
+                 acceptance_criterion=None, proposal_selection=None,
+                 evaluation_cache=None, **kwargs):
         """
         Args:
             assessor: The assessor to evaluate predictions against examples.
@@ -38,6 +40,7 @@ class ParentFastCompare(Evaluator):
         self.minibatch_data = minibatch_data or []
         self.acceptance_criterion = acceptance_criterion or StrictImprovementAcceptance()
         self.evaluation_cache = evaluation_cache or EvaluationCache()
+        self.proposal_selection = proposal_selection or AllImprovements()
         self.verbose = False
 
     def start_compilation(self, student: dspy.Module, dataset_manager=None, verbose: bool = False) -> None:
@@ -55,19 +58,26 @@ class ParentFastCompare(Evaluator):
         2. It outperforms its parent on a random validation minibatch.
         """
         promising_candidates = []
+        improvements = []
 
         for candidate in new_borns.candidates:
             is_promising = False
             if not candidate.parents:
                 # Initial candidates are always promising.
                 is_promising = True
+                improvement = float("inf")
             else:
-                is_improved, _ = self._validate_on_minibatch(candidate, budget)
+                is_improved, _, improvement = self._validate_on_minibatch(candidate, budget)
                 if is_improved:
                     is_promising = True
 
             if is_promising:
                 promising_candidates.append(candidate)
+                improvements.append(improvement)
+
+        promising_candidates = self.proposal_selection.select(
+            promising_candidates, improvements
+        )
 
         self.publish('parent_fast_compare_summary',
                     {'passed': len(promising_candidates), 'total': len(new_borns.candidates)})
@@ -76,7 +86,7 @@ class ParentFastCompare(Evaluator):
     def _validate_on_minibatch(self, child: 'Candidate', budget: Budget) -> tuple[bool, int]:
         """Compares a child and parent on a random minibatch from the development set."""
         if not self.minibatch_data:
-            return False, 0
+            return False, 0, float("-inf")
 
         try:
             # Notify observers about validation start with all relevant info
@@ -91,10 +101,15 @@ class ParentFastCompare(Evaluator):
             # Crossover proposals must improve every parent they were derived
             # from. This is conservative for multi-parent proposals and is
             # identical to the single-parent GEPA path.
+            deltas = [
+                sum(child_values) - sum(values)
+                for values in parent_scores
+            ]
             is_improved = all(
                 self.acceptance_criterion.should_accept(child_values, values)
                 for values in parent_scores
             )
+            improvement = min(deltas, default=float("-inf"))
             avg_child = sum(child_values) / len(child_values) if child_values else 0.0
             avg_parent = min(
                 (sum(values) / len(values) for values in parent_scores if values),
@@ -105,12 +120,12 @@ class ParentFastCompare(Evaluator):
 
             self.publish('validation_result', child,
                         {'passed': is_improved, 'cost': cost, 'parent_avg': avg_parent, 'child_avg': avg_child})
-            return is_improved, cost
+            return is_improved, cost, improvement
 
         except Exception as e:
             # Keep this as direct logging since it's an error case
             logger.warning(f"Minibatch validation failed: {e}")
-            return False, len(self.minibatch_data) * len(child.parents)
+            return False, len(self.minibatch_data) * len(child.parents), float("-inf")
 
     def _evaluate(self, candidate, examples, *, persist_scores):
         cached = [self.evaluation_cache.get(candidate, example) for example in examples]

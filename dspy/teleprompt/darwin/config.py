@@ -11,6 +11,7 @@ from .evaluation import Evaluator, GEPATwoPhasesEval
 from .evaluation.metrics import Assessor, F1Score
 from .dataset_manager import DefaultDatasetManagerFactory
 from .evaluation.acceptance import StrictImprovementAcceptance
+from .evaluation.proposal_selection import AllImprovements
 
 
 @dataclass
@@ -31,6 +32,7 @@ class DarwinConfig:
     crossover: Optional[Type['Generator']] = SystemAwareMerge  # Optional crossover generator
     enhanced_feedback: Optional[Assessor] = F1Score()  # Optional feedback-generating metric
     acceptance_criterion: Any = StrictImprovementAcceptance
+    proposal_selection: Any = AllImprovements
     candidate_selection_strategy: str = "pareto"
     proposals_per_generation: int = 1
     mutation_config: ReflectiveMutationConfig = None
