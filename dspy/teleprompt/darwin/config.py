@@ -67,6 +67,7 @@ class DarwinConfig:
     observers: Tuple[Any, ...] = ()
     checkpoint_path: Optional[str] = None
     resume_from: Optional[str] = None
+    handle_signals: bool = True
     stoppers: Tuple[Any, ...] = ()
 
     # Logging

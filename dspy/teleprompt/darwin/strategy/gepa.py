@@ -5,6 +5,7 @@ import inspect
 import random
 import json
 import importlib
+import signal
 from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
 
@@ -55,6 +56,9 @@ class GEPAStrategy(BaseStrategy[Result]):
         self._budget_exhaustion_notified = False
         self.rng = random.Random(config.seed)
         self.batch_sampler = None
+        self._previous_signal_handlers = {}
+        self._signal_stop_requested = False
+        self._signal_stop_reason = None
 
     def start_compilation(
         self, student: dspy.Module, *, trainset: list[dspy.Example], devset: list[dspy.Example] | None = None, teacher: dspy.Module | None = None, **kwargs
@@ -83,6 +87,7 @@ class GEPAStrategy(BaseStrategy[Result]):
         self.batch_sampler = self.config.batch_sampler or EpochShuffledBatchSampler(
             self.config.mutation_config.minibatch_size,
         )
+        self._install_signal_handlers()
 
         # Centralize train/dev handling so experiments can inject a different
         # dataset policy without changing the strategy itself.
@@ -191,7 +196,36 @@ class GEPAStrategy(BaseStrategy[Result]):
             result_module._compiled = True
         self._notify("finish_compilation", result_module)
         self._write_checkpoint(completed=True)
+        self._restore_signal_handlers()
         return result
+
+    def _install_signal_handlers(self) -> None:
+        if not self.config.handle_signals:
+            return
+        try:
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                self._previous_signal_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, self._handle_signal)
+        except (ValueError, OSError):
+            # Signal handlers can only be installed by the main thread and
+            # are unavailable on some platforms. Optimization still works.
+            self._previous_signal_handlers.clear()
+
+    def _restore_signal_handlers(self) -> None:
+        for signum, handler in self._previous_signal_handlers.items():
+            try:
+                signal.signal(signum, handler)
+            except (ValueError, OSError):
+                pass
+        self._previous_signal_handlers.clear()
+
+    def _handle_signal(self, signum, frame) -> None:
+        self._signal_stop_requested = True
+        self._signal_stop_reason = signal.Signals(signum).name
+        try:
+            self._write_checkpoint(completed=False)
+        except Exception:
+            logger.exception("Unable to write Darwin checkpoint after %s", self._signal_stop_reason)
 
     def get_checkpoint(self, completed: bool = False) -> OptimizationCheckpoint:
         """Return a JSON-safe snapshot of the current optimization state."""
@@ -251,6 +285,7 @@ class GEPAStrategy(BaseStrategy[Result]):
             budget=remaining if isinstance(remaining, dict) else {"remaining": remaining},
             candidates=candidates,
             rng_state=self.rng.getstate(),
+            stop_reason=self._signal_stop_reason,
             completed=completed,
         )
 

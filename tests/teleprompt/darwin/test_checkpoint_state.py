@@ -48,3 +48,18 @@ def test_completed_checkpoint_can_be_resumed(tmp_path):
     assert compiled._compiled is True
     assert resumed.get_last_result().candidates
     assert type(resumed.strategy.current_newborns).__name__ == "NewBorns"
+
+
+def test_signal_handler_writes_interrupted_checkpoint(tmp_path):
+    checkpoint_path = tmp_path / "signal-checkpoint.json"
+    strategy = GEPAStrategy(
+        DarwinConfig(max_lm_calls=1, checkpoint_path=str(checkpoint_path))
+    )
+    strategy._handle_signal(2, None)
+
+    assert strategy._signal_stop_requested is True
+    assert strategy._signal_stop_reason == "SIGINT"
+    assert checkpoint_path.exists()
+    payload = json.loads(checkpoint_path.read_text())
+    assert payload["completed"] is False
+    assert payload["stop_reason"] == "SIGINT"

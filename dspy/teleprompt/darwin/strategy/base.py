@@ -176,6 +176,8 @@ class BaseStrategy(ABC, Generic[R]):
     # Evolutionary decision methods
     def should_terminate(self) -> bool:
         """Decide if optimization should terminate."""
+        if getattr(self, "_signal_stop_requested", False):
+            return True
         for stopper in self.config.stoppers:
             if stopper(self):
                 return True
