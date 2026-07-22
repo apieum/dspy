@@ -139,7 +139,7 @@ class ParetoFrontier(Selector):
         # Get best candidates from task scores and select overall best
         best_candidates = self._remove_dominated(self.task_wins.keys())
 
-        best = max(best_candidates, key=lambda c: c.average_score())
+        best = max(best_candidates, key=lambda c: c.total_score())
 
         # Report candidate pool and final selection
         self.publish('best_candidate_selection', best, {'pool_size': len(best_candidates)})
@@ -161,13 +161,13 @@ class ParetoFrontier(Selector):
         candidates = list(self._remove_dominated(self.task_wins))
 
         if strategy == "current_best":
-            return max(candidates, key=lambda c: c.average_score())
+            return max(candidates, key=lambda c: c.total_score())
         if strategy == "epsilon_greedy":
             if rng.random() < 0.1:
                 return rng.choice(candidates)
-            return max(candidates, key=lambda c: c.average_score())
+            return max(candidates, key=lambda c: c.total_score())
         if strategy == "top_k_pareto":
-            candidates = sorted(candidates, key=lambda c: c.average_score(), reverse=True)
+            candidates = sorted(candidates, key=lambda c: c.total_score(), reverse=True)
             candidates = candidates[: min(3, len(candidates))]
         elif strategy != "pareto":
             raise ValueError(f"Unknown candidate selection strategy: {strategy}")

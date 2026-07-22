@@ -272,17 +272,17 @@ class ReflectivePromptMutation(Generator):
 
         candidates = parents.to_list()
         if selector == "current_best":
-            return max(candidates, key=lambda candidate: candidate.average_score())
+            return max(candidates, key=lambda candidate: candidate.total_score())
 
         if selector == "epsilon_greedy":
             if self.rng.random() < 0.1:
                 return self.rng.choice(candidates)
-            return max(candidates, key=lambda candidate: candidate.average_score())
+            return max(candidates, key=lambda candidate: candidate.total_score())
 
         if selector == "top_k_pareto":
             top_candidates = sorted(
                 candidates,
-                key=lambda candidate: candidate.average_score(),
+                key=lambda candidate: candidate.total_score(),
                 reverse=True,
             )[:5]
             if len(top_candidates) == 1:

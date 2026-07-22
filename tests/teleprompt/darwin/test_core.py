@@ -34,6 +34,7 @@ class TestCandidate:
         assert candidate.find_score_by_uuid('uuid-1').value == 0.8
         assert candidate.find_score_by_uuid('uuid-2').value == 0.6
         assert abs(candidate.average_score() - 0.77) < 0.01  # (0.8 + 0.6 + 0.9) / 3
+        assert candidate.total_score() == 2.3
 
     def test_candidate_domination(self):
         """Test candidate domination logic with UUID-based metrics."""
@@ -174,6 +175,16 @@ class TestSplitStrategy:
         # Test evaluation minibatch
         eval_batch = strategy.get_evaluation_minibatch(candidate, size=1)
         assert len(eval_batch) == 1
+
+
+def test_total_score_is_used_for_partial_candidate_comparisons():
+    first = Candidate(dspy.Predict("question -> answer"))
+    second = Candidate(dspy.Predict("question -> answer"))
+    first.scores = [Metric(0.8, id="a"), Metric(0.8, id="b")]
+    second.scores = [Metric(1.0, id="a")]
+
+    assert first.total_score() > second.total_score()
+    assert first.best_overall(second) is first
 
 
 if __name__ == "__main__":

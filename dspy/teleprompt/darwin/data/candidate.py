@@ -64,6 +64,10 @@ class Candidate:
             return 0.0
         return sum(float(score.value) for score in self.scores) / len(self.scores)
 
+    def total_score(self) -> float:
+        """Return GEPA's aggregate objective over the available examples."""
+        return sum(float(score.value) for score in self.scores)
+
     def evaluate_on_task(self, task: Example, assessor: "Assessor", channel: Optional[Channel] = NullChannel) -> "Metric":
         """Evaluate this candidate on a single example using provided metric."""
         from ..evaluation import Metric
@@ -215,11 +219,11 @@ class Candidate:
         return batch_scores if scores else []
 
     def best_overall(self, other: 'Candidate') -> 'Candidate':
-        my_avg_score = self.average_score()
-        other_avg_score = other.average_score()
-        if my_avg_score > other_avg_score:
+        my_total_score = self.total_score()
+        other_total_score = other.total_score()
+        if my_total_score > other_total_score:
             return self
-        elif my_avg_score < other_avg_score:
+        elif my_total_score < other_total_score:
             return other
         elif self.generation_number > other.generation_number:
             return self

@@ -22,7 +22,7 @@ class DiversityArchive:
     def add(self, candidate) -> None:
         key = self.fingerprint(candidate)
         current = self._entries.get(key)
-        if current is None or candidate.average_score() > current.average_score():
+        if current is None or candidate.total_score() > current.total_score():
             self._entries[key] = candidate
         self._trim()
 
@@ -32,7 +32,7 @@ class DiversityArchive:
 
     def _trim(self) -> None:
         if len(self._entries) > self.capacity:
-            ranked = sorted(self._entries.items(), key=lambda item: item[1].average_score(), reverse=True)
+            ranked = sorted(self._entries.items(), key=lambda item: item[1].total_score(), reverse=True)
             self._entries = dict(ranked[: self.capacity])
 
     def candidates(self):

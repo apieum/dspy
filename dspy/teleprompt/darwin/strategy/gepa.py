@@ -453,7 +453,7 @@ class GEPAStrategy(BaseStrategy[Result]):
             selector_cohort_cls(*restored.values(), iteration=self.current_generation)
         )
         self.best_candidate = max(
-            restored.values(), key=lambda candidate: candidate.average_score(), default=None
+            restored.values(), key=lambda candidate: candidate.total_score(), default=None
         )
         return True
 
@@ -483,7 +483,7 @@ class GEPAStrategy(BaseStrategy[Result]):
                     isinstance(selected, Candidate)
                     and (
                         candidate is None
-                        or selected.average_score() >= candidate.average_score()
+                        or selected.total_score() >= candidate.total_score()
                     )
                 ):
                     candidate = selected
@@ -515,12 +515,11 @@ class GEPAStrategy(BaseStrategy[Result]):
         # Update best candidate tracking
         if self.current_survivors and not self.current_survivors.is_empty():
             best_in_generation = max(self.current_survivors.candidates,
-                                   key=lambda c: c.average_score() if c.average_score() is not None else -1)
+                                   key=lambda c: c.total_score())
             generation_best_score = best_in_generation.average_score()
 
             if (self.best_candidate is None or
-                (best_in_generation.average_score() is not None and self.best_candidate.average_score() is not None and
-                 best_in_generation.average_score() > self.best_candidate.average_score())):
+                best_in_generation.total_score() > self.best_candidate.total_score()):
                 self.best_candidate = best_in_generation
                 self.generations_without_improvement = 0
             else:

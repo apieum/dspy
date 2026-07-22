@@ -104,7 +104,7 @@ class SystemAwareMerge(Generator):
                     # Official GEPA only merges descendants that have both
                     # genuinely surpassed their common ancestor. Otherwise a
                     # stale ancestor can re-enter the search through a merge.
-                    if ancestor.average_score() > min(parent1.average_score(), parent2.average_score()):
+                    if ancestor.total_score() > min(parent1.total_score(), parent2.total_score()):
                         continue
 
                     # Check merge history (integrated logic)
@@ -212,7 +212,7 @@ class SystemAwareMerge(Generator):
 
                 # Condition 3: Both innovated differently, pick from the better-performing parent
                 elif π_a != π_p1 and π_a != π_p2 and π_p1 != π_p2:
-                    best_parent = p1 if p1.average_score() > p2.average_score() else p2
+                    best_parent = p1 if p1.total_score() > p2.total_score() else p2
                     selected_signature = sig_p1 if best_parent == p1 else sig_p2
                     selected_signatures.append((i, selected_signature))
                     logger.debug(f"DESIRABLE: Module {i} - both innovated, using {'p1' if best_parent == p1 else 'p2'}'s signature")
