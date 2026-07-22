@@ -1,7 +1,7 @@
 """Configuration classes for Darwin optimization framework."""
 
 from dataclasses import dataclass
-from typing import Type, Optional
+from typing import Type, Optional, Tuple, Any
 
 from .budget import Budget, LMCallsBudget
 from .selection import Selector, ParetoFrontier
@@ -9,6 +9,7 @@ from .generation import Generator, SystemAwareMerge, ReflectivePromptMutation
 from .generation.config import ReflectiveMutationConfig
 from .evaluation import Evaluator, GEPATwoPhasesEval
 from .evaluation.metrics import Assessor, F1Score
+from .dataset_manager import DefaultDatasetManagerFactory
 
 
 @dataclass
@@ -37,6 +38,10 @@ class DarwinConfig:
     validation_split: float = 0.2
     minibatch_size: int = 3  # Size of minibatch for quick validation
     seed: int = 1
+
+    # Dataset and lifecycle extension points
+    dataset_manager_factory: Type[Any] = DefaultDatasetManagerFactory
+    observers: Tuple[Any, ...] = ()
 
     # Logging
     verbose: bool = False

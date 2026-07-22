@@ -8,6 +8,8 @@ from typing import List, Optional, TYPE_CHECKING, TypeVar, Generic
 import dspy
 from ..data.candidate import Candidate
 from ..result import Result
+from ..compilation_observer import CompilationObserver
+from ..dataset_manager import DatasetManager
 
 if TYPE_CHECKING:
     from ..config import DarwinConfig
@@ -52,6 +54,15 @@ class BaseStrategy(ABC, Generic[R]):
         self.devset: List[dspy.Example] = []
         self.training_data: List[dspy.Example] = []
         self.validation_data: List[dspy.Example] = []
+        self.dataset_manager: Optional[DatasetManager] = None
+        self.observers: tuple[CompilationObserver, ...] = tuple(config.observers)
+
+    def _notify(self, event: str, *args) -> None:
+        """Notify opt-in lifecycle observers without coupling components to them."""
+        for observer in self.observers:
+            callback = getattr(observer, event, None)
+            if callback is not None:
+                callback(*args)
 
     @abstractmethod
     def start_compilation(

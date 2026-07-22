@@ -55,6 +55,13 @@ from .logging import (
 # Strategy and configuration
 from .strategy import BaseStrategy, GEPAStrategy
 from .config import DarwinConfig
+from .compilation_observer import CompilationObserver
+from .dataset_manager import (
+    DatasetManager,
+    DatasetManagerFactory,
+    DefaultDatasetManager,
+    DefaultDatasetManagerFactory,
+)
 from .generation.config import ReflectiveMutationConfig, ModuleSelectionStrategy
 
 # GEPA convenience optimizers
@@ -113,6 +120,9 @@ __all__ = [
     'BaseStrategy',
     'GEPAStrategy',
     'DarwinConfig',
+    'CompilationObserver',
+    'DatasetManager', 'DatasetManagerFactory',
+    'DefaultDatasetManager', 'DefaultDatasetManagerFactory',
     'ReflectiveMutationConfig',
     'ModuleSelectionStrategy',
     
