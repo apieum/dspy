@@ -24,11 +24,13 @@ class SystemAwareMerge(Generator):
     System-Aware Merge generator implementing Algorithm 4 from the GEPA paper.
     """
 
-    def __init__(self, feedback_provider=None, feedback_data=None, assessor=None, config=None):
+    def __init__(self, feedback_provider=None, feedback_data=None, assessor=None,
+                 config=None, val_overlap_floor: int = 5):
         super().__init__()
         # Integrated merge history tracking (replaces MergeHistoryTracker)
         self.attempted_merges: Set[Tuple[int, int, int]] = set()
         self.merge_stats = {"success": 0, "failure_not_desirable": 0, "failure_ancestry": 0}
+        self.merge_stats["failure_overlap"] = 0
         self.verbose = False
         self.feedback_provider = feedback_provider
         self.assessor = assessor or getattr(feedback_provider, "assessor", None)
@@ -38,6 +40,9 @@ class SystemAwareMerge(Generator):
         # Initialize fallback mutation generator
         self.fallback_generator = None
         self.devset = feedback_data or []
+        if val_overlap_floor <= 0:
+            raise ValueError("val_overlap_floor must be positive")
+        self.val_overlap_floor = val_overlap_floor
 
     def generate(self, parents: Parents, budget=None) -> NewBorns:
         """Generate a new candidate using System-Aware Merge (Algorithm 4)."""
@@ -57,6 +62,23 @@ class SystemAwareMerge(Generator):
                 return NewBorns()
 
             parent1, parent2 = list(selected_parents)
+
+            # A merge is only meaningful when both branches have been scored
+            # on enough of the same validation support. Empty scores are kept
+            # permissive for direct/custom generator use; the normal GEPA
+            # evaluator populates them before a merge is scheduled.
+            common_score_ids = {
+                score.id for score in parent1.scores
+            } & {
+                score.id for score in parent2.scores
+            }
+            if parent1.scores and parent2.scores and len(common_score_ids) < self.val_overlap_floor:
+                self.merge_stats["failure_overlap"] += 1
+                logger.debug(
+                    "Skipping merge: %d shared validation scores, %d required",
+                    len(common_score_ids), self.val_overlap_floor,
+                )
+                return NewBorns()
 
             # Find common ancestors
             common_ancestors = parent1.find_common_ancestors(parent2)
@@ -283,7 +305,12 @@ class SystemAwareMerge(Generator):
     ) -> None:
         """Resets merge history for a new compilation run."""
         self.attempted_merges.clear()
-        self.merge_stats = {"success": 0, "failure_not_desirable": 0, "failure_ancestry": 0}
+        self.merge_stats = {
+            "success": 0,
+            "failure_not_desirable": 0,
+            "failure_ancestry": 0,
+            "failure_overlap": 0,
+        }
         self.verbose = verbose
         self.devset = feedback_data or []
 

@@ -34,6 +34,9 @@ class DarwinConfig:
     crossover: Optional[Type['Generator']] = SystemAwareMerge  # Optional crossover generator
     use_merge: bool = False
     max_merge_invocations: int = 5
+    # Official GEPA only attempts a merge when the two branches share enough
+    # validation support to make the merge comparison meaningful.
+    merge_val_overlap_floor: int = 5
     enhanced_feedback: Optional[Assessor] = F1Score()  # Optional feedback-generating metric
     acceptance_criterion: Any = StrictImprovementAcceptance
     proposal_selection: Any = AllImprovements
@@ -97,3 +100,5 @@ class DarwinConfig:
             raise ValueError("archive_capacity must be positive")
         if self.max_merge_invocations < 0:
             raise ValueError("max_merge_invocations must be non-negative")
+        if self.merge_val_overlap_floor <= 0:
+            raise ValueError("merge_val_overlap_floor must be positive")

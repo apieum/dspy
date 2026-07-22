@@ -257,6 +257,13 @@ class BaseStrategy(ABC, Generic[R]):
             "assessor": feedback_assessor,
             "config": mutation_config,
         }
+        # Keep strategy-level merge policy available to merge generators while
+        # preserving the open generator interface for unrelated components.
+        try:
+            if "val_overlap_floor" in inspect.signature(generator_factory).parameters:
+                kwargs["val_overlap_floor"] = self.config.merge_val_overlap_floor
+        except (TypeError, ValueError):
+            pass
         if mutation_config:
             kwargs.update(
                 {

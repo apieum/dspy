@@ -50,3 +50,21 @@ def test_system_aware_merge_does_not_reintroduce_better_ancestor():
     merged = SystemAwareMerge().generate(Parents(first, second, iteration=1))
 
     assert merged.is_empty()
+
+
+def test_system_aware_merge_requires_shared_validation_support():
+    ancestor = Candidate(dspy.Predict("question -> answer"), generation_number=0)
+    first_module = ancestor.module.deepcopy()
+    second_module = ancestor.module.deepcopy()
+    instruction(first_module, "First variant")
+    instruction(second_module, "Second variant")
+    first = Candidate(first_module, parents=[ancestor], generation_number=1)
+    second = Candidate(second_module, parents=[ancestor], generation_number=1)
+    first.scores = [Metric(1.0, id="task-1")]
+    second.scores = [Metric(1.0, id="task-2")]
+
+    merged = SystemAwareMerge(val_overlap_floor=1).generate(
+        Parents(first, second, iteration=1)
+    )
+
+    assert merged.is_empty()
