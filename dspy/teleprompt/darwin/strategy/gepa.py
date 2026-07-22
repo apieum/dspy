@@ -12,7 +12,7 @@ from typing import List, Optional, TYPE_CHECKING
 import dspy
 from dspy.teleprompt.utils import get_signature, set_signature
 from .base import BaseStrategy
-from ..data.candidate import Candidate
+from ..data.candidate import Candidate, example_id
 from ..data.cohort import Cohort, NewBorns, Survivors, Parents
 from ..result import Result, Success, Failure
 from ..state import OptimizationCheckpoint
@@ -265,11 +265,13 @@ class GEPAStrategy(BaseStrategy[Result]):
                         getattr(get_signature(predictor), "instructions", "")
                         for predictor in candidate.module.predictors()
                     ],
-                    "creation_metadata": {
-                        str(key): value
-                        for key, value in candidate.creation_metadata.items()
-                        if isinstance(value, (str, int, float, bool, type(None)))
-                    },
+                    "creation_metadata": self._serialize_creation_metadata(
+                        candidate.creation_metadata
+                    ),
+                    "proposal_minibatch_ids": [
+                        example_id(example)
+                        for example in (candidate.proposal_minibatch or [])
+                    ],
                 })
                 # A candidate can exist in multiple active cohorts. Preserve
                 # all roles without duplicating its serialized record.
@@ -288,6 +290,17 @@ class GEPAStrategy(BaseStrategy[Result]):
             stop_reason=self._signal_stop_reason,
             completed=completed,
         )
+
+    @staticmethod
+    def _serialize_creation_metadata(metadata):
+        """Keep metadata JSON-safe while preserving candidate references."""
+        serialized = {}
+        for key, value in metadata.items():
+            if isinstance(value, Candidate):
+                serialized[f"{key}_id"] = id(value)
+            elif isinstance(value, (str, int, float, bool, type(None))):
+                serialized[str(key)] = value
+        return serialized
 
     def _restore_checkpoint(self, path: str, student: dspy.Module) -> bool:
         """Restore a compilation from a Darwin checkpoint manifest."""
@@ -322,6 +335,15 @@ class GEPAStrategy(BaseStrategy[Result]):
                 )
                 for score in record.get("scores", [])
             ]
+            example_by_id = {
+                example_id(example): example
+                for example in self.training_data + self.validation_data
+            }
+            candidate.proposal_minibatch = [
+                example_by_id[task_id]
+                for task_id in record.get("proposal_minibatch_ids", [])
+                if task_id in example_by_id
+            ] or None
             restored[record.get("id")] = candidate
 
         for record in records:
@@ -331,6 +353,9 @@ class GEPAStrategy(BaseStrategy[Result]):
                 for parent_id in record.get("parents", [])
                 if parent_id in restored
             ]
+            ancestor_id = candidate.creation_metadata.pop("ancestor_candidate_id", None)
+            if ancestor_id in restored:
+                candidate.creation_metadata["ancestor_candidate"] = restored[ancestor_id]
 
         self.history = list(checkpoint.history)
         self.current_generation = checkpoint.generation
