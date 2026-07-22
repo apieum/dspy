@@ -126,7 +126,9 @@ class GEPAStrategy(BaseStrategy[Result]):
 
         # Initialize the first candidate
         initial_candidate = Candidate(self.student.deepcopy(), generation_number=0)
-        self.current_newborns = NewBorns([initial_candidate], iteration=0)
+        self.current_newborns = self.config.cohort_model.newborns(
+            [initial_candidate], iteration=0
+        )
 
         self.algorithm_state = "evaluate"  # Start with evaluation of the initial candidate
 

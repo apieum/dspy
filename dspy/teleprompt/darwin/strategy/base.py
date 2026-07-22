@@ -168,6 +168,7 @@ class BaseStrategy(ABC, Generic[R]):
                     if isinstance(self.config.validation_policy, type)
                     else self.config.validation_policy
                 ),
+                cohort_model=self.config.cohort_model,
             )
             self._evaluator.start_compilation(
                 getattr(self, "student", None),
@@ -296,6 +297,8 @@ class BaseStrategy(ABC, Generic[R]):
                 kwargs["reflection_lm"] = self.config.reflection_lm
             if "candidate_selection_strategy" in inspect.signature(generator_factory).parameters:
                 kwargs["candidate_selection_strategy"] = self.config.candidate_selection_strategy
+            if "cohort_model" in inspect.signature(generator_factory).parameters:
+                kwargs["cohort_model"] = self.config.cohort_model
         except (TypeError, ValueError):
             pass
         if mutation_config:
