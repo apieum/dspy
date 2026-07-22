@@ -1,6 +1,6 @@
 """Feedback data structures for evaluation step."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 
@@ -38,6 +38,8 @@ class FeedbackResult:
     diagnostics: List[str]  # Textual diagnostic feedback
     scores: List[float]  # Scalar scores for each example
     examples: List[Any] = None  # Labeled examples used for the feedback
+    # Normalized metrics allow the parent rollout to be reused by evaluation.
+    metrics: List[Any] = field(default_factory=list)
     # Enhanced Feedback Function μf fields
     evaluation_traces: List[EvaluationTrace] = None  # Rich evaluation traces
     module_feedback: List[ModuleFeedback] = None  # Module-level feedback

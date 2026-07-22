@@ -61,7 +61,15 @@ class Generator(Channel):
             else [parents] * count
         )
         feedback_batches = (
-            batch_sampler.sample(getattr(self, "feedback_data", []), len(parent_tasks), rng=rng)
+            # The sampler must see the complete reflection pool.  ``feedback_data``
+            # is retained as the direct-generator fallback, but strategies should
+            # provide ``feedback_pool`` so successive GEPA generations do not keep
+            # recycling the same initial minibatch.
+            batch_sampler.sample(
+                getattr(self, "feedback_pool", getattr(self, "feedback_data", [])),
+                len(parent_tasks),
+                rng=rng,
+            )
             if batch_sampler is not None
             else [None] * len(parent_tasks)
         )

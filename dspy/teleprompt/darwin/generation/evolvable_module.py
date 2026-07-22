@@ -9,6 +9,8 @@ from dspy import Module
 from .prompt_mutator import PromptMutator, ReflectivePromptMutator
 from .reflection_strategy import GEPAReflection
 from ..evaluation.feedback import FeedbackResult
+from ..evaluation.metrics import Metric
+from ..data.candidate import example_id as task_id
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,7 @@ class EvolvableModule(Module):
         scores = []
         diagnostics = []
         traces = []
+        metrics = []
         
         for example_id, example in examples.items():
             try:
@@ -81,22 +84,47 @@ class EvolvableModule(Module):
                     trace = dspy.settings.trace.copy() if hasattr(dspy.settings, 'trace') else []
                 
                 # Use feedback provider for evaluation
-                score, diagnostic = feedback_provider.evaluate(example, prediction, trace, target_module_idx)
+                predictors = self.predictors()
+                target_predictor = (
+                    predictors[target_module_idx]
+                    if 0 <= target_module_idx < len(predictors) else None
+                )
+                score, diagnostic = feedback_provider.evaluate(
+                    example, prediction, trace, target_module_idx,
+                    pred_name=getattr(target_predictor, "name", None),
+                    pred_trace=(
+                        trace[target_module_idx]
+                        if target_module_idx < len(trace) else None
+                    ),
+                )
                 
                 scores.append(score)
                 diagnostics.append(diagnostic)
                 traces.append(trace)
+                metrics.append(Metric(
+                    score,
+                    id=task_id(example),
+                    feedback=str(diagnostic or ""),
+                    trace=trace,
+                ))
                 
             except Exception as e:
                 scores.append(0.0)
                 diagnostics.append(f"ERROR: {str(e)}")
                 traces.append([])
+                metrics.append(Metric(
+                    0.0,
+                    id=task_id(example),
+                    feedback=f"ERROR: {str(e)}",
+                    trace=[],
+                ))
         
         return FeedbackResult(
             scores=scores,
             diagnostics=diagnostics,
             traces=traces,
             examples=list(examples.values()),
+            metrics=metrics,
         )
     
     def evolve(self, 

@@ -30,7 +30,8 @@ class ReflectivePromptMutation(Generator):
                  module_selection: str = "round_robin",
                  max_retries: int = 1,
                  config: Optional[ReflectiveMutationConfig] = None,
-                 assessor=None):
+                 assessor=None,
+                 rng=None):
         super().__init__()
         if feedback_provider is None and assessor is not None:
             from .feedback import FeedbackProvider
@@ -52,8 +53,14 @@ class ReflectivePromptMutation(Generator):
         self.module_selection = module_selection
         self.max_retries = max(1, max_retries)
         self.use_abstract_feedback = config.use_abstract_feedback if config is not None else False
+        self.perfect_score = getattr(config, "perfect_score", 1.0) if config is not None else 1.0
+        # Direct generator users historically expect a proposal even for a
+        # perfect toy metric; strategy-owned GEPA runs use the reference skip.
+        self.skip_perfect_score = getattr(config, "skip_perfect_score", False) if config is not None else False
 
         self.next_module_idx = 0
+        self.rng = rng or random.Random()
+        self._next_module_by_parent = {}
 
     def start_compilation(
         self,
@@ -74,6 +81,7 @@ class ReflectivePromptMutation(Generator):
             )
         self.dataset_manager = dataset_manager
         self.next_module_idx = 0
+        self._next_module_by_parent = {}
         self.verbose = verbose
 
     def generate(self, parents: Parents, budget=None) -> NewBorns:
@@ -84,7 +92,7 @@ class ReflectivePromptMutation(Generator):
             return NewBorns()
 
         try:
-            selected_parents = parents.sample_stochastic(1)
+            selected_parents = parents.sample_stochastic(1, rng=self.rng)
             if selected_parents.is_empty():
                 if budget:
                     budget.spend_on_generation(None, {"type": "no_selected_parent"})
@@ -125,6 +133,29 @@ class ReflectivePromptMutation(Generator):
                         minibatch, self.feedback_provider, module_idx
                     )
 
+                    # Reuse the parent rollout for acceptance when an
+                    # evaluation cache is attached by the strategy.  This is
+                    # the reference GEPA behavior: one parent execution feeds
+                    # both reflection and parent/child comparison.
+                    evaluation_cache = getattr(self, "evaluation_cache", None)
+                    if evaluation_cache is not None:
+                        for example, metric in zip(feedback.examples, feedback.metrics):
+                            evaluation_cache.put(parent, example, metric)
+
+                    if (
+                        self.skip_perfect_score
+                        and self.perfect_score is not None
+                        and feedback.scores
+                        and all(float(score) >= self.perfect_score for score in feedback.scores)
+                    ):
+                        if budget:
+                            budget.spend_on_generation(parent.module, {
+                                "type": "perfect_parent_skip",
+                                "module_idx": module_idx,
+                                "cost": len(minibatch),
+                            })
+                        return NewBorns(iteration=parents.iteration)
+
                     # Evolve using a PromptMutator strategy
                     mutator = ReflectivePromptMutator(
                         self.reflection_strategy,
@@ -163,11 +194,12 @@ class ReflectivePromptMutation(Generator):
     def _select_target_module(self, num_modules: int, parent: Optional[Candidate] = None) -> int:
         """Select module to mutate."""
         if self.module_selection == ModuleSelectionStrategy.ROUND_ROBIN.value:
-            module_idx = self.next_module_idx % num_modules
-            self.next_module_idx = (self.next_module_idx + 1)
+            key = id(parent) if parent is not None else None
+            module_idx = self._next_module_by_parent.get(key, 0) % num_modules
+            self._next_module_by_parent[key] = module_idx + 1
             return module_idx
         elif self.module_selection == ModuleSelectionStrategy.RANDOM.value:
-            return random.randint(0, num_modules - 1)
+            return self.rng.randint(0, num_modules - 1)
         elif self.module_selection == ModuleSelectionStrategy.ALL.value:
             module_idx = self.next_module_idx % num_modules
             self.next_module_idx = (self.next_module_idx + 1)
@@ -179,8 +211,9 @@ class ReflectivePromptMutation(Generator):
 
     def _select_worst_performing_module(self, parent: Candidate, num_modules: int) -> int:
         if parent is None or not parent.scores:
-            module_idx = self.next_module_idx % num_modules
-            self.next_module_idx = (self.next_module_idx + 1)
+            key = id(parent) if parent is not None else None
+            module_idx = self._next_module_by_parent.get(key, 0) % num_modules
+            self._next_module_by_parent[key] = module_idx + 1
             return module_idx
 
         module_errors = [0.0] * num_modules
@@ -191,7 +224,10 @@ class ReflectivePromptMutation(Generator):
                 module_errors[module_idx] += 1.0 - float(score.value)
 
         if sum(module_errors) == 0:
-            return self.next_module_idx % num_modules
+            key = id(parent) if parent is not None else None
+            module_idx = self._next_module_by_parent.get(key, 0) % num_modules
+            self._next_module_by_parent[key] = module_idx + 1
+            return module_idx
         return max(range(num_modules), key=lambda idx: module_errors[idx])
 
 

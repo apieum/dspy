@@ -127,6 +127,19 @@ class Candidate:
                         result = Metric(value, id=example_id(example), feedback=str(feedback), trace=trace)
                     else:
                         result = Metric(result, id=example_id(example), trace=trace)
+                else:
+                    # Assessors are allowed to return a Metric, but its
+                    # default UUID is not a stable task identifier. Normalize
+                    # it before it reaches the Pareto frontier.
+                    result = Metric(
+                        result.value,
+                        id=example_id(example),
+                        feedback=result.feedback,
+                        errors=result.errors,
+                        suggestions=result.suggestions,
+                        trace=result.trace if result.trace is not None else trace,
+                        objective_scores=result.objective_scores,
+                    )
 
                 # Publish evaluation event to observers via channel
                 channel.publish('example_evaluated', {
@@ -148,6 +161,7 @@ class Candidate:
 
                 error_result = Metric(
                     value=0.0,
+                    id=example_id(example),
                     feedback=f"Evaluation failed: {str(e)}",
                     errors={'evaluation_error': e},
                     trace=error_trace

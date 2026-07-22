@@ -185,10 +185,36 @@ class TestGeneration:
         
         # Test that feedback provider can be created and has the assessor
         assert feedback_provider.assessor == simple_metric
-        
-        # Test the assessor directly
         score = simple_metric(example, prediction)
         assert score == 0.5  # simple_metric always returns 0.5
+
+    def test_feedback_provider_supports_official_gepa_metric_signature(self):
+        received = {}
+
+        def metric(gold, pred, trace, pred_name, pred_trace):
+            received.update(pred_name=pred_name, pred_trace=pred_trace)
+            return 0.25
+
+        provider = FeedbackProvider(assessor=metric)
+        trace = [(object(), {"question": "q"}, {"answer": "a"})]
+        score, _ = provider.evaluate(
+            dspy.Example(question="q", answer="a"),
+            Mock(), trace, module_idx=0,
+        )
+
+        assert score == 0.25
+        assert received["pred_name"] == "0"
+        assert received["pred_trace"] == trace[0]
+
+    def test_feedback_provider_accepts_short_mu_f_functions(self):
+        provider = FeedbackProvider(
+            assessor=lambda example, prediction, trace=None: (0.5, "base"),
+            feedback_function=lambda example, prediction, trace=None: "additional",
+        )
+        example = dspy.Example(question="q", answer="a").with_inputs("question")
+        score, diagnostic = provider.evaluate(example, dspy.Prediction(answer="a"))
+        assert score == 0.5
+        assert "additional" in diagnostic
 
 
 if __name__ == "__main__":

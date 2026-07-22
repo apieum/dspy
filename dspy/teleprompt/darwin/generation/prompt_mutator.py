@@ -84,7 +84,9 @@ class ReflectivePromptMutator(PromptMutator):
         formatted_examples = (
             self._format_enhanced_feedback(feedback, target_module_idx)
             if self.use_abstract_feedback
-            else self._format_feedback_for_reflection(feedback, target_module_idx)
+            else self._format_feedback_for_reflection(
+                feedback, target_module_idx, target_predictor=target_predictor
+            )
         )
 
         # Use reflection strategy to generate improved instruction
@@ -110,7 +112,7 @@ class ReflectivePromptMutator(PromptMutator):
 
         return mutated_module
 
-    def _format_feedback_for_reflection(self, feedback: FeedbackResult, target_module_idx: int) -> str:
+    def _format_feedback_for_reflection(self, feedback: FeedbackResult, target_module_idx: int, target_predictor=None) -> str:
         """Format feedback using DSPy's native trace format."""
         if not feedback.scores or not feedback.diagnostics:
             return "No feedback available."
@@ -118,24 +120,31 @@ class ReflectivePromptMutator(PromptMutator):
         formatted_parts = []
         for i, (score, diagnostic) in enumerate(zip(feedback.scores, feedback.diagnostics)):
             example = feedback.examples[i] if i < len(feedback.examples) else None
-            expected = ""
-            if example is not None:
-                expected_outputs = {
-                    key: value
-                    for key, value in example.items()
-                    if key not in example.inputs()
-                }
-                expected = f"\nExpected: {expected_outputs}"
             # Extract trace information using DSPy's standard trace format
             trace_info = "No trace"
             if (feedback.traces and i < len(feedback.traces) and
-                feedback.traces[i] and target_module_idx < len(feedback.traces[i])):
+                feedback.traces[i]):
                     # This section processes the execution trace of a specific predictor for a given example.
                     # A DSPy trace for a predictor call is a tuple: (predictor_object, inputs_dict, outputs_dict).
                     # We unpack this tuple to access the inputs and outputs.
                     # `feedback.traces[i]` gets the trace for the i-th example in the batch.
                     # `[target_module_idx]` selects the specific predictor's trace we want to analyze.
-                    predictor, inputs, outputs = feedback.traces[i][target_module_idx]
+                    trace_entries = feedback.traces[i]
+                    selected = None
+                    if target_predictor is not None:
+                        target_signature = getattr(target_predictor, "signature", None)
+                        for entry in trace_entries:
+                            if len(entry) >= 3 and (
+                                entry[0] is target_predictor
+                                or getattr(entry[0], "signature", None) == target_signature
+                            ):
+                                selected = entry
+                                break
+                    if selected is None and target_module_idx < len(trace_entries):
+                        selected = trace_entries[target_module_idx]
+                    if selected is None or len(selected) < 3:
+                        raise ValueError("No trace for selected predictor")
+                    predictor, inputs, outputs = selected
 
                     # The following lines format the `inputs` and `outputs` dictionaries into
                     # a concise, human-readable string for the reflection model.
@@ -143,34 +152,20 @@ class ReflectivePromptMutator(PromptMutator):
                     # It iterates through the input dictionary. For each key-value pair, it creates a "key: value" string.
                     # If a value is too long (over 30 characters), it's truncated to keep the context manageable.
                     # All these strings are then joined together.
-                    input_str = ", ".join([f"{k}: {str(v)[:30]}..." if len(str(v)) > 30 else f"{k}: {v}"
-                                         for k, v in inputs.items()])
+                    input_str = ", ".join(f"{k}: {v}" for k, v in inputs.items())
 
-                    # Enhanced output formatting that preserves reasoning information
+                    # Preserve complete outputs. A short preview can hide the
+                    # actual error or the relevant reasoning step.
                     output_parts = []
-                    reasoning_text = None
-
                     for k, v in outputs.items():
-                        if k.lower() in ['reasoning', 'rationale', 'thought']:
-                            # Preserve full reasoning for reflection (up to 200 chars)
-                            reasoning_text = str(v)[:200] + ("..." if len(str(v)) > 200 else "")
-                            output_parts.append(f"{k}: {reasoning_text}")
-                        else:
-                            # Standard truncation for other fields
-                            truncated = str(v)[:30] + "..." if len(str(v)) > 30 else str(v)
-                            output_parts.append(f"{k}: {truncated}")
+                        output_parts.append(f"{k}: {v}")
 
                     output_str = ", ".join(output_parts)
-
-                    # Enhanced trace info that highlights reasoning when available
-                    if reasoning_text:
-                        trace_info = f"Input: {input_str} → Output: {output_str}\nReasoning: {reasoning_text}"
-                    else:
-                        trace_info = f"Input: {input_str} → Output: {output_str}"
+                    trace_info = f"Input: {input_str} → Output: {output_str}"
 
             example_text = f"""Example {i+1}:
 Score: {score:.2f}
-Feedback: {diagnostic}{expected}
+Feedback: {diagnostic}
 Execution: {trace_info}"""
             formatted_parts.append(example_text)
 
@@ -290,7 +285,4 @@ Execution: {trace_info}"""
 
         print("=" * 80)
         print()
-
-
-
 

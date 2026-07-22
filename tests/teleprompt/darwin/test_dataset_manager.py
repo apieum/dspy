@@ -79,6 +79,21 @@ def test_components_receive_the_dataset_manager():
     assert evaluator.dataset_manager is manager
 
 
+def test_strategy_exposes_full_training_pool_for_reflection_sampling():
+    """GEPA must sample fresh reflection batches from all training examples."""
+    from dspy.teleprompt.darwin import DarwinConfig, GEPAStrategy
+
+    student = dspy.Predict("question -> answer")
+    examples = _examples(8)
+    strategy = GEPAStrategy(DarwinConfig(minibatch_size=2, max_lm_calls=1))
+    strategy.start_compilation(student, trainset=examples, devset=_examples(2))
+
+    generator = strategy.generator
+    assert len(generator.feedback_data) == 2
+    assert generator.feedback_pool == strategy.training_data
+    assert len(generator.feedback_pool) == len(strategy.training_data)
+
+
 def test_strategy_accepts_preconfigured_factory_instance():
     """A factory instance should not be called as if it were a class."""
     from dspy.teleprompt.darwin import Darwin, DarwinConfig, GEPAStrategy

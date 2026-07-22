@@ -95,6 +95,11 @@ class ParetoFrontier(Selector):
 
         self.publish('pareto_filtering', {'frontier_size': len(pareto_frontier)})
 
+        # The per-task winner union is a candidate frontier, but it can still
+        # contain a candidate globally dominated on another task. Official
+        # GEPA removes those candidates before parent sampling.
+        pareto_frontier = self._remove_dominated(pareto_frontier)
+
         # 4. Extract task_wins for the Pareto-filtered candidates
         relevant_task_wins = {
             candidate: self.task_wins[candidate]
@@ -111,13 +116,24 @@ class ParetoFrontier(Selector):
 
         return result
 
+    @staticmethod
+    def _remove_dominated(candidates):
+        candidates = set(candidates)
+        return {
+            candidate for candidate in candidates
+            if not any(
+                other is not candidate and other.dominate(candidate)
+                for other in candidates
+            )
+        }
+
     def best_candidate(self) -> Candidate:
         """Return the best candidate from the pool."""
         if not self.task_wins:
             raise RuntimeError("No candidates found in selector - optimization failed")
 
         # Get best candidates from task scores and select overall best
-        best_candidates = self.task_wins.keys()
+        best_candidates = self._remove_dominated(self.task_wins.keys())
 
         best = max(best_candidates, key=lambda c: c.average_score())
 
@@ -138,7 +154,7 @@ class ParetoFrontier(Selector):
         if not self.task_wins:
             raise RuntimeError("No candidates found in selector - optimization failed")
         rng = rng or random.Random(0)
-        candidates = list(self.task_wins)
+        candidates = list(self._remove_dominated(self.task_wins))
 
         if strategy == "current_best":
             return max(candidates, key=lambda c: c.average_score())

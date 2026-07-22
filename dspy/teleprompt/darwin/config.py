@@ -51,7 +51,12 @@ class DarwinConfig:
     max_lm_calls: int = 100
     max_evaluation_calls: Optional[int] = None
     max_generation_calls: Optional[int] = None
-    max_iterations: int = 100
+    # A safety cap protects local/mock runs whose budget accounting is not
+    # representative. Production runs should set this high or rely on the
+    # LM-call budget as their primary stopping condition.
+    max_iterations: Optional[int] = 100
+    perfect_score: Optional[float] = 1.0
+    skip_perfect_score: bool = True
     patience: int = 3
     validation_split: float = 0.2
     minibatch_size: int = 3  # Size of minibatch for quick validation

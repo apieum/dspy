@@ -19,7 +19,10 @@ class ReflectiveMutationConfig:
     """Tunable options for reflective prompt mutation."""
 
     minibatch_size: int = 5
-    module_selection_strategy: ModuleSelectionStrategy = ModuleSelectionStrategy.WORST_PERFORMING
+    # GEPA's default component selector is deterministic round-robin.  A
+    # score trace does not necessarily identify the predictor that produced
+    # it, so WORST_PERFORMING is not a safe default for multi-predictor apps.
+    module_selection_strategy: ModuleSelectionStrategy = ModuleSelectionStrategy.ROUND_ROBIN
     max_retries: int = 3
     reflection_strategy: Optional["ReflectionStrategy"] = None
     feedback_provider: Optional["FeedbackProvider"] = None

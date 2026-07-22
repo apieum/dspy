@@ -32,16 +32,24 @@ class ReflectionStrategy(ABC):
 
 
 class GEPAReflectionSignature(dspy.Signature):
-    """Propose a new instruction from labeled execution examples and feedback."""
+    """I provided an assistant with instructions to perform a task.
+
+    The examples below contain task inputs, generated outputs, expected
+    outputs, scores, and detailed feedback. Read every example before
+    proposing an instruction. Infer the task and its input/output format,
+    identify domain-specific facts and recurring failure modes, and preserve
+    strategies that worked. The replacement instruction must address the
+    observed errors while remaining general enough for unseen examples. Return
+    only the complete replacement instruction, without commentary or fences."""
     current_instruction: str = dspy.InputField(
         desc="Current instruction text that needs improvement based on performance feedback"
     )
     formatted_examples: str = dspy.InputField(
-        desc="Labeled execution examples containing inputs, expected outputs, actual outputs, scores, and feedback used to diagnose failures and improve the instruction"
+        desc="All labeled execution examples, including inputs, expected outputs, generated outputs, scores, execution traces, and evaluator feedback"
     )
 
     new_instruction: str = dspy.OutputField(
-        desc="A complete improved instruction for the assistant, including task-specific knowledge and actionable guidance inferred from the examples and feedback."
+        desc="A complete replacement instruction containing actionable task guidance, relevant domain knowledge, output-format requirements, and safeguards against the observed errors."
     )
 
 

@@ -32,14 +32,29 @@ def _as_assessor(metric: Callable[[Any, Any, Optional[Any]], float]):
         except (TypeError, ValueError):
             parameter_count = 3
 
-        def assessor(example, prediction, trace=None):
-            if parameter_count <= 2:
-                result = metric(example, prediction)
-            else:
-                result = metric(example, prediction, trace)
+        def assessor(example, prediction, trace=None, pred_name=None, pred_trace=None):
+            args = (example, prediction, trace, pred_name, pred_trace)
+            # Preserve the official GEPA metric contract when the caller
+            # supplies predictor-level context, while retaining old metrics.
+            positional_count = min(
+                5,
+                len([
+                    p for p in signature.parameters.values()
+                    if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+                ]),
+            )
+            result = metric(*args[:positional_count])
 
             if isinstance(result, Metric):
-                return result
+                return Metric(
+                    result.value,
+                    id=example_id(example),
+                    feedback=result.feedback,
+                    errors=result.errors,
+                    suggestions=result.suggestions,
+                    trace=result.trace if result.trace is not None else trace,
+                    objective_scores=result.objective_scores,
+                )
             if isinstance(result, tuple) and len(result) == 2:
                 value, feedback = result
                 return Metric(value, id=example_id(example), feedback=str(feedback), trace=trace)
@@ -62,9 +77,10 @@ class GEPAMute(Darwin):
         metric: Callable[[Any, Any, Optional[Any]], float],
         max_calls: int = 1000,
         minibatch_size: int = 25,
-        patience: int = 5,
+        patience: Optional[int] = None,
         verbose: bool = False,
         reflection_strategy=None,
+        feedback_function: Optional[Callable[..., Any]] = None,
         seed: int = 1,
         **kwargs
     ):
@@ -91,6 +107,7 @@ class GEPAMute(Darwin):
             mutation_config=ReflectiveMutationConfig(
                 minibatch_size=minibatch_size,
                 reflection_strategy=reflection_strategy,
+                enhanced_feedback_function=feedback_function,
             ),
         )
 

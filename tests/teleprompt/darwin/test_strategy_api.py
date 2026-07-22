@@ -27,6 +27,7 @@ from dspy.teleprompt.darwin import (
 )
 from dspy.utils.dummies import DummyLM
 from dspy.teleprompt.darwin.result import Result
+from dspy.teleprompt.darwin.gepa_optimizers import GEPAMute
 
 
 class SimpleQA(Module):
@@ -87,6 +88,11 @@ def test_refactored_darwin_exposes_strategy_components():
     assert hasattr(optimizer.strategy, "selector")
     assert hasattr(optimizer.strategy, "generator")
     assert hasattr(optimizer.strategy, "evaluator")
+
+
+def test_gepa_mute_is_budget_driven_by_default():
+    optimizer = GEPAMute(metric=simple_metric, max_calls=8)
+    assert optimizer.config.patience is None
 
 
 def test_darwin_algorithm_phases(simple_trainset, dummy_lm):

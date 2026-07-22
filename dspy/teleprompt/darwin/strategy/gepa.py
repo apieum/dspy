@@ -15,6 +15,7 @@ from ..data.cohort import NewBorns, Survivors, Parents
 from ..result import Result, Success, Failure
 from ..state import OptimizationCheckpoint
 from ..generation import SingleMutationSampling, EpochShuffledBatchSampler
+from ..evaluation import EvaluationCache
 
 if TYPE_CHECKING:
     from ..config import DarwinConfig
@@ -41,7 +42,6 @@ class GEPAStrategy(BaseStrategy[Result]):
         self.current_parents: Optional[Parents] = None
         self._iteration_started = False
         self.history = []
-        from ..evaluation import EvaluationCache
         self.evaluation_cache = EvaluationCache()
         self._budget_exhaustion_notified = False
         self.rng = random.Random(config.seed)
@@ -63,6 +63,7 @@ class GEPAStrategy(BaseStrategy[Result]):
         self._generator = None
         self._crossover = None
         self._evaluator = None
+        self.evaluation_cache = EvaluationCache()
         self.current_generation = 0
         self.best_candidate = None
         self.generations_without_improvement = 0
@@ -86,10 +87,11 @@ class GEPAStrategy(BaseStrategy[Result]):
             if "seed" in factory_parameters:
                 factory_kwargs["seed"] = self.config.seed
             manager_factory = manager_factory(**factory_kwargs)
-        manager = manager_factory.create(
-            self.trainset,
-            self.devset if self.devset else None,
-        )
+        # Official GEPA evaluates on trainset when no explicit validation set
+        # is supplied.  Keep the dataset manager's standalone split behavior,
+        # but make the strategy pass the reference semantics explicitly.
+        validation_input = self.devset if self.devset else self.trainset
+        manager = manager_factory.create(self.trainset, validation_input)
         self.dataset_manager = manager
         self.training_data = list(manager.get_eval_set().values())
         self.validation_data = list(

@@ -11,6 +11,7 @@ from dspy.teleprompt.darwin import (
     ParetoFrontier,
     StrictImprovementAcceptance,
 )
+from dspy.teleprompt.darwin.data.cohort import Survivors
 
 
 def candidate(score_values):
@@ -48,3 +49,18 @@ def test_pareto_selection_is_seeded_and_frequency_weighted():
     assert first is second
     assert first in {frequent, specialist}
     assert selector.select_candidate(strategy="current_best") is frequent
+
+
+def test_pareto_parent_frontier_removes_globally_dominated_candidate():
+    selector = ParetoFrontier()
+    dominant = candidate([1.0, 1.0])
+    dominated = candidate([1.0, 0.0])
+    selector.update_score("example-0", dominant, Metric(1.0, id="example-0"))
+    selector.update_score("example-1", dominant, Metric(1.0, id="example-1"))
+    selector.update_score("example-0", dominated, Metric(1.0, id="example-0"))
+    selector.update_score("example-1", dominated, Metric(0.0, id="example-1"))
+
+    parents = selector.promote(Survivors(iteration=0))
+
+    assert dominant in parents
+    assert dominated not in parents

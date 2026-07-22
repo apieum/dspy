@@ -184,12 +184,23 @@ class BaseStrategy(ABC, Generic[R]):
             return True
 
         # Check patience (generations without improvement)
-        if self.generations_without_improvement >= self.config.patience:
+        # GEPA is budget-driven by default.  A patience limit remains useful
+        # for bounded experiments, but it must be explicitly configured; an
+        # implicit early-stop changes the search algorithm and can strand the
+        # optimizer at a local optimum before it has sampled another batch.
+        if (
+            self.config.patience is not None
+            and self.generations_without_improvement >= self.config.patience
+        ):
             return True
 
         # Generation zero is the seed evaluation. Stop before creating a new
         # generation once the configured number of mutation rounds is done.
-        if getattr(self, "algorithm_state", None) == "generate" and self.current_generation >= self.config.max_iterations:
+        if (
+            getattr(self, "algorithm_state", None) == "generate"
+            and self.config.max_iterations is not None
+            and self.current_generation >= self.config.max_iterations
+        ):
             return True
 
         return False
@@ -250,6 +261,15 @@ class BaseStrategy(ABC, Generic[R]):
             )
 
         generator = generator_factory(**kwargs)
+        # Keep the initial minibatch for compatibility with direct generator
+        # use, while exposing the complete training pool to GEPA's epoch
+        # sampler.  Reflection minibatches must change across generations.
+        generator.feedback_pool = list(self.training_data)
+        generator.rng = self.rng
+        generator.evaluation_cache = self.evaluation_cache
+        if hasattr(generator, "perfect_score"):
+            generator.perfect_score = self.config.perfect_score
+            generator.skip_perfect_score = self.config.skip_perfect_score
 
         student = getattr(self, "student", None)
         if student is not None:
