@@ -7,7 +7,10 @@ from dspy.teleprompt.darwin.budget import LMCallsBudget
 from dspy.teleprompt.darwin.selection import ParetoFrontier
 from dspy.teleprompt.darwin.generation import ReflectivePromptMutation
 from dspy.teleprompt.darwin.generation.feedback import FeedbackProvider
+from dspy.teleprompt.darwin.generation import Generator
+from dspy.teleprompt.darwin.data import Candidate, NewBorns
 from dspy.teleprompt.darwin.evaluation import GEPATwoPhasesEval
+from dspy.teleprompt.darwin.evaluation import Metric
 from dspy.teleprompt.darwin.result import Success
 from dspy.utils.dummies import DummyLM
 
@@ -21,6 +24,34 @@ class MultiStepQA(dspy.Module):
 
     def forward(self, question):
         return self.think(question=question)
+
+
+class DeterministicQualityModule(dspy.Module):
+    """Small LM-free program used to test GEPA's promotion decisions."""
+
+    def __init__(self, quality: bool):
+        super().__init__()
+        self.quality = quality
+
+    def forward(self, question):
+        answer = "correct" if self.quality else "wrong"
+        return dspy.Prediction(answer=answer)
+
+
+class ImprovingGenerator(Generator):
+    """Deterministic mutation for testing the complete GEPA loop."""
+
+    def __init__(self, **kwargs):
+        super().__init__()
+
+    def generate(self, parents, budget=None):
+        parent = parents.first()
+        child = Candidate(
+            DeterministicQualityModule(quality=True),
+            parents=[parent],
+            generation_number=parent.generation_number + 1,
+        )
+        return NewBorns(child, iteration=parents.iteration)
 
 
 class TestFunctional:
@@ -71,6 +102,40 @@ class TestFunctional:
             assert isinstance(compiled_module, dspy.Module)
             assert compiled_module._compiled is True
             assert hasattr(compiled_module, 'think')  # Preserves original structure
+
+    def test_gepa_promotes_a_scoring_improvement(self):
+        """The GEPA loop must retain a child that objectively beats its parent."""
+        example = dspy.Example(question="test", answer="correct").with_inputs("question")
+
+        def exact_assessor(example, prediction, trace=None):
+            return Metric(
+                float(prediction.answer == example.answer),
+                id="test-example",
+                trace=trace,
+            )
+
+        config = DarwinConfig(
+            mutation=ImprovingGenerator,
+            fitness_function=exact_assessor,
+            enhanced_feedback=exact_assessor,
+            max_lm_calls=20,
+            max_iterations=1,
+            patience=3,
+            minibatch_size=1,
+            verbose=False,
+        )
+
+        optimizer = Darwin(GEPAStrategy, config)
+        compiled_module = optimizer.compile(
+            DeterministicQualityModule(quality=False),
+            trainset=[example],
+            valset=[example],
+        )
+        result = optimizer.get_last_result()
+
+        assert isinstance(result, Success)
+        assert result.candidates[0].average_score() == 1.0
+        assert compiled_module.quality is True
 
     def test_optimization_with_difficult_metric(self):
         """Test optimization with a more challenging metric."""

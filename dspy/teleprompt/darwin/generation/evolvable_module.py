@@ -45,31 +45,15 @@ class EvolvableModule(Module):
         self._evolution_history: List[Dict] = []
     
     def _copy_from(self, other_module: Module):
-        """Copy all attributes from another DSPy module."""
-        try:
-            # ``Module.__getattribute__`` warns when ``forward`` is accessed
-            # outside ``__call__``. Only copy state, never methods.
-            skipped_methods = {"forward", "aforward", "__call__", "acall"}
-            # Copy all non-private attributes
-            for attr_name in dir(other_module):
-                if attr_name in skipped_methods:
-                    continue
-                if (not attr_name.startswith('_') and 
-                    hasattr(other_module, attr_name) and
-                    attr_name not in ['reflection_strategy', 'reflection_lm']):  # Skip our own attrs
-                    
-                    try:
-                        attr_value = getattr(other_module, attr_name)
-                        # Deep copy predictors to avoid shared state
-                        if hasattr(attr_value, 'deepcopy'):
-                            setattr(self, attr_name, attr_value.deepcopy())
-                        else:
-                            setattr(self, attr_name, attr_value)
-                    except (AttributeError, TypeError):
-                        continue
-                        
-        except Exception as e:
-            logger.warning(f"Failed to copy some attributes: {e}")
+        """Store a deep-copied module and delegate execution to it."""
+        wrapped = other_module
+        if isinstance(other_module, EvolvableModule):
+            wrapped = other_module._base_module
+        self._base_module = wrapped.deepcopy()
+
+    def forward(self, *args, **kwargs):
+        """Execute the wrapped DSPy module through its public call API."""
+        return self._base_module(*args, **kwargs)
     
     def collect_traces_and_evaluate(self, 
                                   examples: Dict[int, dspy.Example], 
