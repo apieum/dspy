@@ -58,6 +58,7 @@ class ParetoFrontier(Selector):
         self.task_wins: Dict[Candidate, int] = defaultdict(int)  # candidate -> number of examples won
         self.elitist_pruning = False
         self.diversity_archive = None
+        self.frontier_type = "instance"
 
     def start_compilation(self, student: dspy.Module, verbose: bool=False) -> None:
         """Called when compilation begins. Initialize task tracking structures."""
@@ -234,19 +235,11 @@ class ParetoFrontier(Selector):
         if not candidates:
             return
 
-        # Get all example UUIDs from all candidates being processed
-        all_example_uuids = set()
         for candidate in candidates:
             for score in candidate.scores:
-                if score.id:
-                    all_example_uuids.add(score.id)
-
-        # Process each example once
-        for example_uuid in all_example_uuids:
-            for candidate in candidates:
-                score = candidate.find_score_by_uuid(example_uuid)
-                if score is not None:
-                    self.update_score(example_uuid, candidate, score)
+                for frontier_key, value in self._frontier_entries(score):
+                    frontier_score = score if frontier_key == score.id else Metric(value, id=frontier_key)
+                    self.update_score(frontier_key, candidate, frontier_score)
 
 
         self.publish('update_scores_batch', candidates)
@@ -258,6 +251,7 @@ class ParetoFrontier(Selector):
             config: Configuration containing observers and settings
         """
         self.elitist_pruning = getattr(config, 'elitist_pruning', False)
+        self.frontier_type = getattr(config, 'frontier_type', 'instance')
         if getattr(config, 'preserve_diversity', False):
             self.diversity_archive = DiversityArchive(getattr(config, 'archive_capacity', 32))
         # Subscribe all selector observers to our events using the Channel pattern
@@ -266,3 +260,15 @@ class ParetoFrontier(Selector):
             for event_name in ['promote', 'update_score', 'update_scores_batch']:
                 if hasattr(observer, event_name):
                     self.subscribe(observer, event_name)
+
+    def _frontier_entries(self, score: "Metric"):
+        """Expand scalar/objective metrics into configured frontier keys."""
+        objectives = getattr(score, "objective_scores", {}) or {}
+        if self.frontier_type == "instance" or not objectives:
+            return [(score.id, float(score.value))]
+        objective_entries = [(f"objective:{name}", value) for name, value in objectives.items()]
+        if self.frontier_type == "objective":
+            return objective_entries
+        if self.frontier_type == "cartesian":
+            return [(f"{key}:{score.id}", value) for key, value in objective_entries]
+        return [(score.id, float(score.value)), *objective_entries]

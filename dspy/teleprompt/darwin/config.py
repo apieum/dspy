@@ -38,6 +38,7 @@ class DarwinConfig:
     preserve_diversity: bool = False
     archive_capacity: int = 32
     candidate_selection_strategy: str = "pareto"
+    frontier_type: str = "instance"
     proposals_per_generation: int = 1
     mutation_config: ReflectiveMutationConfig = None
 
@@ -68,6 +69,10 @@ class DarwinConfig:
             raise ValueError(
                 "candidate_selection_strategy must be one of: pareto, "
                 "current_best, epsilon_greedy, top_k_pareto"
+            )
+        if self.frontier_type not in {"instance", "objective", "hybrid", "cartesian"}:
+            raise ValueError(
+                "frontier_type must be one of: instance, objective, hybrid, cartesian"
             )
         if self.proposals_per_generation <= 0:
             raise ValueError("proposals_per_generation must be positive")

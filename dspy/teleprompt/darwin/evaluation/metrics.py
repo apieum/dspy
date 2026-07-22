@@ -22,7 +22,8 @@ class Metric:
                  feedback: str = "",
                  errors: Dict[str, Any] = dict(),
                  suggestions: List[str] = list(),
-                 trace: Any = None):
+                 trace: Any = None,
+                 objective_scores: Optional[Dict[str, float]] = None):
         """Initialize metric result.
 
         Args:
@@ -40,6 +41,7 @@ class Metric:
         self.errors = errors
         self.suggestions = suggestions
         self.trace = trace
+        self.objective_scores = objective_scores or {}
 
     @property
     def id(self):
@@ -427,6 +429,22 @@ class CompositeMetric(BaseAssessor):
             total_score += score * self.weights.get(name, 0.0)
 
         return total_score
+
+    def _evaluate(self, example: dspy.Example, prediction: str, trace=None) -> Metric:
+        objective_scores = {
+            name: float(assessor(example, prediction, trace))
+            for name, assessor in self.assessors.items()
+        }
+        score = sum(
+            value * self.weights.get(name, 0.0)
+            for name, value in objective_scores.items()
+        )
+        return Metric(
+            value=score,
+            id=getattr(example, "dspy_uuid", ""),
+            trace=trace,
+            objective_scores=objective_scores,
+        )
 
     def __repr__(self) -> str:
         metric_names = list(self.assessors.keys())
