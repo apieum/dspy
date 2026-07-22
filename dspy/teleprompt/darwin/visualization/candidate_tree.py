@@ -181,6 +181,37 @@ class CandidateTreeVisualizer(SelectorObserver, GeneratorObserver, EvaluatorObse
                     output.append(f"      └─ {parent_info}")
         
         return "\\n".join(output)
+
+    def render_dot(self, show_scores: bool = True) -> str:
+        """Render the tracked candidate lineage as Graphviz DOT.
+
+        The output is dependency-free; callers may pass it to Graphviz or
+        display it with any DOT-compatible renderer.
+        """
+        lines = ["digraph DarwinCandidates {", "  rankdir=LR;"]
+        if not self.candidates:
+            lines.append("}")
+            return "\n".join(lines)
+
+        def quote(value: str) -> str:
+            return '"' + value.replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ') + '"'
+
+        for candidate_id, node in self.candidates.items():
+            label = f"gen={node.generation}"
+            if show_scores:
+                label += f"\\nscore={node.avg_score:.3f}"
+            label += f"\\nvia={node.creation_strategy}"
+            lines.append(f"  c{candidate_id} [label={quote(label)}];")
+
+        for candidate_id, node in self.candidates.items():
+            for parent in node.parents:
+                parent_id = id(parent)
+                if parent_id in self.candidates:
+                    lines.append(f"  c{parent_id} -> c{candidate_id};")
+        lines.append("}")
+        return "\n".join(lines)
+
+    to_dot = render_dot
     
     def render_detailed_tree(self) -> str:
         """Render a detailed tree with full statistics."""
