@@ -26,6 +26,7 @@ from dspy.teleprompt.darwin import (
     Success,
 )
 from dspy.utils.dummies import DummyLM
+from dspy.teleprompt.darwin.result import Result
 
 
 class SimpleQA(Module):
@@ -119,3 +120,22 @@ def test_darwin_factory_configuration_creates_optimizer():
     assert hasattr(optimizer.strategy, "selector")
     assert hasattr(optimizer.strategy, "generator")
     assert hasattr(optimizer.strategy, "evaluator")
+
+
+def test_gepa_result_uses_selector_final_candidate():
+    """The final result should use accumulated Pareto state when available."""
+    strategy = GEPAStrategy(DarwinConfig(max_lm_calls=1))
+    strategy.student = SimpleQA()
+    generation_candidate = Candidate(strategy.student.deepcopy())
+    selector_candidate = Candidate(strategy.student.deepcopy())
+    strategy.best_candidate = generation_candidate
+
+    class SelectorWithFinalCandidate:
+        def best_candidate(self):
+            return selector_candidate
+
+    strategy._selector = SelectorWithFinalCandidate()
+    result = strategy.terminate_compilation()
+
+    assert isinstance(result, Result)
+    assert result.get_best_generalist() is selector_candidate

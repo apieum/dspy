@@ -66,6 +66,8 @@ class TestIntegration:
         assert observer.events[0] == ("start", 1, 1)
         assert observer.events[-1] == ("finish", True)
         assert optimizer.strategy.budget.consumed_calls <= 2
+        assert optimizer.get_last_result().history
+        assert optimizer.get_last_result().history[0]["evaluated_candidates"] == 1
 
     def test_gepa_mute_compilation(self):
         """Test GEPAMute end-to-end compilation."""

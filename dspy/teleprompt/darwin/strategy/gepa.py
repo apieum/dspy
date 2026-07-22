@@ -34,6 +34,7 @@ class GEPAStrategy(BaseStrategy[Result]):
         self.current_survivors: Optional[Survivors] = None
         self.current_parents: Optional[Parents] = None
         self._iteration_started = False
+        self.history = []
 
     def start_compilation(
         self, student: dspy.Module, *, trainset: list[dspy.Example], devset: list[dspy.Example] | None = None, teacher: dspy.Module | None = None, **kwargs
@@ -43,6 +44,10 @@ class GEPAStrategy(BaseStrategy[Result]):
         self.trainset = trainset
         self.devset = devset if devset is not None else []
         self.teacher = teacher
+        self.current_generation = 0
+        self.best_candidate = None
+        self.generations_without_improvement = 0
+        self.history = []
 
         # Centralize train/dev handling so experiments can inject a different
         # dataset policy without changing the strategy itself.
@@ -96,10 +101,12 @@ class GEPAStrategy(BaseStrategy[Result]):
 
     def terminate_compilation(self) -> Result:
         """Get the result of the optimization process."""
+        final_candidate = self._select_final_candidate()
+        self.best_candidate = final_candidate
         if self.best_candidate:
             result = Success(
                 candidates=[self.best_candidate],
-                history=None # TODO: Add history tracking
+                history=list(self.history),
             )
         else:
             result = Failure(
@@ -110,6 +117,26 @@ class GEPAStrategy(BaseStrategy[Result]):
             result_module._compiled = True
         self._notify("finish_compilation", result_module)
         return result
+
+    def _select_final_candidate(self) -> Optional[Candidate]:
+        """Select the final candidate from the accumulated Pareto state.
+
+        The selector has the global task-level view required by GEPA.  Keep
+        the strategy's best-per-generation candidate as a fallback for custom
+        selectors that do not expose a final-candidate method.
+        """
+        candidate = self.best_candidate
+        selector_best = getattr(self.selector, "best_candidate", None)
+        if callable(selector_best):
+            try:
+                selected = selector_best()
+                if isinstance(selected, Candidate):
+                    candidate = selected
+            except (RuntimeError, ValueError):
+                # A selector may have no accumulated scores when compilation
+                # ends before the first evaluation completes.
+                pass
+        return candidate
 
     def _evaluate_step(self):
         """Evaluate current candidates."""
@@ -124,10 +151,13 @@ class GEPAStrategy(BaseStrategy[Result]):
         # Evaluate the newborns (including initial candidate)
         self.current_survivors = self.evaluator.evaluate(self.current_newborns, self.budget)
 
+        generation_best_score = None
+
         # Update best candidate tracking
         if self.current_survivors and not self.current_survivors.is_empty():
             best_in_generation = max(self.current_survivors.candidates,
                                    key=lambda c: c.average_score() if c.average_score() is not None else -1)
+            generation_best_score = best_in_generation.average_score()
 
             if (self.best_candidate is None or
                 (best_in_generation.average_score() is not None and self.best_candidate.average_score() is not None and
@@ -136,6 +166,13 @@ class GEPAStrategy(BaseStrategy[Result]):
                 self.generations_without_improvement = 0
             else:
                 self.generations_without_improvement += 1
+
+        self.history.append({
+            "generation": self.current_generation,
+            "evaluated_candidates": len(self.current_newborns),
+            "surviving_candidates": len(self.current_survivors),
+            "best_score": generation_best_score,
+        })
 
         self.algorithm_state = "select"
 
