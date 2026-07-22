@@ -69,6 +69,7 @@ class GEPAAdaptiveGenerator(Generator):
     def start_compilation(
         self,
         student: dspy.Module,
+        dataset_manager=None,
         *,
         feedback_data=None,
         verbose: bool = False,
@@ -95,9 +96,19 @@ class GEPAAdaptiveGenerator(Generator):
         
         # Initialize child generators (now all use standard interface)
         if self.mutation_gen:
-            self.mutation_gen.start_compilation(student, feedback_data=self.feedback_data, verbose=verbose)
+            self.mutation_gen.start_compilation(
+                student,
+                dataset_manager=dataset_manager,
+                feedback_data=self.feedback_data,
+                verbose=verbose,
+            )
         if self.merge_gen:
-            self.merge_gen.start_compilation(student, verbose=verbose, feedback_data=self.feedback_data)
+            self.merge_gen.start_compilation(
+                student,
+                dataset_manager=dataset_manager,
+                verbose=verbose,
+                feedback_data=self.feedback_data,
+            )
     
     def finish_compilation(self, result: dspy.Module) -> None:
         """Clean up generators."""

@@ -35,8 +35,9 @@ class ParentFastCompare(Evaluator):
         self.minibatch_data = minibatch_data or []
         self.verbose = False
 
-    def start_compilation(self, student: dspy.Module, verbose: bool = False) -> None:
+    def start_compilation(self, student: dspy.Module, dataset_manager=None, verbose: bool = False) -> None:
         """Set verbose mode for the evaluator."""
+        self.dataset_manager = dataset_manager
         self.verbose = verbose
 
 
@@ -124,8 +125,9 @@ class FullTaskScores(Evaluator):
         self.validation_data = validation_data or []
         self.verbose = False
 
-    def start_compilation(self, student: dspy.Module, verbose: bool=False) -> None:
+    def start_compilation(self, student: dspy.Module, dataset_manager=None, verbose: bool=False) -> None:
         """Set verbose mode for the evaluator."""
+        self.dataset_manager = dataset_manager
         self.verbose = verbose
 
     def evaluate(self, new_borns: NewBorns, budget: Budget) -> Survivors:

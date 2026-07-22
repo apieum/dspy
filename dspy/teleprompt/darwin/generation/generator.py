@@ -37,9 +37,11 @@ class Generator(Channel):
     def start_compilation(
         self,
         student: dspy.Module,
+        dataset_manager=None,
         *,
         feedback_data: Optional[List[dspy.Example]] = None,
         verbose: bool = False,
     ) -> None:
         """Initialize generator state for a compilation run."""
+        self.dataset_manager = dataset_manager
         self.verbose = verbose

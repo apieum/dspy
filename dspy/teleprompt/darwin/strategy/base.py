@@ -137,6 +137,11 @@ class BaseStrategy(ABC, Generic[R]):
                 minibatch_data=minibatch_data,         # Intelligently sampled minibatch for quick validation
                 validation_data=self.validation_data  # Full set for comprehensive evaluation
             )
+            self._evaluator.start_compilation(
+                getattr(self, "student", None),
+                dataset_manager=self.dataset_manager,
+                verbose=self.config.verbose,
+            )
         return self._evaluator
 
     # Evolutionary decision methods
@@ -203,5 +208,10 @@ class BaseStrategy(ABC, Generic[R]):
 
         student = getattr(self, "student", None)
         if student is not None:
-            generator.start_compilation(student, feedback_data=feedback_data, verbose=self.config.verbose)
+            generator.start_compilation(
+                student,
+                dataset_manager=self.dataset_manager,
+                feedback_data=feedback_data,
+                verbose=self.config.verbose,
+            )
         return generator

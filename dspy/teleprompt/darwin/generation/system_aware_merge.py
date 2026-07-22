@@ -256,6 +256,7 @@ class SystemAwareMerge(Generator):
     def start_compilation(
         self,
         student: dspy.Module,
+        dataset_manager=None,
         *,
         feedback_data: Optional[List[dspy.Example]] = None,
         verbose: bool = False,
@@ -276,7 +277,12 @@ class SystemAwareMerge(Generator):
                 feedback_data=self.devset,
                 config=self.config,
             )
-            self.fallback_generator.start_compilation(student, feedback_data=self.devset, verbose=verbose)
+            self.fallback_generator.start_compilation(
+                student,
+                dataset_manager=dataset_manager,
+                feedback_data=self.devset,
+                verbose=verbose,
+            )
             logger.debug("Initialized ReflectivePromptMutation fallback with provided assessor")
         else:
             logger.warning("No assessor provided for SystemAwareMerge fallback - mutation will not be available")

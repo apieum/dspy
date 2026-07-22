@@ -63,6 +63,7 @@ class GEPAMute(Darwin):
         minibatch_size: int = 25,
         patience: int = 5,
         verbose: bool = False,
+        reflection_strategy=None,
         **kwargs
     ):
         """Initialize GEPAMute optimizer.
@@ -84,7 +85,10 @@ class GEPAMute(Darwin):
             mutation=ReflectivePromptMutation,
             fitness_function=assessor,
             enhanced_feedback=assessor,
-            mutation_config=ReflectiveMutationConfig(minibatch_size=minibatch_size),
+            mutation_config=ReflectiveMutationConfig(
+                minibatch_size=minibatch_size,
+                reflection_strategy=reflection_strategy,
+            ),
         )
 
         super().__init__(GEPAStrategy, config, **kwargs)

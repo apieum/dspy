@@ -1,6 +1,7 @@
 """GEPA - Default evolutionary optimization strategy."""
 
 import logging
+import inspect
 from typing import List, Optional, TYPE_CHECKING
 
 import dspy
@@ -50,7 +51,11 @@ class GEPAStrategy(BaseStrategy[Result]):
         # factory instance.  The latter is useful when an experiment needs a
         # custom split policy or a stateful dataset manager.
         if isinstance(manager_factory, type):
-            manager_factory = manager_factory(split_ratio=self.config.validation_split)
+            factory_parameters = inspect.signature(manager_factory).parameters
+            factory_kwargs = {"split_ratio": self.config.validation_split}
+            if "seed" in factory_parameters:
+                factory_kwargs["seed"] = self.config.seed
+            manager_factory = manager_factory(**factory_kwargs)
         manager = manager_factory.create(
             self.trainset,
             self.devset if self.devset else None,

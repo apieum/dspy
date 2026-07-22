@@ -46,6 +46,7 @@ class ReflectivePromptMutation(Generator):
 
         self.feedback_provider = feedback_provider
         self.feedback_data = feedback_data or []
+        self.minibatch_size = config.minibatch_size if config is not None else 5
         self.reflection_strategy = reflection_strategy or GEPAReflection()
         self.reflection_lm = reflection_lm
         self.module_selection = module_selection
@@ -56,6 +57,7 @@ class ReflectivePromptMutation(Generator):
     def start_compilation(
         self,
         student: dspy.Module,
+        dataset_manager=None,
         *,
         feedback_data: Optional[List[dspy.Example]] = None,
         verbose: bool = False,
@@ -63,6 +65,13 @@ class ReflectivePromptMutation(Generator):
         """Set verbose mode for the generator."""
         if feedback_data is not None:
             self.feedback_data = feedback_data
+        elif dataset_manager is not None:
+            self.feedback_data = list(
+                dataset_manager.get_feedback_minibatch(
+                    self.minibatch_size
+                ).values()
+            )
+        self.dataset_manager = dataset_manager
         self.next_module_idx = 0
         self.verbose = verbose
 

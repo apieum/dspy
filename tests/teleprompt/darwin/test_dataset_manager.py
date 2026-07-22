@@ -40,6 +40,14 @@ def test_factory_preserves_configured_split_ratio():
     assert manager.num_dev_examples == 5
 
 
+def test_seeded_feedback_sampling_is_reproducible():
+    examples = _examples(10)
+    first = DefaultDatasetManager(examples, seed=7).get_feedback_minibatch(3)
+    second = DefaultDatasetManager(examples, seed=7).get_feedback_minibatch(3)
+
+    assert list(first) == list(second)
+
+
 def test_strategy_accepts_preconfigured_factory_instance():
     """A factory instance should not be called as if it were a class."""
     from dspy.teleprompt.darwin import Darwin, DarwinConfig, GEPAStrategy

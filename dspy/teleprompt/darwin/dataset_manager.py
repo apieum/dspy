@@ -42,7 +42,9 @@ class DefaultDatasetManager:
         training_data: List[dspy.Example] | Dict[Any, dspy.Example],
         validation_data: Optional[List[dspy.Example] | Dict[Any, dspy.Example]] = None,
         split_ratio: float = 0.2,
+        seed: Optional[int] = None,
     ):
+        self._rng = random.Random(seed)
         training = self._as_dict(training_data)
         if validation_data is not None:
             self.eval_data = training
@@ -82,7 +84,7 @@ class DefaultDatasetManager:
         if not self.dev_data or size <= 0:
             return {}
         count = min(size, len(self.dev_data))
-        return dict(random.sample(list(self.dev_data.items()), count))
+        return dict(self._rng.sample(list(self.dev_data.items()), count))
 
     def get_validation_minibatch(self, size: int) -> Dict[Any, dspy.Example]:
         return self._sample_dev(size)
@@ -94,12 +96,13 @@ class DefaultDatasetManager:
 class DefaultDatasetManagerFactory:
     """Default factory using a configurable validation split."""
 
-    def __init__(self, split_ratio: float = 0.2):
+    def __init__(self, split_ratio: float = 0.2, seed: Optional[int] = None):
         self.split_ratio = split_ratio
+        self.seed = seed
 
     def create(
         self,
         training_data: List[dspy.Example] | Dict[Any, dspy.Example],
         validation_data: Optional[List[dspy.Example] | Dict[Any, dspy.Example]] = None,
     ) -> DefaultDatasetManager:
-        return DefaultDatasetManager(training_data, validation_data, self.split_ratio)
+        return DefaultDatasetManager(training_data, validation_data, self.split_ratio, self.seed)

@@ -24,6 +24,12 @@ class Evaluator(Channel):
     def __init__(self):
         """Initialize evaluator with observer support."""
         super().__init__()
+        self.dataset_manager = None
+
+    def start_compilation(self, student: dspy.Module, dataset_manager=None, verbose: bool = False) -> None:
+        """Attach compilation data without removing the list-based API."""
+        self.dataset_manager = dataset_manager
+        self.verbose = verbose
 
     @abstractmethod
     def evaluate(self, new_borns: "NewBorns", budget: "Budget") -> "Survivors":
@@ -124,9 +130,9 @@ class Evaluator(Channel):
 
             return survivors
 
-        def start_compilation(self, student: dspy.Module, verbose: bool=False) -> None:
+        def start_compilation(self, student: dspy.Module, dataset_manager=None, verbose: bool=False) -> None:
             for evaluator in self.evaluators:
-                evaluator.start_compilation(student, verbose=verbose)
+                evaluator.start_compilation(student, dataset_manager=dataset_manager, verbose=verbose)
 
         def finish_compilation(self, result: Module) -> None:
             for evaluator in self.evaluators:
