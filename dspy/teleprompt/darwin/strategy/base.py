@@ -117,6 +117,9 @@ class BaseStrategy(ABC, Generic[R]):
         if self._selector is None:
             from ..selection import Selector
             self._selector = self.config.selection()
+            configure = getattr(self._selector, "configure", None)
+            if callable(configure):
+                configure(self.config)
         return self._selector
 
     @property

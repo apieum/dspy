@@ -2,4 +2,5 @@
 
 from .selector import Selector
 from .pareto import ParetoFrontier
-__all__ = ['Selector', 'ParetoFrontier']
+from .archive import DiversityArchive
+__all__ = ['Selector', 'ParetoFrontier', 'DiversityArchive']

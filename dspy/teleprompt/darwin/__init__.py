@@ -18,6 +18,7 @@ from .evaluation import Evaluator
 # Business step implementations
 from .budget import LMCallsBudget, IterationBudget, AdaptiveBudget
 from .selection.pareto import ParetoFrontier
+from .selection.archive import DiversityArchive
 from .generation.mutation import ReflectivePromptMutation
 from .generation.system_aware_merge import SystemAwareMerge
 from .generation.feedback import FeedbackProvider
@@ -89,6 +90,7 @@ __all__ = [
     'IterationBudget',
     'AdaptiveBudget',
     'ParetoFrontier',
+    'DiversityArchive',
     'ReflectivePromptMutation',
     'SystemAwareMerge',
     'FeedbackProvider',

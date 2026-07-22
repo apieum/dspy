@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from ..config import DarwinConfig
 
 from ..evaluation import Metric
+from .archive import DiversityArchive
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ class ParetoFrontier(Selector):
         self.example_best_candidates: Dict[str, List[Candidate]] = {}  # example_uuid -> candidates with best scores
         self.task_wins: Dict[Candidate, int] = defaultdict(int)  # candidate -> number of examples won
         self.elitist_pruning = False
+        self.diversity_archive = None
 
     def start_compilation(self, student: dspy.Module, verbose: bool=False) -> None:
         """Called when compilation begins. Initialize task tracking structures."""
@@ -80,6 +82,8 @@ class ParetoFrontier(Selector):
 
         # 1. Update scores for new survivors (adds them to internal tracking)
         self.update_scores_batch(survivors)
+        if self.diversity_archive is not None:
+            self.diversity_archive.add_all(survivors)
 
         # 2. Get all candidates currently tracked
         pareto_frontier = set()
@@ -252,6 +256,8 @@ class ParetoFrontier(Selector):
             config: Configuration containing observers and settings
         """
         self.elitist_pruning = getattr(config, 'elitist_pruning', False)
+        if getattr(config, 'preserve_diversity', False):
+            self.diversity_archive = DiversityArchive(getattr(config, 'archive_capacity', 32))
         # Subscribe all selector observers to our events using the Channel pattern
         for observer in getattr(config, 'selector_observers', []):
             # Use the modern Channel subscription pattern

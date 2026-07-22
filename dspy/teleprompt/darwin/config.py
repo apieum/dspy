@@ -35,6 +35,8 @@ class DarwinConfig:
     acceptance_criterion: Any = StrictImprovementAcceptance
     proposal_selection: Any = AllImprovements
     validation_policy: Any = FullEvaluationPolicy
+    preserve_diversity: bool = False
+    archive_capacity: int = 32
     candidate_selection_strategy: str = "pareto"
     proposals_per_generation: int = 1
     mutation_config: ReflectiveMutationConfig = None
@@ -69,3 +71,5 @@ class DarwinConfig:
             )
         if self.proposals_per_generation <= 0:
             raise ValueError("proposals_per_generation must be positive")
+        if self.archive_capacity <= 0:
+            raise ValueError("archive_capacity must be positive")
