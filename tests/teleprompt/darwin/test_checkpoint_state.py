@@ -49,6 +49,7 @@ def test_completed_checkpoint_can_be_resumed(tmp_path):
     assert compiled._compiled is True
     assert resumed.get_last_result().candidates
     assert type(resumed.strategy.current_newborns).__name__ == "NewBorns"
+    assert len(resumed.strategy.evaluation_cache) > 0
 
 
 def test_signal_handler_writes_interrupted_checkpoint(tmp_path):

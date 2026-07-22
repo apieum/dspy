@@ -355,6 +355,14 @@ class GEPAStrategy(BaseStrategy[Result]):
                 for task_id in record.get("proposal_minibatch_ids", [])
                 if task_id in example_by_id
             ] or None
+            # Candidate scores are valid cache entries for the corresponding
+            # examples.  Seeding the compilation cache prevents a resumed
+            # run from spending new LM calls merely to re-evaluate restored
+            # parents.
+            for score in candidate.scores:
+                for example in self.training_data + self.validation_data:
+                    if str(example_id(example)) == str(score.id):
+                        self.evaluation_cache.put(candidate, example, score)
             restored[record.get("id")] = candidate
 
         for record in records:
