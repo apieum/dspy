@@ -282,6 +282,8 @@ class BaseStrategy(ABC, Generic[R]):
         generator.feedback_pool = list(self.training_data)
         generator.rng = self.rng
         generator.evaluation_cache = self.evaluation_cache
+        if hasattr(generator, "reuse_parent_rollouts"):
+            generator.reuse_parent_rollouts = self.config.reuse_parent_rollouts
         if hasattr(generator, "perfect_score"):
             generator.perfect_score = self.config.perfect_score
             generator.skip_perfect_score = self.config.skip_perfect_score

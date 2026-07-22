@@ -40,6 +40,10 @@ class DarwinConfig:
     # Optional LM dedicated to reflective prompt proposals. When omitted,
     # reflection uses DSPy's active task LM, preserving the existing default.
     reflection_lm: Optional[Any] = None
+    # Reuse the parent rollout collected for reflection during acceptance.
+    # This is cheaper and deterministic; disabling it matches implementations
+    # that independently rerun the parent during validation.
+    reuse_parent_rollouts: bool = True
     enhanced_feedback: Optional[Assessor] = F1Score()  # Optional feedback-generating metric
     acceptance_criterion: Any = StrictImprovementAcceptance
     proposal_selection: Any = AllImprovements

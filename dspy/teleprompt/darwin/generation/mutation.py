@@ -50,6 +50,7 @@ class ReflectivePromptMutation(Generator):
         self.minibatch_size = config.minibatch_size if config is not None else 5
         self.reflection_strategy = reflection_strategy or GEPAReflection()
         self.reflection_lm = reflection_lm
+        self.reuse_parent_rollouts = True
         self.module_selection = module_selection
         self.max_retries = max(1, max_retries)
         self.use_abstract_feedback = config.use_abstract_feedback if config is not None else False
@@ -161,7 +162,7 @@ class ReflectivePromptMutation(Generator):
                     # the reference GEPA behavior: one parent execution feeds
                     # both reflection and parent/child comparison.
                     evaluation_cache = getattr(self, "evaluation_cache", None)
-                    if evaluation_cache is not None:
+                    if evaluation_cache is not None and self.reuse_parent_rollouts:
                         for example, metric in zip(feedback.examples, feedback.metrics):
                             evaluation_cache.put(parent, example, metric)
 
