@@ -50,6 +50,7 @@ class CandidateTreeVisualizer(SelectorObserver, GeneratorObserver, EvaluatorObse
         self.generation_candidates: Dict[int, List[int]] = defaultdict(list)  # generation -> candidate_ids
         self.parent_child_map: Dict[int, List[int]] = defaultdict(list)  # parent_id -> child_ids
         self.root_candidates: Set[int] = set()  # Candidates with no parents
+        self.cohort_snapshots: List[Dict[str, Any]] = []
         
         self.track_detailed_stats = track_detailed_stats
         self.total_tasks = 0
@@ -182,7 +183,16 @@ class CandidateTreeVisualizer(SelectorObserver, GeneratorObserver, EvaluatorObse
         
         return "\\n".join(output)
 
-    def render_dot(self, show_scores: bool = True) -> str:
+    def record_cohort(self, cohort, label: str | None = None, step: int | None = None) -> None:
+        """Record a cohort membership snapshot for optional DOT export."""
+        self.cohort_snapshots.append({
+            "label": label or type(cohort).__name__,
+            "step": step if step is not None else len(self.cohort_snapshots),
+            "type": f"{type(cohort).__module__}:{type(cohort).__qualname__}",
+            "candidate_ids": [id(candidate) for candidate in cohort],
+        })
+
+    def render_dot(self, show_scores: bool = True, include_cohorts: bool = False) -> str:
         """Render the tracked candidate lineage as Graphviz DOT.
 
         The output is dependency-free; callers may pass it to Graphviz or
@@ -208,6 +218,22 @@ class CandidateTreeVisualizer(SelectorObserver, GeneratorObserver, EvaluatorObse
                 parent_id = id(parent)
                 if parent_id in self.candidates:
                     lines.append(f"  c{parent_id} -> c{candidate_id};")
+        if include_cohorts:
+            for index, snapshot in enumerate(self.cohort_snapshots):
+                cluster_id = f"cohort_{index}"
+                label = f"{snapshot['label']} (step {snapshot['step']})"
+                lines.append(f"  subgraph cluster_{cluster_id} {{")
+                lines.append(f"    label={quote(label)};")
+                lines.append("    color=gray;")
+                cohort_node = f"cohort_node_{index}"
+                lines.append(f"    {cohort_node} [shape=box, label={quote(snapshot['type'])}];")
+                for candidate_id in snapshot["candidate_ids"]:
+                    if candidate_id in self.candidates:
+                        lines.append(
+                            f"    {cohort_node} -> c{candidate_id} "
+                            "[style=dashed, color=gray];"
+                        )
+                lines.append("  }")
         lines.append("}")
         return "\n".join(lines)
 
@@ -394,6 +420,7 @@ class CandidateTreeVisualizer(SelectorObserver, GeneratorObserver, EvaluatorObse
         self.generation_candidates.clear()
         self.parent_child_map.clear()
         self.root_candidates.clear()
+        self.cohort_snapshots.clear()
         self.stats = {
             "total_candidates": 0,
             "generations": 0,
@@ -405,6 +432,7 @@ class CandidateTreeVisualizer(SelectorObserver, GeneratorObserver, EvaluatorObse
     # Observer protocol implementations
     async def promote(self, survivors) -> None:
         """Observe candidate promotion from selector."""
+        self.record_cohort(survivors, label="survivors", step=survivors.iteration)
         for candidate in survivors.candidates:
             # Update existing candidate with promotion info
             candidate_id = id(candidate)
@@ -427,6 +455,8 @@ class CandidateTreeVisualizer(SelectorObserver, GeneratorObserver, EvaluatorObse
     
     async def generate(self, parents, newborns) -> None:
         """Observe candidate generation from generator."""
+        self.record_cohort(parents, label="parents", step=parents.iteration)
+        self.record_cohort(newborns, label="newborns", step=newborns.iteration)
         for candidate in newborns.candidates:
             # Determine creation strategy based on parents
             creation_strategy = "unknown"
