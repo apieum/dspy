@@ -1,7 +1,7 @@
 """Test Darwin generation components (mutation, reflection, merging)."""
 
 import dspy
-from dspy.teleprompt.darwin import Bleu, Contains, ExactMatch, ReflectiveMutationConfig, RougeL
+from dspy.teleprompt.darwin import Bleu, Contains, ExactMatch, F1Score, ReflectiveMutationConfig, RougeL
 from dspy.teleprompt.darwin.generation.config import ModuleSelectionStrategy
 from dspy.teleprompt.darwin.generation.mutation import ReflectivePromptMutation
 from dspy.teleprompt.darwin.generation.feedback import FeedbackProvider
@@ -129,6 +129,22 @@ class TestGeneration:
         assert Contains is not None
         assert RougeL is not None
         assert Bleu is not None
+
+    def test_text_metrics_score_exact_and_partial_answers(self):
+        example = dspy.Example(answer="The quick brown fox").with_inputs()
+
+        assert ExactMatch()(example, "The quick brown fox").value == 1
+        assert Contains()(example, "The quick").value == 1
+        assert F1Score()(example, "quick brown fox").value == 0.8571428571428571
+        assert RougeL()(example, "The brown fox").value == 0.8571428571428571
+
+    def test_bleu_rewards_overlap_and_penalizes_short_outputs(self):
+        example = dspy.Example(answer="the quick brown fox").with_inputs()
+        bleu = Bleu()
+
+        assert bleu(example, "the quick brown fox").value == 1.0
+        assert bleu(example, "the fox").value == 0.5
+        assert bleu(example, "completely unrelated").value == 0.0
 
     def test_system_aware_merge_initialization(self):
         """Test system aware merge initialization."""
