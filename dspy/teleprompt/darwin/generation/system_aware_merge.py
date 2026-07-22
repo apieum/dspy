@@ -5,6 +5,7 @@ ancestry tracking, desirability analysis, and signature merging.
 """
 
 import logging
+import random
 from typing import List, Optional, Tuple, Set, TYPE_CHECKING
 
 import dspy
@@ -32,6 +33,7 @@ class SystemAwareMerge(Generator):
         self.feedback_provider = feedback_provider
         self.assessor = assessor or getattr(feedback_provider, "assessor", None)
         self.config = config
+        self.rng = random.Random(0)
 
         # Initialize fallback mutation generator
         self.fallback_generator = None
@@ -50,7 +52,7 @@ class SystemAwareMerge(Generator):
 
         try:
             # Stochastic selection of two parent candidates
-            selected_parents = parents.sample_stochastic(2)
+            selected_parents = parents.sample_stochastic(2, rng=self.rng)
             if selected_parents.size() < 2:
                 return NewBorns()
 
@@ -62,6 +64,12 @@ class SystemAwareMerge(Generator):
             # Iterate through common ancestors to find a valid merge
             # Sort by generation number (most recent first) for better results
             for ancestor in sorted(list(common_ancestors), key=lambda c: c.generation_number, reverse=True):
+
+                # Official GEPA only merges descendants that have both
+                # genuinely surpassed their common ancestor. Otherwise a
+                # stale ancestor can re-enter the search through a merge.
+                if ancestor.average_score() > min(parent1.average_score(), parent2.average_score()):
+                    continue
 
                 # Check merge history (integrated logic)
                 merge_key = tuple(sorted((id(parent1), id(parent2)))) + (id(ancestor),)
@@ -253,6 +261,7 @@ class SystemAwareMerge(Generator):
                 generation_number=iteration,
                 creation_metadata={
                     "merge_type": "system_aware",
+                    "ancestor_candidate": ancestor,
                     "ancestor_generation": ancestor.generation_number,
                     "parent1_generation": p1.generation_number,
                     "parent2_generation": p2.generation_number,

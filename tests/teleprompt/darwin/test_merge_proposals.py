@@ -3,6 +3,7 @@ import dspy
 from dspy.teleprompt.darwin import Candidate, SystemAwareMerge
 from dspy.teleprompt.darwin.data.cohort import Parents
 from dspy.teleprompt.utils import get_signature, set_signature
+from dspy.teleprompt.darwin.evaluation import Metric
 
 
 def instruction(module, value):
@@ -32,3 +33,20 @@ def test_system_aware_merge_combines_divergent_lineages():
 
 def test_system_aware_merge_is_observable():
     assert hasattr(SystemAwareMerge(), "subscribe")
+
+
+def test_system_aware_merge_does_not_reintroduce_better_ancestor():
+    ancestor = Candidate(dspy.Predict("question -> answer"), generation_number=0)
+    first_module = ancestor.module.deepcopy()
+    second_module = ancestor.module.deepcopy()
+    instruction(first_module, "First variant")
+    instruction(second_module, "Second variant")
+    first = Candidate(first_module, parents=[ancestor], generation_number=1)
+    second = Candidate(second_module, parents=[ancestor], generation_number=1)
+    ancestor.scores = [Metric(1.0, id="task")]
+    first.scores = [Metric(0.5, id="task")]
+    second.scores = [Metric(0.5, id="task")]
+
+    merged = SystemAwareMerge().generate(Parents(first, second, iteration=1))
+
+    assert merged.is_empty()
