@@ -194,6 +194,15 @@ class GEPAStrategy(BaseStrategy[Result]):
                     "generation": candidate.generation_number,
                     "score": candidate.average_score(),
                     "parents": [id(parent) for parent in candidate.parents],
+                    "scores": [
+                        {
+                            "id": score.id,
+                            "value": float(score.value),
+                            "feedback": score.feedback,
+                            "objective_scores": dict(score.objective_scores),
+                        }
+                        for score in candidate.scores
+                    ],
                     "instructions": [
                         getattr(get_signature(predictor), "instructions", "")
                         for predictor in candidate.module.predictors()
@@ -211,6 +220,7 @@ class GEPAStrategy(BaseStrategy[Result]):
             history=list(self.history),
             budget=remaining if isinstance(remaining, dict) else {"remaining": remaining},
             candidates=candidates,
+            rng_state=self.rng.getstate(),
             completed=completed,
         )
 

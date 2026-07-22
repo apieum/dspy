@@ -14,6 +14,7 @@ class OptimizationCheckpoint:
     history: list[dict[str, Any]] = field(default_factory=list)
     budget: dict[str, Any] = field(default_factory=dict)
     candidates: list[dict[str, Any]] = field(default_factory=list)
+    rng_state: Any = None
     completed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
