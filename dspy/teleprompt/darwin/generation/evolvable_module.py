@@ -47,8 +47,13 @@ class EvolvableModule(Module):
     def _copy_from(self, other_module: Module):
         """Copy all attributes from another DSPy module."""
         try:
+            # ``Module.__getattribute__`` warns when ``forward`` is accessed
+            # outside ``__call__``. Only copy state, never methods.
+            skipped_methods = {"forward", "aforward", "__call__", "acall"}
             # Copy all non-private attributes
             for attr_name in dir(other_module):
+                if attr_name in skipped_methods:
+                    continue
                 if (not attr_name.startswith('_') and 
                     hasattr(other_module, attr_name) and
                     attr_name not in ['reflection_strategy', 'reflection_lm']):  # Skip our own attrs

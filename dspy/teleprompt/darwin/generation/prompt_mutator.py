@@ -48,7 +48,8 @@ class ReflectivePromptMutator(PromptMutator):
 
     def __init__(self,
                  reflection_strategy: Optional[ReflectionStrategy] = None,
-                 reflection_lm: Optional[Any] = None):
+                 reflection_lm: Optional[Any] = None,
+                 use_abstract_feedback: bool = False):
         """Initialize reflective mutator with pre-optimized reflection strategy.
 
         Args:
@@ -58,6 +59,7 @@ class ReflectivePromptMutator(PromptMutator):
         # Use pre-optimized reflection strategy by default
         self.reflection_strategy = reflection_strategy or GEPAReflection()
         self.reflection_lm = reflection_lm
+        self.use_abstract_feedback = use_abstract_feedback
         self.mutation_count = 0
 
     def mutate(self, module: Module, feedback: FeedbackResult, target_module_idx: int = 0, verbose: bool = False) -> Module:
@@ -75,7 +77,15 @@ class ReflectivePromptMutator(PromptMutator):
         current_instruction = get_predictor_instruction(target_predictor)
 
         # Use enhanced abstract feedback formatting (prevents task-specific overfitting)
-        formatted_examples = self._format_enhanced_feedback(feedback, target_module_idx)
+        # Official GEPA gives the reflector concrete inputs, outputs, traces,
+        # and feedback. Abstract summaries are still available as an explicit
+        # option, but hiding the examples by default prevents the reflector
+        # from diagnosing task-specific errors (e.g. arithmetic mistakes).
+        formatted_examples = (
+            self._format_enhanced_feedback(feedback, target_module_idx)
+            if self.use_abstract_feedback
+            else self._format_feedback_for_reflection(feedback, target_module_idx)
+        )
 
         # Use reflection strategy to generate improved instruction
         improved_instruction = self.reflection_strategy.reflect(
@@ -271,7 +281,6 @@ Execution: {trace_info}"""
 
         print("=" * 80)
         print()
-
 
 
 

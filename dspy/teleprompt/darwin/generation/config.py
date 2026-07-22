@@ -28,6 +28,7 @@ class ReflectiveMutationConfig:
     max_modules_per_generation: Optional[int] = None
     enable_detailed_logging: bool = False
     preserve_original_on_failure: bool = True
+    use_abstract_feedback: bool = False
 
     def __post_init__(self):
         if self.minibatch_size <= 0:

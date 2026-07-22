@@ -51,6 +51,7 @@ class ReflectivePromptMutation(Generator):
         self.reflection_lm = reflection_lm
         self.module_selection = module_selection
         self.max_retries = max(1, max_retries)
+        self.use_abstract_feedback = config.use_abstract_feedback if config is not None else False
 
         self.next_module_idx = 0
 
@@ -115,7 +116,11 @@ class ReflectivePromptMutation(Generator):
                     )
 
                     # Evolve using a PromptMutator strategy
-                    mutator = ReflectivePromptMutator(self.reflection_strategy, self.reflection_lm)
+                    mutator = ReflectivePromptMutator(
+                        self.reflection_strategy,
+                        self.reflection_lm,
+                        use_abstract_feedback=self.use_abstract_feedback,
+                    )
                     child_module = mutator.mutate(evolvable, feedback, module_idx, verbose=getattr(self, 'verbose', False))
 
                     child_candidate = Candidate(

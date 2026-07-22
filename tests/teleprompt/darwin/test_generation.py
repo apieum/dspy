@@ -6,6 +6,9 @@ from dspy.teleprompt.darwin.generation.config import ModuleSelectionStrategy
 from dspy.teleprompt.darwin.generation.mutation import ReflectivePromptMutation
 from dspy.teleprompt.darwin.generation.feedback import FeedbackProvider
 from dspy.teleprompt.darwin.generation.system_aware_merge import SystemAwareMerge
+from dspy.teleprompt.darwin.generation.evolvable_module import EvolvableModule
+from dspy.teleprompt.darwin.generation.prompt_mutator import ReflectivePromptMutator
+from dspy.teleprompt.darwin.evaluation.feedback import FeedbackResult
 from dspy.teleprompt.darwin.data.cohort import Parents
 from dspy.teleprompt.darwin.data.candidate import Candidate
 from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
@@ -32,6 +35,26 @@ class TestGeneration:
         assert generator.feedback_provider == feedback_provider
         assert generator.feedback_data == feedback_data
         assert generator.module_selection == "round_robin"
+
+    def test_evolvable_copy_does_not_read_forward_methods(self, caplog):
+        """Wrapping a DSPy predictor must not trigger direct-forward warnings."""
+        with caplog.at_level("WARNING", logger="dspy.primitives.module"):
+            EvolvableModule(base_module=dspy.Predict("question -> answer"))
+
+        assert "Calling module.forward" not in caplog.text
+
+    def test_reflection_receives_concrete_feedback_by_default(self):
+        feedback = FeedbackResult(
+            traces=[[(None, {"question": "7 + 5"}, {"answer": "12"})]],
+            diagnostics=["Score: 1.00 | Feedback: correct arithmetic"],
+            scores=[1.0],
+        )
+        mutator = ReflectivePromptMutator()
+
+        formatted = mutator._format_feedback_for_reflection(feedback, 0)
+
+        assert "7 + 5" in formatted
+        assert "12" in formatted
 
     def test_mutation_compilation(self):
         """Test mutation generator compilation setup."""
