@@ -57,6 +57,28 @@ def test_seeded_automatic_split_is_reproducible_and_shuffled():
     assert list(first.get_eval_set()) != [0, 1, 2, 3, 4]
 
 
+def test_components_receive_the_dataset_manager():
+    from dspy.teleprompt.darwin.evaluation import GEPATwoPhasesEval
+    from dspy.teleprompt.darwin.generation import ReflectivePromptMutation
+    from dspy.teleprompt.darwin.generation.feedback import FeedbackProvider
+
+    manager = DefaultDatasetManager(_examples(6), seed=3)
+    student = dspy.Predict("question -> answer")
+    assessor = lambda example, prediction, trace=None: 0.5
+
+    generator = ReflectivePromptMutation(
+        feedback_provider=FeedbackProvider(assessor=assessor)
+    )
+    generator.start_compilation(student, manager)
+
+    evaluator = GEPATwoPhasesEval(assessor=assessor)
+    evaluator.start_compilation(student, manager)
+
+    assert generator.dataset_manager is manager
+    assert len(generator.feedback_data) <= generator.minibatch_size
+    assert evaluator.dataset_manager is manager
+
+
 def test_strategy_accepts_preconfigured_factory_instance():
     """A factory instance should not be called as if it were a class."""
     from dspy.teleprompt.darwin import Darwin, DarwinConfig, GEPAStrategy

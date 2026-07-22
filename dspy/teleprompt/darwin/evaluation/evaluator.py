@@ -131,6 +131,7 @@ class Evaluator(Channel):
             return survivors
 
         def start_compilation(self, student: dspy.Module, dataset_manager=None, verbose: bool=False) -> None:
+            self.dataset_manager = dataset_manager
             for evaluator in self.evaluators:
                 evaluator.start_compilation(student, dataset_manager=dataset_manager, verbose=verbose)
 
