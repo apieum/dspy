@@ -165,8 +165,25 @@ class Candidate:
 
                 return error_result
 
-        # Execute parallel evaluation and get scores
-        scores = executor.execute(process_example, examples)
+        # Execute parallel evaluation and get scores. ParallelExecutor may
+        # return ``None`` for an exception it handled internally; normalize
+        # that to a failed metric so selection remains well-defined when an LM
+        # or budget is exhausted.
+        raw_scores = executor.execute(process_example, examples)
+        scores = []
+        for index, example in enumerate(examples):
+            score = raw_scores[index] if raw_scores and index < len(raw_scores) else None
+            if isinstance(score, Metric):
+                scores.append(score)
+            else:
+                scores.append(
+                    Metric(
+                        value=0.0,
+                        id=example_id(example),
+                        feedback="Evaluation failed before a metric was returned.",
+                        trace={"example": example},
+                    )
+                )
 
         # Store scores in candidate and publish batch completion
         if scores:

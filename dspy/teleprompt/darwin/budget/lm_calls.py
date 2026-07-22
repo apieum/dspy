@@ -58,8 +58,13 @@ class LMCallsBudget(Budget):
                 logger.debug(f"Evaluation cost: {expected_calls} calls - {metadata}")
 
     def spend_on_generation(self, module: Optional[dspy.Module] = None, metadata: Optional[Dict[str, Any]] = None) -> None:
-        """Track cost of generating new candidates - typically 1 LLM call for reflection."""
-        generation_cost = 1  # Standard cost for one reflection/mutation LLM call
+        """Track all LM calls used to produce a candidate.
+
+        Reflective GEPA mutation performs one LM call per feedback example and
+        one additional reflection call. Generators can pass that exact cost in
+        metadata; custom generators retain the historical default of one.
+        """
+        generation_cost = int((metadata or {}).get("cost", 1))
         self._spend(generation_cost, "generation")
         logger.debug(f"Generation cost: {generation_cost} calls - {metadata}")
 

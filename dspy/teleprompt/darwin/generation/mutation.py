@@ -78,8 +78,6 @@ class ReflectivePromptMutation(Generator):
 
     def generate(self, parents: Parents, budget=None) -> NewBorns:
         """Generate a new candidate without validation."""
-        if budget is not None and hasattr(budget, "can_spend") and not budget.can_spend("generation"):
-            return NewBorns()
         if parents.is_empty() or not self.feedback_data:
             if budget:
                 budget.spend_on_generation(None, {"type": "no_parents_or_data"})
@@ -104,6 +102,18 @@ class ReflectivePromptMutation(Generator):
             if not minibatch:
                 if budget:
                     budget.spend_on_generation(None, {"type": "no_minibatch"})
+                return NewBorns()
+
+            # Feedback execution evaluates the parent once per example and
+            # reflection consumes one additional LM call. Reserve the whole
+            # generation before making any request so max_calls is a hard
+            # upper bound on Darwin's expected LM work.
+            generation_cost = len(minibatch) + 1
+            if (
+                budget is not None
+                and hasattr(budget, "can_spend")
+                and not budget.can_spend("generation", generation_cost)
+            ):
                 return NewBorns()
 
             last_error = None
@@ -134,7 +144,8 @@ class ReflectivePromptMutation(Generator):
                     if budget:
                         budget.spend_on_generation(child_module, {
                             "type": "reflective_mutation",
-                            "module_idx": module_idx
+                            "module_idx": module_idx,
+                            "cost": generation_cost,
                         })
 
                     return NewBorns(child_candidate, iteration=parents.iteration)
