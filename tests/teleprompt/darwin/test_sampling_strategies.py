@@ -80,6 +80,15 @@ def test_epoch_batch_sampler_is_reproducible():
     assert first == second
 
 
+def test_epoch_batch_sampler_pads_small_datasets_to_full_batches():
+    sampler = EpochShuffledBatchSampler(minibatch_size=3)
+
+    batches = sampler.sample(["only"], 2, rng=random.Random(3))
+
+    assert all(len(batch) == 3 for batch in batches)
+    assert all(set(batch) == {"only"} for batch in batches)
+
+
 class TaskRecordingGenerator(Generator):
     def __init__(self, feedback_data):
         super().__init__()

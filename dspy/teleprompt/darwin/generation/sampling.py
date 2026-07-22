@@ -8,6 +8,7 @@ generation should explore several mutations before promotion.
 from __future__ import annotations
 
 import random
+from collections import Counter
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Sequence, Any
@@ -62,6 +63,7 @@ class EpochShuffledBatchSampler(BatchSampler):
         self.minibatch_size = minibatch_size
         self._order: list[Any] = []
         self._position = 0
+        self._data_size = 0
 
     def sample(self, data, count, *, rng=None):
         if count <= 0:
@@ -69,21 +71,36 @@ class EpochShuffledBatchSampler(BatchSampler):
         if not data:
             return [[] for _ in range(count)]
         rng = rng or random.Random()
-        if len(self._order) != len(data) or self._position >= len(self._order):
+        if self._data_size != len(data) or self._position >= len(self._order):
             self._order = list(data)
+            self._data_size = len(data)
             rng.shuffle(self._order)
+            frequencies = Counter(self._order)
+            remainder = len(self._order) % self.minibatch_size
+            padding = (self.minibatch_size - remainder) if remainder else 0
+            for _ in range(padding):
+                least_used = min(frequencies.values())
+                selected = next(item for item in self._order if frequencies[item] == least_used)
+                self._order.append(selected)
+                frequencies[selected] += 1
             self._position = 0
 
         batches = []
         for _ in range(count):
             if self._position + self.minibatch_size > len(self._order):
-                remainder = self._order[self._position:]
+                self._order = list(data)
+                self._data_size = len(data)
                 rng.shuffle(self._order)
-                self._position = 0
-                self._order = self._order
-                needed = self.minibatch_size - len(remainder)
-                batch = remainder + self._order[:needed]
-                self._position = needed
+                frequencies = Counter(self._order)
+                remainder = len(self._order) % self.minibatch_size
+                padding = (self.minibatch_size - remainder) if remainder else 0
+                for _ in range(padding):
+                    least_used = min(frequencies.values())
+                    selected = next(item for item in self._order if frequencies[item] == least_used)
+                    self._order.append(selected)
+                    frequencies[selected] += 1
+                batch = self._order[:self.minibatch_size]
+                self._position = self.minibatch_size
             else:
                 batch = self._order[self._position:self._position + self.minibatch_size]
                 self._position += self.minibatch_size
