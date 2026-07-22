@@ -50,6 +50,7 @@ from .evaluation.metrics import (
     CustomMetric,
     CompositeMetric,
 )
+from .evaluation.confidence import ConfidenceAssessor, LinearConfidenceScoring, ThresholdConfidenceScoring, extract_logprob
 
 # Visualization tools
 from .visualization.candidate_tree import CandidateTreeVisualizer

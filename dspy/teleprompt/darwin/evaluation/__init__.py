@@ -19,6 +19,7 @@ from .metrics import (
     CustomMetric,
     CompositeMetric,
 )
+from .confidence import ConfidenceAssessor, LinearConfidenceScoring, ThresholdConfidenceScoring, extract_logprob
 
 __all__ = [
     'FeedbackResult',
@@ -47,4 +48,8 @@ __all__ = [
     'Bleu',
     'CustomMetric',
     'CompositeMetric',
+    'ConfidenceAssessor',
+    'LinearConfidenceScoring',
+    'ThresholdConfidenceScoring',
+    'extract_logprob',
 ]
