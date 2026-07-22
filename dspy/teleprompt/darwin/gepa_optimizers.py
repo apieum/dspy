@@ -65,6 +65,7 @@ class GEPAMute(Darwin):
         patience: int = 5,
         verbose: bool = False,
         reflection_strategy=None,
+        seed: int = 1,
         **kwargs
     ):
         """Initialize GEPAMute optimizer.
@@ -83,6 +84,7 @@ class GEPAMute(Darwin):
             minibatch_size=minibatch_size,
             patience=patience,
             verbose=verbose,
+            seed=seed,
             mutation=ReflectivePromptMutation,
             fitness_function=assessor,
             enhanced_feedback=assessor,

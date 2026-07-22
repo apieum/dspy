@@ -21,7 +21,7 @@ import argparse
 import json
 import os
 import time
-from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any
 
 import dspy
@@ -29,30 +29,84 @@ import dspy
 from dspy.teleprompt.darwin import GEPAMute
 
 
+@dataclass(frozen=True)
+class TaskSuite:
+    """One deterministic task family shared by both optimizers."""
+
+    name: str
+    train: tuple[tuple[str, str], ...]
+    validation: tuple[tuple[str, str], ...]
+
+    def datasets(self) -> tuple[list[dspy.Example], list[dspy.Example]]:
+        def examples(items):
+            return [
+                dspy.Example(question=question, answer=answer).with_inputs("question")
+                for question, answer in items
+            ]
+
+        return examples(self.train), examples(self.validation)
+
+
+def make_task_suites() -> dict[str, TaskSuite]:
+    """Return several small task families for an apples-to-apples comparison."""
+    return {
+        "arithmetic": TaskSuite(
+            "arithmetic",
+            (
+                ("What is 7 + 5?", "12"),
+                ("What is 9 + 6?", "15"),
+                ("What is 8 + 4?", "12"),
+                ("What is 13 - 5?", "8"),
+                ("What is 18 - 9?", "9"),
+                ("What is 6 * 3?", "18"),
+            ),
+            (
+                ("What is 11 + 7?", "18"),
+                ("What is 14 - 6?", "8"),
+                ("What is 5 * 4?", "20"),
+                ("What is 16 + 3?", "19"),
+            ),
+        ),
+        "classification": TaskSuite(
+            "classification",
+            (
+                ("Classify the sentiment as positive or negative: I loved the concert.", "positive"),
+                ("Classify the sentiment as positive or negative: The service was awful.", "negative"),
+                ("Classify the sentiment as positive or negative: This is a wonderful idea.", "positive"),
+                ("Classify the sentiment as positive or negative: I regret buying it.", "negative"),
+                ("Classify the sentiment as positive or negative: The result was excellent.", "positive"),
+                ("Classify the sentiment as positive or negative: The experience was disappointing.", "negative"),
+            ),
+            (
+                ("Classify the sentiment as positive or negative: What a fantastic meal.", "positive"),
+                ("Classify the sentiment as positive or negative: I disliked the movie.", "negative"),
+                ("Classify the sentiment as positive or negative: The product works perfectly.", "positive"),
+                ("Classify the sentiment as positive or negative: The delay was frustrating.", "negative"),
+            ),
+        ),
+        "factual": TaskSuite(
+            "factual",
+            (
+                ("What is the capital of France?", "Paris"),
+                ("What planet do humans live on?", "Earth"),
+                ("What gas do plants absorb from the air?", "carbon dioxide"),
+                ("How many days are in a week?", "7"),
+                ("What is H2O commonly called?", "water"),
+                ("What is the largest ocean on Earth?", "Pacific Ocean"),
+            ),
+            (
+                ("What is the capital of Italy?", "Rome"),
+                ("What star is at the center of our solar system?", "the Sun"),
+                ("How many months are in a year?", "12"),
+                ("What is the frozen form of water called?", "ice"),
+            ),
+        ),
+    }
+
+
 def make_dataset() -> tuple[list[dspy.Example], list[dspy.Example]]:
-    """Return a small deterministic arithmetic train/validation split."""
-    train = [
-        ("What is 7 + 5?", "12"),
-        ("What is 9 + 6?", "15"),
-        ("What is 8 + 4?", "12"),
-        ("What is 13 - 5?", "8"),
-        ("What is 18 - 9?", "9"),
-        ("What is 6 * 3?", "18"),
-    ]
-    validation = [
-        ("What is 11 + 7?", "18"),
-        ("What is 14 - 6?", "8"),
-        ("What is 5 * 4?", "20"),
-        ("What is 16 + 3?", "19"),
-    ]
-
-    def examples(items):
-        return [
-            dspy.Example(question=question, answer=answer).with_inputs("question")
-            for question, answer in items
-        ]
-
-    return examples(train), examples(validation)
+    """Backward-compatible arithmetic dataset helper."""
+    return make_task_suites()["arithmetic"].datasets()
 
 
 def score(example, prediction) -> float:
@@ -64,7 +118,27 @@ def official_metric(gold, prediction, trace=None, pred_name=None, pred_trace=Non
     return score(gold, prediction)
 
 
+def make_darwin_metric(task_name: str):
+    def darwin_metric(example, prediction, trace=None):
+        value = score(example, prediction)
+        expected = str(example.answer).strip()
+        actual = str(getattr(prediction, "answer", "")).strip()
+        feedback = (
+            f"The answer is correct for the {task_name} task."
+            if value
+            else f"The answer is incorrect for the {task_name} task. Expected {expected!r}, got {actual!r}."
+        )
+        return value, feedback
+
+    return darwin_metric
+
+
+def make_official_metric():
+    return official_metric
+
+
 def darwin_metric(example, prediction, trace=None):
+    """Backward-compatible arithmetic metric helper."""
     value = score(example, prediction)
     feedback = "The answer is correct." if value else "The answer is incorrect; solve the arithmetic carefully."
     return value, feedback
@@ -93,14 +167,15 @@ def usage(lm: dspy.LM) -> dict[str, int]:
     return totals
 
 
-def run_darwin(trainset, valset, lm, budget: int) -> dict[str, Any]:
+def run_darwin(trainset, valset, lm, budget: int, metric, seed: int) -> dict[str, Any]:
     student = dspy.Predict("question -> answer")
     optimizer = GEPAMute(
-        metric=darwin_metric,
+        metric=metric,
         max_calls=budget,
         minibatch_size=3,
         patience=2,
         verbose=False,
+        seed=seed,
     )
     started = time.perf_counter()
     with dspy.context(lm=lm):
@@ -119,16 +194,16 @@ def run_darwin(trainset, valset, lm, budget: int) -> dict[str, Any]:
     }
 
 
-def run_official(trainset, valset, task_lm, reflection_lm, budget: int, use_merge: bool) -> dict[str, Any]:
+def run_official(trainset, valset, task_lm, reflection_lm, budget: int, use_merge: bool, seed: int, metric) -> dict[str, Any]:
     student = dspy.Predict("question -> answer")
     optimizer = dspy.GEPA(
-        metric=official_metric,
+        metric=metric,
         reflection_lm=reflection_lm,
         max_metric_calls=budget,
         reflection_minibatch_size=3,
         use_merge=use_merge,
         max_merge_invocations=2,
-        seed=1,
+        seed=seed,
         track_stats=True,
     )
     started = time.perf_counter()
@@ -153,6 +228,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--budget", type=int, default=24, help="Optimization budget per optimizer")
     parser.add_argument("--merge", action="store_true", help="Enable official GEPA merge proposals")
+    parser.add_argument("--suite", choices=["all", "arithmetic", "classification", "factual"], default="arithmetic")
+    parser.add_argument("--repeats", type=int, default=1, help="Number of deterministic seeds per suite")
     args = parser.parse_args()
 
     api_key = os.environ.get("OPENROUTER_API_KEY")
@@ -161,17 +238,31 @@ def main() -> None:
         raise SystemExit("OPENROUTER_API_KEY is required; this benchmark makes paid requests.")
     if args.budget <= 0:
         raise SystemExit("--budget must be positive")
+    if args.repeats <= 0:
+        raise SystemExit("--repeats must be positive")
 
-    trainset, valset = make_dataset()
-    darwin_lm = make_lm(model, api_key)
-    official_task_lm = make_lm(model, api_key)
-    official_reflection_lm = make_lm(model, api_key)
-
-    results = [
-        run_darwin(trainset, valset, darwin_lm, args.budget),
-        run_official(trainset, valset, official_task_lm, official_reflection_lm, args.budget, args.merge),
-    ]
-    print(json.dumps({"model": model, "budget_per_optimizer": args.budget, "merge": args.merge, "results": results}, indent=2))
+    suites = make_task_suites()
+    selected = list(suites) if args.suite == "all" else [args.suite]
+    results = []
+    for suite_name in selected:
+        for seed in range(args.repeats):
+            trainset, valset = suites[suite_name].datasets()
+            darwin_lm = make_lm(model, api_key)
+            official_task_lm = make_lm(model, api_key)
+            official_reflection_lm = make_lm(model, api_key)
+            results.extend([
+                {
+                    "suite": suite_name,
+                    "seed": seed,
+                    **run_darwin(trainset, valset, darwin_lm, args.budget, make_darwin_metric(suite_name), seed),
+                },
+                {
+                    "suite": suite_name,
+                    "seed": seed,
+                    **run_official(trainset, valset, official_task_lm, official_reflection_lm, args.budget, args.merge, seed, make_official_metric()),
+                },
+            ])
+    print(json.dumps({"model": model, "budget_per_optimizer": args.budget, "merge": args.merge, "suite": args.suite, "repeats": args.repeats, "results": results}, indent=2))
 
 
 if __name__ == "__main__":
