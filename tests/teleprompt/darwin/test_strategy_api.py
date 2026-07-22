@@ -20,6 +20,7 @@ from dspy.teleprompt.darwin import (
     GEPATwoPhasesEval,
     Generator,
     LMCallsBudget,
+    Metric,
     ParetoFrontier,
     ReflectivePromptMutation,
     Selector,
@@ -157,3 +158,28 @@ def test_gepa_result_uses_selector_final_candidate():
 
     assert isinstance(result, Result)
     assert result.get_best_generalist() is selector_candidate
+
+
+def test_gepa_result_retains_pareto_candidates_and_lineage():
+    strategy = GEPAStrategy(DarwinConfig(max_lm_calls=1))
+    strategy.student = SimpleQA()
+    parent = Candidate(strategy.student.deepcopy())
+    child = Candidate(strategy.student.deepcopy(), parents=[parent], generation_number=1)
+    parent.scores = [Metric(0.5, id="task")]
+    child.scores = [Metric(1.0, id="task")]
+    strategy.best_candidate = parent
+
+    class SelectorWithPopulation:
+        task_wins = {parent: 0, child: 1}
+        example_best_candidates = {"task": [child]}
+
+        def best_candidate(self):
+            return child
+
+    strategy._selector = SelectorWithPopulation()
+    result = strategy.terminate_compilation()
+
+    assert result.candidates == [child, parent]
+    assert result.parents[child] == [parent]
+    assert result.val_subscores[child] == {"task": 1.0}
+    assert result.per_val_instance_best_candidates["task"] == {child}

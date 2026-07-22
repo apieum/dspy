@@ -132,9 +132,40 @@ class GEPAStrategy(BaseStrategy[Result]):
         final_candidate = self._select_final_candidate()
         self.best_candidate = final_candidate
         if self.best_candidate:
+            all_candidates = set()
+            all_candidates.update(getattr(self.selector, "task_wins", {}).keys())
+            for winners in getattr(self.selector, "example_best_candidates", {}).values():
+                all_candidates.update(winners)
+            if not all_candidates:
+                all_candidates.add(self.best_candidate)
+            ordered_candidates = [self.best_candidate] + [
+                candidate for candidate in all_candidates
+                if candidate is not self.best_candidate
+            ]
+            parents = {
+                candidate: list(candidate.parents)
+                for candidate in ordered_candidates
+            }
+            val_subscores = {
+                candidate: {
+                    score.id: float(score.value)
+                    for score in candidate.scores
+                }
+                for candidate in ordered_candidates
+            }
+            winners = {
+                task_id: set(candidates)
+                for task_id, candidates in getattr(
+                    self.selector, "example_best_candidates", {}
+                ).items()
+            }
             result = Success(
-                candidates=[self.best_candidate],
+                candidates=ordered_candidates,
                 history=list(self.history),
+                best_candidate=self.best_candidate,
+                parents=parents,
+                val_subscores=val_subscores,
+                per_val_instance_best_candidates=winners,
             )
         else:
             result = Failure(
