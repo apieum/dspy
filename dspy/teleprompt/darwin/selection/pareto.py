@@ -89,6 +89,8 @@ class ParetoFrontier(Selector):
         pareto_frontier = set()
         for example_winners in self.example_best_candidates.values():
             pareto_frontier.update(example_winners)
+        if self.diversity_archive is not None:
+            pareto_frontier.update(self.diversity_archive.candidates())
 
         self.publish('pareto_filtering', {'frontier_size': len(pareto_frontier)})
 
