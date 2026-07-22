@@ -82,6 +82,9 @@ class DarwinConfig:
     observers: Tuple[Any, ...] = ()
     checkpoint_path: Optional[str] = None
     resume_from: Optional[str] = None
+    # Optional JSONL sink for compact proposal decisions. Rejected candidate
+    # modules are not retained by this diagnostic trace.
+    proposal_trace_path: Optional[str] = None
     handle_signals: bool = True
     stoppers: Tuple[Any, ...] = ()
 

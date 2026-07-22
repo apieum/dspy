@@ -6,6 +6,7 @@ import random
 import json
 import importlib
 import signal
+import os
 from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
 
@@ -513,6 +514,9 @@ class GEPAStrategy(BaseStrategy[Result]):
 
         # Evaluate the newborns (including initial candidate)
         self.current_survivors = self.evaluator.evaluate(self.current_newborns, self.budget)
+        self._write_proposal_trace(
+            getattr(self.evaluator, "last_proposal_records", [])
+        )
 
         survivors = set(self.current_survivors.candidates)
         for candidate in self.current_newborns:
@@ -542,6 +546,19 @@ class GEPAStrategy(BaseStrategy[Result]):
         self._write_checkpoint()
 
         self.algorithm_state = "select"
+
+    def _write_proposal_trace(self, records: list[dict]) -> None:
+        """Append compact proposal decisions to the optional JSONL sink."""
+        path = self.config.proposal_trace_path
+        if not path or not records:
+            return
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "a", encoding="utf-8") as stream:
+            for record in records:
+                stream.write(json.dumps({
+                    "generation": self.current_generation,
+                    **record,
+                }, default=str) + "\n")
 
     def select(self):
         """Select candidates for next generation."""

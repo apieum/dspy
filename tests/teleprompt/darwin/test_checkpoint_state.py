@@ -52,6 +52,26 @@ def test_completed_checkpoint_can_be_resumed(tmp_path):
     assert len(resumed.strategy.evaluation_cache) > 0
 
 
+def test_proposal_trace_is_opt_in_and_compact(tmp_path):
+    trace_path = tmp_path / "proposals.jsonl"
+    data = [dspy.Example(question="q", answer="a").with_inputs("question")]
+
+    with dspy.context(lm=DummyLM([{"answer": "a"}])):
+        Darwin(
+            GEPAStrategy,
+            DarwinConfig(
+                max_lm_calls=1,
+                proposal_trace_path=str(trace_path),
+            ),
+        ).compile(dspy.Predict("question -> answer"), trainset=data)
+
+    records = [json.loads(line) for line in trace_path.read_text().splitlines()]
+    assert records
+    assert records[0]["selected"] is True
+    assert "parent_ids" in records[0]
+    assert "candidate" not in records[0]
+
+
 def test_signal_handler_writes_interrupted_checkpoint(tmp_path):
     checkpoint_path = tmp_path / "signal-checkpoint.json"
     strategy = GEPAStrategy(

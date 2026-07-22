@@ -106,6 +106,7 @@ class TestEvaluator:
         assert survivors.size() == 1
         assert survivors.first().scores  # Should have Metric scores
         assert len(survivors.first().scores) > 0
+        assert evaluator.last_proposal_records[0]["selected"] is True
 
     def test_budget_tracking(self):
         """Test that evaluation tracks budget correctly."""

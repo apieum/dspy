@@ -43,6 +43,7 @@ class ParentFastCompare(Evaluator):
         self.evaluation_cache = evaluation_cache or EvaluationCache()
         self.proposal_selection = proposal_selection or AllImprovements()
         self.verbose = False
+        self.last_proposal_records = []
 
     def start_compilation(self, student: dspy.Module, dataset_manager=None, verbose: bool = False) -> None:
         """Set verbose mode for the evaluator."""
@@ -60,6 +61,9 @@ class ParentFastCompare(Evaluator):
         """
         promising_candidates = []
         improvements = []
+        self.last_proposal_records = []
+        validation_details = {}
+        passed_acceptance = set()
 
         for candidate in new_borns.candidates:
             is_promising = False
@@ -67,10 +71,15 @@ class ParentFastCompare(Evaluator):
                 # Initial candidates are always promising.
                 is_promising = True
                 improvement = float("inf")
+                passed_acceptance.add(id(candidate))
             else:
                 is_improved, _, improvement = self._validate_on_minibatch(candidate, budget)
                 if is_improved:
                     is_promising = True
+                    passed_acceptance.add(id(candidate))
+                validation_details[id(candidate)] = getattr(
+                    self, "_last_validation_details", {}
+                )
 
             if is_promising:
                 promising_candidates.append(candidate)
@@ -79,6 +88,18 @@ class ParentFastCompare(Evaluator):
         promising_candidates = self.proposal_selection.select(
             promising_candidates, improvements
         )
+        selected_ids = {id(candidate) for candidate in promising_candidates}
+        self.last_proposal_records = [
+            {
+                "candidate_id": id(candidate),
+                "parent_ids": [id(parent) for parent in candidate.parents],
+                "passed_acceptance": id(candidate) in passed_acceptance,
+                "selected": id(candidate) in selected_ids,
+                "merge": candidate.creation_metadata.get("merge_type") == "system_aware",
+                **validation_details.get(id(candidate), {}),
+            }
+            for candidate in new_borns.candidates
+        ]
 
         self.publish('parent_fast_compare_summary',
                     {'passed': len(promising_candidates), 'total': len(new_borns.candidates)})
@@ -105,6 +126,7 @@ class ParentFastCompare(Evaluator):
                     comparison_parents = comparison_parents[:2]
                 cost = len(minibatch_data) * (len(comparison_parents) + 1)
             if hasattr(budget, "can_spend") and not budget.can_spend("evaluation", cost):
+                self._last_validation_details = {"reason": "budget_exhausted", "cost": cost}
                 return False, 0, float("-inf")
             # Notify observers about validation start with all relevant info
             self.publish('validate_on_minibatch', child, len(minibatch_data))
@@ -144,6 +166,13 @@ class ParentFastCompare(Evaluator):
                 default=0.0,
             )
             budget.spend_on_evaluation(child.module, {"phase": "validation", "cost": cost})
+            self._last_validation_details = {
+                "child_scores": child_values,
+                "parent_scores": parent_scores,
+                "improvement": improvement,
+                "cost": cost,
+                "reason": "accepted" if is_improved else "not_improved",
+            }
 
             self.publish('validation_result', child,
                         {'passed': is_improved, 'cost': cost, 'parent_avg': avg_parent, 'child_avg': avg_child})
@@ -152,6 +181,10 @@ class ParentFastCompare(Evaluator):
         except Exception as e:
             # Keep this as direct logging since it's an error case
             logger.warning(f"Minibatch validation failed: {e}")
+            self._last_validation_details = {
+                "reason": "validation_error",
+                "error": str(e),
+            }
             return False, len(minibatch_data) * (len(comparison_parents) + 1), float("-inf")
 
     def _evaluate(self, candidate, examples, *, persist_scores):
