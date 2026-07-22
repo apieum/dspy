@@ -61,9 +61,13 @@ class ParetoFrontier(Selector):
         self.frontier_type = "instance"
 
     def start_compilation(self, student: dspy.Module, verbose: bool=False) -> None:
-        """Called when compilation begins. Initialize task tracking structures."""
+        """Reset all selection state at the beginning of a compilation."""
         self.verbose = verbose
-        # Task structures will be initialized dynamically as we receive candidates with scores
+        self.example_best_scores.clear()
+        self.example_best_candidates.clear()
+        self.task_wins.clear()
+        if self.diversity_archive is not None:
+            self.diversity_archive = DiversityArchive(self.diversity_archive.capacity)
 
 
     def promote(self, survivors: Survivors, budget: Optional[Budget] = None) -> Parents:
@@ -270,6 +274,8 @@ class ParetoFrontier(Selector):
         self.frontier_type = getattr(config, 'frontier_type', 'instance')
         if getattr(config, 'preserve_diversity', False):
             self.diversity_archive = DiversityArchive(getattr(config, 'archive_capacity', 32))
+        else:
+            self.diversity_archive = None
         # Subscribe all selector observers to our events using the Channel pattern
         for observer in getattr(config, 'selector_observers', []):
             # Use the modern Channel subscription pattern

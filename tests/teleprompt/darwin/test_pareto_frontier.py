@@ -17,6 +17,7 @@ from dspy.teleprompt.darwin.data.candidate import Candidate
 from dspy.teleprompt.darwin.data.cohort import Survivors, Parents
 from dspy.teleprompt.darwin.evaluation.metrics import Metric
 from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
+from dspy.teleprompt.darwin import DarwinConfig
 
 
 class TestParetoFrontierCore:
@@ -53,6 +54,20 @@ class TestParetoFrontierCore:
         assert len(selector.task_wins) == 0
         assert hasattr(selector, 'publish')  # Channel capability
         assert selector.elitist_pruning == False  # Default mode is official GEPA
+
+    def test_start_compilation_resets_previous_state(self):
+        candidate = self.create_candidate_with_scores({"task": 1.0})
+        self.selector.update_scores_batch(Survivors(candidate, iteration=0))
+        assert self.selector.size() == 1
+
+        self.selector.configure(DarwinConfig(preserve_diversity=True, archive_capacity=4))
+        self.selector.diversity_archive.add(candidate)
+        self.selector.start_compilation(None, verbose=False)
+
+        assert self.selector.size() == 0
+        assert self.selector.example_best_scores == {}
+        assert self.selector.example_best_candidates == {}
+        assert len(self.selector.diversity_archive) == 0
 
     def test_single_candidate_promotion(self):
         """Test promoting a single candidate."""
