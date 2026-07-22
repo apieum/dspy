@@ -25,7 +25,7 @@ class SystemAwareMerge(Generator):
     """
 
     def __init__(self, feedback_provider=None, feedback_data=None, assessor=None,
-                 config=None, val_overlap_floor: int = 5):
+                 config=None, val_overlap_floor: int = 5, max_attempts: int = 10):
         super().__init__()
         # Integrated merge history tracking (replaces MergeHistoryTracker)
         self.attempted_merges: Set[Tuple[int, int, int]] = set()
@@ -43,7 +43,10 @@ class SystemAwareMerge(Generator):
         self.validation_data = []
         if val_overlap_floor <= 0:
             raise ValueError("val_overlap_floor must be positive")
+        if max_attempts <= 0:
+            raise ValueError("max_attempts must be positive")
         self.val_overlap_floor = val_overlap_floor
+        self.max_attempts = max_attempts
 
     def generate(self, parents: Parents, budget=None) -> NewBorns:
         """Generate a new candidate using System-Aware Merge (Algorithm 4)."""
@@ -56,82 +59,90 @@ class SystemAwareMerge(Generator):
                 logger.warning("SystemAwareMerge: Fallback generator not initialized")
                 return NewBorns()
 
-        try:
-            # Stochastic selection of two parent candidates
-            selected_parents = parents.sample_stochastic(2, rng=self.rng)
-            if selected_parents.size() < 2:
-                return NewBorns()
+        attempted_pairs = set()
+        for _ in range(self.max_attempts):
+            try:
+                # Stochastic selection of two parent candidates.  GEPA makes
+                # several attempts because the first pair may have no useful
+                # common ancestor even when another pair can be merged.
+                selected_parents = parents.sample_stochastic(2, rng=self.rng)
+                if selected_parents.size() < 2:
+                    return NewBorns()
 
-            parent1, parent2 = list(selected_parents)
+                parent1, parent2 = list(selected_parents)
+                pair_key = tuple(sorted((id(parent1), id(parent2))))
+                if pair_key in attempted_pairs:
+                    continue
+                attempted_pairs.add(pair_key)
 
-            # A merge is only meaningful when both branches have been scored
-            # on enough of the same validation support. Empty scores are kept
-            # permissive for direct/custom generator use; the normal GEPA
-            # evaluator populates them before a merge is scheduled.
-            common_score_ids = {
-                score.id for score in parent1.scores
-            } & {
-                score.id for score in parent2.scores
-            }
-            if parent1.scores and parent2.scores and len(common_score_ids) < self.val_overlap_floor:
-                self.merge_stats["failure_overlap"] += 1
-                logger.debug(
-                    "Skipping merge: %d shared validation scores, %d required",
-                    len(common_score_ids), self.val_overlap_floor,
-                )
-                return NewBorns()
-
-            # Find common ancestors
-            common_ancestors = parent1.find_common_ancestors(parent2)
-
-            # Iterate through common ancestors to find a valid merge
-            # Sort by generation number (most recent first) for better results
-            for ancestor in sorted(list(common_ancestors), key=lambda c: c.generation_number, reverse=True):
-
-                # Official GEPA only merges descendants that have both
-                # genuinely surpassed their common ancestor. Otherwise a
-                # stale ancestor can re-enter the search through a merge.
-                if ancestor.average_score() > min(parent1.average_score(), parent2.average_score()):
+                # A merge is only meaningful when both branches have been scored
+                # on enough of the same validation support. Empty scores are kept
+                # permissive for direct/custom generator use; the normal GEPA
+                # evaluator populates them before a merge is scheduled.
+                common_score_ids = {
+                    score.id for score in parent1.scores
+                } & {
+                    score.id for score in parent2.scores
+                }
+                if parent1.scores and parent2.scores and len(common_score_ids) < self.val_overlap_floor:
+                    self.merge_stats["failure_overlap"] += 1
+                    logger.debug(
+                        "Skipping merge: %d shared validation scores, %d required",
+                        len(common_score_ids), self.val_overlap_floor,
+                    )
                     continue
 
-                # Check merge history (integrated logic)
-                merge_key = tuple(sorted((id(parent1), id(parent2)))) + (id(ancestor),)
-                if merge_key in self.attempted_merges:
-                    continue
-                self.attempted_merges.add(merge_key)
+                # Find common ancestors
+                common_ancestors = parent1.find_common_ancestors(parent2)
 
-                # Check for desirable divergence
-                desirable_signatures = self._find_desirable_signatures(ancestor, parent1, parent2)
-                if not desirable_signatures:
-                    self.merge_stats["failure_not_desirable"] += 1
-                    continue
+                # Iterate through common ancestors to find a valid merge
+                # Sort by generation number (most recent first) for better results
+                for ancestor in sorted(list(common_ancestors), key=lambda c: c.generation_number, reverse=True):
 
-                # Step 6: Create the merged candidate
-                child_candidate = self._create_merged_candidate(
-                    ancestor, parent1, parent2, parents.iteration, desirable_signatures
-                )
-                if child_candidate is None:
-                    continue
+                    # Official GEPA only merges descendants that have both
+                    # genuinely surpassed their common ancestor. Otherwise a
+                    # stale ancestor can re-enter the search through a merge.
+                    if ancestor.average_score() > min(parent1.average_score(), parent2.average_score()):
+                        continue
 
-                # GEPA evaluates a crossover on a balanced sample containing
-                # examples where either parent wins (and ties when available).
-                # Carry that sample with the proposal so the evaluator does
-                # not silently replace it with the ordinary mutation batch.
-                child_candidate.proposal_minibatch = self._select_merge_minibatch(
-                    parent1, parent2
-                )
+                    # Check merge history (integrated logic)
+                    merge_key = tuple(sorted((id(parent1), id(parent2)))) + (id(ancestor),)
+                    if merge_key in self.attempted_merges:
+                        continue
+                    self.attempted_merges.add(merge_key)
 
-                # Display merge evolution if verbose mode is enabled
-                if self.verbose:
-                    self._display_merge_evolution(ancestor, parent1, parent2, child_candidate, desirable_signatures)
+                    # Check for desirable divergence
+                    desirable_signatures = self._find_desirable_signatures(ancestor, parent1, parent2)
+                    if not desirable_signatures:
+                        self.merge_stats["failure_not_desirable"] += 1
+                        continue
 
-                self.merge_stats["success"] += 1
-                return NewBorns(child_candidate, iteration=parents.iteration)
+                    # Step 6: Create the merged candidate
+                    child_candidate = self._create_merged_candidate(
+                        ancestor, parent1, parent2, parents.iteration, desirable_signatures
+                    )
+                    if child_candidate is None:
+                        continue
 
-            logger.debug(f"No successful merge found for parents despite {len(common_ancestors)} common ancestors")
+                    # GEPA evaluates a crossover on a balanced sample containing
+                    # examples where either parent wins (and ties when available).
+                    # Carry that sample with the proposal so the evaluator does
+                    # not silently replace it with the ordinary mutation batch.
+                    child_candidate.proposal_minibatch = self._select_merge_minibatch(
+                        parent1, parent2
+                    )
 
-        except Exception as e:
-            logger.warning(f"System-Aware Merge failed: {e}")
+                    # Display merge evolution if verbose mode is enabled
+                    if self.verbose:
+                        self._display_merge_evolution(ancestor, parent1, parent2, child_candidate, desirable_signatures)
+
+                    self.merge_stats["success"] += 1
+                    return NewBorns(child_candidate, iteration=parents.iteration)
+
+                logger.debug("No successful merge found for sampled parent pair")
+
+            except Exception as e:
+                logger.warning(f"System-Aware Merge attempt failed: {e}")
 
         return NewBorns()  # No successful merge found
 
