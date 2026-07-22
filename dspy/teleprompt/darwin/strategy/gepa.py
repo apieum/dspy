@@ -60,10 +60,10 @@ class GEPAStrategy(BaseStrategy[Result]):
         self._signal_stop_requested = False
         self._signal_stop_reason = None
         self._phase_actions = {
-            "initialize": self._initialize_step,
-            "evaluate": self._evaluate_step,
-            "select": self._select_step,
-            "generate": self._generate_step,
+            "initialize": self.initialize,
+            "evaluate": self.evaluate,
+            "select": self.select,
+            "generate": self.generate,
         }
 
     def start_compilation(
@@ -201,7 +201,7 @@ class GEPAStrategy(BaseStrategy[Result]):
         self._restore_signal_handlers()
         return result
 
-    def _initialize_step(self) -> None:
+    def initialize(self) -> None:
         """Create the seed cohort for the current compilation."""
         initial_candidate = Candidate(self.student.deepcopy(), generation_number=0)
         self.current_newborns = NewBorns([initial_candidate], iteration=0)
@@ -501,7 +501,7 @@ class GEPAStrategy(BaseStrategy[Result]):
                 pass
         return candidate
 
-    def _evaluate_step(self):
+    def evaluate(self):
         """Evaluate current candidates."""
         if self.config.verbose:
             logger.info(f"Evaluating candidates in generation {self.current_generation}")
@@ -543,7 +543,7 @@ class GEPAStrategy(BaseStrategy[Result]):
 
         self.algorithm_state = "select"
 
-    def _select_step(self):
+    def select(self):
         """Select candidates for next generation."""
         if self.config.verbose:
             logger.info(f"Selecting candidates for generation {self.current_generation + 1}")
@@ -571,7 +571,7 @@ class GEPAStrategy(BaseStrategy[Result]):
         self.algorithm_state = "generate"
         self._write_checkpoint()
 
-    def _generate_step(self):
+    def generate(self):
         """Generate new candidates."""
         self.current_generation += 1
 
