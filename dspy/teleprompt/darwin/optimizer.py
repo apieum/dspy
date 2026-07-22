@@ -44,7 +44,16 @@ class Darwin(Teleprompter):
         self.config = config
         self.latest_result: Result | None = None
 
-    def compile(self, student: Module, *, trainset: list[dspy.Example], devset: list[dspy.Example] | None = None, teacher: dspy.Module | None = None, **kwargs) -> dspy.Module:
+    def compile(
+        self,
+        student: Module,
+        *,
+        trainset: list[dspy.Example],
+        teacher: dspy.Module | None = None,
+        valset: list[dspy.Example] | None = None,
+        devset: list[dspy.Example] | None = None,
+        **kwargs,
+    ) -> dspy.Module:
         """Main compilation method - simple strategy execution loop.
 
         Args:
@@ -53,7 +62,18 @@ class Darwin(Teleprompter):
             devset: Optional test set for final evaluation
         """
         try:
-            self.strategy.start_compilation(student=student, trainset=trainset, devset=devset, teacher=teacher, **kwargs)
+            # ``valset`` is the Teleprompter API name. ``devset`` remains an
+            # accepted alias for existing Darwin callers.
+            if valset is not None and devset is not None:
+                raise ValueError("Pass either valset or devset, not both")
+            validation_set = valset if valset is not None else devset
+            self.strategy.start_compilation(
+                student=student,
+                trainset=trainset,
+                devset=validation_set,
+                teacher=teacher,
+                **kwargs,
+            )
 
             if self.config.verbose:
                 pass
