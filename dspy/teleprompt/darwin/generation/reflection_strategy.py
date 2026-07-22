@@ -32,26 +32,16 @@ class ReflectionStrategy(ABC):
 
 
 class GEPAReflectionSignature(dspy.Signature):
-    """Pre-optimized GEPA reflection signature using MIPROv2-enhanced prompts.
-    
-    These prompts were optimized on HotPotQA, GSM8K, and MATH datasets to prevent
-    task-specific overfitting while maintaining high instruction quality.
-    """
+    """Propose a new instruction from labeled execution examples and feedback."""
     current_instruction: str = dspy.InputField(
         desc="Current instruction text that needs improvement based on performance feedback"
     )
     formatted_examples: str = dspy.InputField(
         desc="Labeled execution examples containing inputs, expected outputs, actual outputs, scores, and feedback used to diagnose failures and improve the instruction"
     )
-    
-    task_analysis: str = dspy.OutputField(
-        desc="Systematic analysis of response patterns, structural requirements, and quality indicators that transcend specific content domains"
-    )
-    improvement_strategy: str = dspy.OutputField(
-        desc="Evidence-based strategy for enhancing instruction effectiveness through structural, clarity, and guidance improvements that apply broadly across question types"
-    )
+
     new_instruction: str = dspy.OutputField(
-        desc="Refined general-purpose instruction optimized for clarity, completeness, and broad applicability. Focus on response structure, reasoning quality, and answer precision without domain-specific references. Ensure effectiveness across diverse question formats and complexity levels."
+        desc="A complete improved instruction for the assistant, including task-specific knowledge and actionable guidance inferred from the examples and feedback."
     )
 
 
@@ -67,9 +57,10 @@ class GEPAReflection(ReflectionStrategy):
             # Use pre-optimized reflector (e.g., via MIPROv2)
             self.reflector = optimized_reflector
         else:
-            # Default DSPy ChainOfThought for reflection with paper's approach
-            # ChainOfThought automatically adds 'reasoning' field for step-by-step thinking
-            self.reflector = dspy.ChainOfThought(GEPAReflectionSignature)
+            # Official GEPA uses a single focused instruction-proposal call.
+            # Keeping the proposal output narrow leaves more context for the
+            # labeled examples and makes the reflection task unambiguous.
+            self.reflector = dspy.Predict(GEPAReflectionSignature)
     
     def reflect(self, 
                 current_instruction: str,
@@ -85,11 +76,6 @@ class GEPAReflection(ReflectionStrategy):
                 )
             
             # Log the reflection process for debugging
-            if hasattr(reflection_result, 'task_analysis'):
-                logger.debug(f"Task analysis: {reflection_result.task_analysis[:200]}...")
-            if hasattr(reflection_result, 'improvement_strategy'):
-                logger.debug(f"Improvement strategy: {reflection_result.improvement_strategy[:200]}...")
-            
             # Return the improved instruction with safety check
             if hasattr(reflection_result, 'new_instruction') and reflection_result.new_instruction:
                 return reflection_result.new_instruction
@@ -120,7 +106,7 @@ def create_optimized_reflection_strategy(reflection_trainset=None, optimizer_typ
         from dspy.teleprompt import MIPROv2, BootstrapFewShot
         
         # Base reflector to optimize
-        base_reflector = dspy.ChainOfThought(GEPAReflectionSignature)
+        base_reflector = dspy.Predict(GEPAReflectionSignature)
         
         # Metric for reflection quality (how general and effective the new instructions are)
         def reflection_quality_metric(example, prediction, trace=None):
@@ -165,4 +151,3 @@ def create_optimized_reflection_strategy(reflection_trainset=None, optimizer_typ
     except Exception as e:
         logger.warning(f"Failed to create optimized reflection strategy: {e}")
         return GEPAReflection()
-
