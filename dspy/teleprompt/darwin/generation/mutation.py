@@ -77,6 +77,8 @@ class ReflectivePromptMutation(Generator):
 
     def generate(self, parents: Parents, budget=None) -> NewBorns:
         """Generate a new candidate without validation."""
+        if budget is not None and hasattr(budget, "can_spend") and not budget.can_spend("generation"):
+            return NewBorns()
         if parents.is_empty() or not self.feedback_data:
             if budget:
                 budget.spend_on_generation(None, {"type": "no_parents_or_data"})

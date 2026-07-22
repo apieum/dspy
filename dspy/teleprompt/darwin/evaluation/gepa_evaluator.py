@@ -89,6 +89,9 @@ class ParentFastCompare(Evaluator):
             return False, 0, float("-inf")
 
         try:
+            cost = len(self.minibatch_data) * (len(child.parents) + 1)
+            if hasattr(budget, "can_spend") and not budget.can_spend("evaluation", cost):
+                return False, 0, float("-inf")
             # Notify observers about validation start with all relevant info
             self.publish('validate_on_minibatch', child, len(self.minibatch_data))
             child_scores = self._evaluate(child, self.minibatch_data, persist_scores=False)
@@ -115,7 +118,6 @@ class ParentFastCompare(Evaluator):
                 (sum(values) / len(values) for values in parent_scores if values),
                 default=0.0,
             )
-            cost = len(self.minibatch_data) * (len(child.parents) + 1)  # Cost for evaluating both child and parents
             budget.spend_on_evaluation(child.module, {"phase": "validation", "cost": cost})
 
             self.publish('validation_result', child,
@@ -178,7 +180,17 @@ class FullTaskScores(Evaluator):
         self.publish('comprehensive_evaluation_start',
                     {'candidates_count': len(new_borns.candidates), 'tasks_count': len(self.validation_data)})
 
+        evaluated_candidates = []
         for candidate in new_borns.candidates:
+            # Always score the seed program so a constrained run still has a
+            # valid result. Subsequent proposals must fit the evaluation
+            # domain budget before they are evaluated.
+            if evaluated_candidates or candidate.parents:
+                budget_exhausted = hasattr(budget, "can_spend") and not budget.can_spend(
+                "evaluation", len(self.validation_data)
+                )
+                if budget_exhausted:
+                    break
             # Comprehensive evaluation on complete validation set - now returns List[Metric] directly
             scores = self._evaluate(candidate, self.validation_data)
 
@@ -192,11 +204,12 @@ class FullTaskScores(Evaluator):
                 candidate.module,
                 {"phase": "full_evaluation", "examples": len(self.validation_data)}
             )
+            evaluated_candidates.append(candidate)
 
         self.publish('comprehensive_evaluation_complete',
                     {'candidates_count': len(new_borns.candidates), 'tasks_count': len(self.validation_data)})
         # All candidates that get a full evaluation are considered "survivors" of this stage.
-        return Survivors(*new_borns.to_list(), iteration=new_borns.iteration)
+        return Survivors(*evaluated_candidates, iteration=new_borns.iteration)
 
     def _evaluate(self, candidate, examples):
         cached = [self.evaluation_cache.get(candidate, example) for example in examples]

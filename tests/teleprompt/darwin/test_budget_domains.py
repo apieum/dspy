@@ -1,0 +1,27 @@
+import pytest
+
+from dspy.teleprompt.darwin import LMCallsBudget
+
+
+def test_lm_budget_tracks_evaluation_and_generation_domains():
+    budget = LMCallsBudget(
+        max_calls=10,
+        evaluation_max_calls=6,
+        generation_max_calls=4,
+    )
+    budget.spend_on_evaluation(None, {"phase": "full_evaluation", "examples": 5})
+    budget.spend_on_generation(None)
+    budget.spend_on_generation(None)
+
+    remaining = budget.get_remaining()
+    assert budget.evaluation_calls == 5
+    assert budget.generation_calls == 2
+    assert remaining["evaluation_calls"] == 1
+    assert remaining["generation_calls"] == 2
+    assert budget.can_spend("evaluation", 1)
+    assert not budget.can_spend("evaluation", 2)
+
+
+def test_lm_budget_rejects_unknown_domain():
+    with pytest.raises(ValueError):
+        LMCallsBudget(10).can_spend("reflection")

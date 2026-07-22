@@ -39,6 +39,8 @@ class DarwinConfig:
 
     # System parameters we actually have
     max_lm_calls: int = 100
+    max_evaluation_calls: Optional[int] = None
+    max_generation_calls: Optional[int] = None
     max_iterations: int = 100
     patience: int = 3
     validation_split: float = 0.2

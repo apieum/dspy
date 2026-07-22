@@ -174,6 +174,10 @@ class BaseStrategy(ABC, Generic[R]):
         kwargs = {}
         if "max_calls" in signature.parameters:
             kwargs["max_calls"] = self.config.max_lm_calls
+            if "evaluation_max_calls" in signature.parameters:
+                kwargs["evaluation_max_calls"] = self.config.max_evaluation_calls
+            if "generation_max_calls" in signature.parameters:
+                kwargs["generation_max_calls"] = self.config.max_generation_calls
         elif "max_iterations" in signature.parameters:
             kwargs["max_iterations"] = self.config.max_iterations
         elif "total_budget" in signature.parameters:
