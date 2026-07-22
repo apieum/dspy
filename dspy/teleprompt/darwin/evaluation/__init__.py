@@ -3,6 +3,7 @@
 from .feedback import FeedbackResult, EvaluationTrace, ModuleFeedback
 from .evaluator import Evaluator
 from .gepa_evaluator import GEPATwoPhasesEval, FullTaskScores, ParentFastCompare
+from .batching import BatchEvaluator, PerCandidateBatchEvaluator, CallbackBatchEvaluator
 from .acceptance import StrictImprovementAcceptance, ImprovementOrEqualAcceptance
 from .cache import EvaluationCache
 from .proposal_selection import AllImprovements, BestImprovement, TopKImprovements
@@ -29,6 +30,9 @@ __all__ = [
     'GEPATwoPhasesEval',
     'FullTaskScores',
     'ParentFastCompare',
+    'BatchEvaluator',
+    'PerCandidateBatchEvaluator',
+    'CallbackBatchEvaluator',
     'StrictImprovementAcceptance',
     'ImprovementOrEqualAcceptance',
     'EvaluationCache',

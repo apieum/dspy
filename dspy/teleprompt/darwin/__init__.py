@@ -33,6 +33,7 @@ from .generation.mutation import ReflectivePromptMutation
 from .generation.system_aware_merge import SystemAwareMerge
 from .generation.feedback import FeedbackProvider
 from .evaluation.gepa_evaluator import FullTaskScores, ParentFastCompare, GEPATwoPhasesEval
+from .evaluation.batching import BatchEvaluator, PerCandidateBatchEvaluator, CallbackBatchEvaluator
 from .evaluation.acceptance import StrictImprovementAcceptance, ImprovementOrEqualAcceptance
 from .evaluation.cache import EvaluationCache
 from .evaluation.proposal_selection import AllImprovements, BestImprovement, TopKImprovements
@@ -119,6 +120,9 @@ __all__ = [
     'FeedbackProvider',
     'FullTaskScores',
     'ParentFastCompare',
+    'BatchEvaluator',
+    'PerCandidateBatchEvaluator',
+    'CallbackBatchEvaluator',
     'StrictImprovementAcceptance',
     'ImprovementOrEqualAcceptance',
     'EvaluationCache',

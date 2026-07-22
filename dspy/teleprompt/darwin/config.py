@@ -1,6 +1,6 @@
 """Configuration classes for Darwin optimization framework."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Type, Optional, Tuple, Any
 
 from .budget import Budget, LMCallsBudget
@@ -14,6 +14,7 @@ from .dataset_manager import DefaultDatasetManagerFactory
 from .evaluation.acceptance import StrictImprovementAcceptance
 from .evaluation.proposal_selection import AllImprovements
 from .evaluation.policy import FullEvaluationPolicy
+from .evaluation.batching import PerCandidateBatchEvaluator
 
 
 @dataclass
@@ -59,7 +60,7 @@ class DarwinConfig:
     batch_sampler: Optional[BatchSampler] = None
     # Optional adapter-level evaluator. It receives a list of
     # (candidate, examples) jobs and returns one metric list per job.
-    batch_evaluator: Optional[Any] = None
+    batch_evaluator: Any = field(default_factory=PerCandidateBatchEvaluator)
     mutation_config: ReflectiveMutationConfig = None
 
     # System parameters we actually have

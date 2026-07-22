@@ -16,6 +16,7 @@ from .acceptance import StrictImprovementAcceptance
 from .cache import EvaluationCache
 from .proposal_selection import AllImprovements
 from .policy import FullEvaluationPolicy
+from .batching import resolve_batch_evaluator
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +221,7 @@ class FullTaskScores(Evaluator):
         self.validation_data = validation_data or []
         self.evaluation_cache = evaluation_cache or EvaluationCache()
         self.validation_policy = validation_policy or FullEvaluationPolicy()
-        self.batch_evaluator = batch_evaluator
+        self.batch_evaluator = resolve_batch_evaluator(batch_evaluator)
         self._iteration = 0
         self.verbose = False
 
@@ -241,8 +242,7 @@ class FullTaskScores(Evaluator):
         self.publish('comprehensive_evaluation_start',
                     {'candidates_count': len(new_borns.candidates), 'tasks_count': len(self.validation_data)})
 
-        if self.batch_evaluator is not None and len(new_borns.candidates) > 1:
-            return self._evaluate_with_batch_evaluator(new_borns, budget)
+        return self._evaluate_with_batch_evaluator(new_borns, budget)
 
         evaluated_candidates = []
         for candidate in new_borns.candidates:
@@ -280,15 +280,14 @@ class FullTaskScores(Evaluator):
         return Survivors(*evaluated_candidates, iteration=new_borns.iteration)
 
     def _evaluate_with_batch_evaluator(self, new_borns: NewBorns, budget: Budget) -> Survivors:
-        """Evaluate several candidates through an optional adapter-level batch hook.
+        """Evaluate candidates through the configured batch-evaluator strategy.
 
         The hook receives ``[(candidate, missing_examples), ...]`` and must
         return metric lists in the same order. Cached examples are omitted.
-        The default evaluator never enters this path, preserving DSPy's
-        existing per-candidate execution semantics.
+        The default strategy preserves DSPy's existing per-candidate execution
+        semantics; an adapter can replace it with true cross-candidate batching.
         """
         jobs = []
-        cached_by_candidate = {}
         eval_data_by_candidate = {}
         for candidate in new_borns.candidates:
             eval_data = self.validation_policy.get_eval_batch(
@@ -300,13 +299,12 @@ class FullTaskScores(Evaluator):
                 break
             eval_data_by_candidate[candidate] = eval_data
             cached = [self.evaluation_cache.get(candidate, example) for example in eval_data]
-            cached_by_candidate[candidate] = cached
             missing = [example for example, score in zip(eval_data, cached) if score is None]
             if missing:
                 jobs.append((candidate, missing))
 
         if jobs:
-            fresh_by_job = self.batch_evaluator(jobs, self.assessor, self)
+            fresh_by_job = self.batch_evaluator.evaluate(jobs, self.assessor, self)
             if len(fresh_by_job) != len(jobs):
                 raise ValueError(
                     "batch_evaluator must return one metric list per evaluation job"
