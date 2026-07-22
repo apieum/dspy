@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
 
 import dspy
-from dspy.teleprompt.utils import get_signature
+from dspy.teleprompt.utils import get_signature, set_signature
 from .base import BaseStrategy
 from ..data.candidate import Candidate
 from ..data.cohort import NewBorns, Survivors, Parents
@@ -16,11 +16,19 @@ from ..result import Result, Success, Failure
 from ..state import OptimizationCheckpoint
 from ..generation import SingleMutationSampling, EpochShuffledBatchSampler
 from ..evaluation import EvaluationCache
+from ..evaluation import Metric
 
 if TYPE_CHECKING:
     from ..config import DarwinConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _tuple_tree(value):
+    """Convert JSON-loaded RNG state lists back to nested tuples."""
+    if isinstance(value, list):
+        return tuple(_tuple_tree(item) for item in value)
+    return value
 
 
 class GEPAStrategy(BaseStrategy[Result]):
@@ -102,6 +110,12 @@ class GEPAStrategy(BaseStrategy[Result]):
             logger.info(f"Data split: {len(self.training_data)} train, {len(self.validation_data)} validation, {len(self.devset)} test")
 
         self._notify("start_compilation", self.student, self.dataset_manager)
+
+        if self.config.resume_from:
+            if self._restore_checkpoint(self.config.resume_from, student):
+                self._write_checkpoint()
+                return
+
         self._write_checkpoint()
 
         # Initialize the first candidate
@@ -182,7 +196,11 @@ class GEPAStrategy(BaseStrategy[Result]):
         """Return a JSON-safe snapshot of the current optimization state."""
         candidates = []
         tracked = set()
-        for cohort in (self.current_newborns, self.current_survivors, self.current_parents):
+        for role, cohort in (
+            ("newborns", self.current_newborns),
+            ("survivors", self.current_survivors),
+            ("parents", self.current_parents),
+        ):
             if cohort is None:
                 continue
             for candidate in cohort:
@@ -191,6 +209,7 @@ class GEPAStrategy(BaseStrategy[Result]):
                 tracked.add(id(candidate))
                 candidates.append({
                     "id": id(candidate),
+                    "roles": [role],
                     "generation": candidate.generation_number,
                     "score": candidate.average_score(),
                     "parents": [id(parent) for parent in candidate.parents],
@@ -213,6 +232,12 @@ class GEPAStrategy(BaseStrategy[Result]):
                         if isinstance(value, (str, int, float, bool, type(None)))
                     },
                 })
+                # A candidate can exist in multiple active cohorts. Preserve
+                # all roles without duplicating its serialized record.
+                if any(item["id"] == id(candidate) for item in candidates[:-1]):
+                    existing = next(item for item in candidates if item["id"] == id(candidate))
+                    existing.setdefault("roles", []).append(role)
+                    candidates.pop()
         remaining = self.budget.get_remaining()
         return OptimizationCheckpoint(
             generation=self.current_generation,
@@ -223,6 +248,90 @@ class GEPAStrategy(BaseStrategy[Result]):
             rng_state=self.rng.getstate(),
             completed=completed,
         )
+
+    def _restore_checkpoint(self, path: str, student: dspy.Module) -> bool:
+        """Restore a compilation from a Darwin checkpoint manifest."""
+        checkpoint_path = Path(path)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Darwin checkpoint not found: {path}")
+        checkpoint = OptimizationCheckpoint.from_dict(
+            json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        )
+
+        records = checkpoint.candidates
+        restored = {}
+        for record in records:
+            module = student.deepcopy()
+            predictors = module.predictors()
+            for predictor, instruction in zip(predictors, record.get("instructions", [])):
+                set_signature(
+                    predictor,
+                    get_signature(predictor).with_instructions(instruction),
+                )
+            candidate = Candidate(
+                module,
+                generation_number=int(record.get("generation", 0)),
+                creation_metadata=record.get("creation_metadata", {}),
+            )
+            candidate.scores = [
+                Metric(
+                    score.get("value", 0.0),
+                    id=str(score.get("id", "")),
+                    feedback=score.get("feedback", ""),
+                    objective_scores=score.get("objective_scores", {}),
+                )
+                for score in record.get("scores", [])
+            ]
+            restored[record.get("id")] = candidate
+
+        for record in records:
+            candidate = restored[record.get("id")]
+            candidate.parents = [
+                restored[parent_id]
+                for parent_id in record.get("parents", [])
+                if parent_id in restored
+            ]
+
+        self.history = list(checkpoint.history)
+        self.current_generation = checkpoint.generation
+        self.algorithm_state = "terminate" if checkpoint.completed else checkpoint.algorithm_state
+        if checkpoint.rng_state is not None:
+            self.rng.setstate(_tuple_tree(checkpoint.rng_state))
+
+        self._budget = None
+        budget = self.budget
+        remaining = checkpoint.budget
+        if hasattr(budget, "max_calls") and "calls" in remaining:
+            budget.consumed_calls = max(0, budget.max_calls - int(remaining["calls"]))
+            if hasattr(budget, "evaluation_max_calls"):
+                budget.evaluation_calls = max(
+                    0, budget.evaluation_max_calls - int(remaining.get("evaluation_calls", budget.evaluation_calls))
+                )
+            if hasattr(budget, "generation_max_calls"):
+                budget.generation_calls = max(
+                    0, budget.generation_max_calls - int(remaining.get("generation_calls", budget.generation_calls))
+                )
+
+        def cohort(role):
+            return [
+                candidate for record in records if role in record.get("roles", [])
+                for candidate in [restored[record.get("id")]]
+            ]
+
+        self.current_newborns = NewBorns(*cohort("newborns"), iteration=self.current_generation)
+        self.current_survivors = Survivors(*cohort("survivors"), iteration=self.current_generation)
+        self.current_parents = Parents(*cohort("parents"), iteration=self.current_generation)
+
+        # Rebuild the selector's per-task Pareto state from restored scores.
+        self._selector = self.config.selection()
+        configure = getattr(self._selector, "configure", None)
+        if callable(configure):
+            configure(self.config)
+        self._selector.update_scores_batch(Survivors(*restored.values(), iteration=self.current_generation))
+        self.best_candidate = max(
+            restored.values(), key=lambda candidate: candidate.average_score(), default=None
+        )
+        return True
 
     def _write_checkpoint(self, completed: bool = False) -> None:
         if not self.config.checkpoint_path:

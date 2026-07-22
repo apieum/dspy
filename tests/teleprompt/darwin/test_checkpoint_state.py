@@ -27,3 +27,22 @@ def test_checkpoint_manifest_is_written_and_json_safe(tmp_path):
     assert "instructions" in checkpoint.candidates[0]
     assert checkpoint.rng_state is not None
     assert "scores" in checkpoint.candidates[0]
+
+
+def test_completed_checkpoint_can_be_resumed(tmp_path):
+    checkpoint_path = tmp_path / "darwin-checkpoint.json"
+    data = [dspy.Example(question="q", answer="a").with_inputs("question")]
+    with dspy.context(lm=DummyLM([{"answer": "a"}])):
+        Darwin(
+            GEPAStrategy,
+            DarwinConfig(max_lm_calls=1, checkpoint_path=str(checkpoint_path)),
+        ).compile(dspy.Predict("question -> answer"), trainset=data)
+
+    resumed = Darwin(
+        GEPAStrategy,
+        DarwinConfig(max_lm_calls=1, resume_from=str(checkpoint_path)),
+    )
+    compiled = resumed.compile(dspy.Predict("question -> answer"), trainset=data)
+
+    assert compiled._compiled is True
+    assert resumed.get_last_result().candidates

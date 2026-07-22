@@ -66,6 +66,7 @@ class DarwinConfig:
     dataset_manager_factory: Any = DefaultDatasetManagerFactory
     observers: Tuple[Any, ...] = ()
     checkpoint_path: Optional[str] = None
+    resume_from: Optional[str] = None
     stoppers: Tuple[Any, ...] = ()
 
     # Logging
