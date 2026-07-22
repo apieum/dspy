@@ -6,11 +6,9 @@ from asyncio import iscoroutinefunction
 from queue import Queue
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Generator
 
-import litellm
-import ujson
+import orjson
 from anyio import create_memory_object_stream, create_task_group
 from anyio.streams.memory import MemoryObjectSendStream
-from litellm import ModelResponseStream
 
 from dspy.dsp.utils.settings import settings
 from dspy.primitives.prediction import Prediction
@@ -19,6 +17,12 @@ from dspy.streaming.streaming_listener import StreamListener, find_predictor_for
 from dspy.utils.asyncify import asyncify
 
 logger = logging.getLogger(__name__)
+
+
+def _is_litellm_model_response_stream(value: Any) -> bool:
+    cls = type(value)
+    return cls.__name__ == "ModelResponseStream" and cls.__module__.startswith("litellm")
+
 
 if TYPE_CHECKING:
     from dspy.primitives.module import Module
@@ -58,13 +62,13 @@ def streamify(
         A function that takes the same arguments as the original program, but returns an async
             generator that yields the program's outputs incrementally.
 
-    Example:
+    Examples:
 
     ```python
     import asyncio
     import dspy
 
-    dspy.settings.configure(lm=dspy.LM("openai/gpt-4o-mini"))
+    dspy.configure(lm=dspy.LM("openai/gpt-4o-mini"))
     # Create the program and wrap it with streaming functionality
     program = dspy.streamify(dspy.Predict("q->a"))
 
@@ -88,7 +92,7 @@ def streamify(
     import asyncio
     import dspy
 
-    dspy.settings.configure(lm=dspy.LM("openai/gpt-4o-mini"))
+    dspy.configure(lm=dspy.LM("openai/gpt-4o-mini"))
 
     class MyStatusMessageProvider(StatusMessageProvider):
         def module_start_status_message(self, instance, inputs):
@@ -121,7 +125,7 @@ def streamify(
     import asyncio
     import dspy
 
-    dspy.settings.configure(lm=dspy.LM("openai/gpt-4o-mini", cache=False))
+    dspy.configure(lm=dspy.LM("openai/gpt-4o-mini", cache=False))
 
     # Create the program and wrap it with streaming functionality
     predict = dspy.Predict("question->answer, reasoning")
@@ -161,7 +165,7 @@ def streamify(
     elif not iscoroutinefunction(program):
         program = asyncify(program)
 
-    callbacks = settings.callbacks
+    callbacks = list(settings.callbacks)
     status_streaming_callback = StatusStreamingCallback(status_message_provider)
     if not any(isinstance(c, StatusStreamingCallback) for c in callbacks):
         callbacks.append(status_streaming_callback)
@@ -178,22 +182,26 @@ def streamify(
             tg.start_soon(generator, args, kwargs, send_stream)
 
             async for value in receive_stream:
-                if isinstance(value, ModelResponseStream):
+                if _is_litellm_model_response_stream(value):
                     if len(predict_id_to_listener) == 0:
                         # No listeners are configured, yield the chunk directly for backwards compatibility.
                         yield value
                     else:
                         # We are receiving a chunk from the LM's response stream, delegate it to the listeners to
                         # determine if we should yield a value to the user.
-                        output = None
                         for listener in predict_id_to_listener[value.predict_id]:
-                            # There should be at most one listener provides a return value.
-                            output = listener.receive(value) or output
-                        if output:
-                            yield output
+                            # In some special cases such as Citation API, it is possible that multiple listeners
+                            # return values at the same time due to the chunk buffer of the listener.
+                            if output := listener.receive(value):
+                                yield output
                 elif isinstance(value, StatusMessage):
                     yield value
                 elif isinstance(value, Prediction):
+                    # Flush remaining buffered tokens before yielding the Prediction instance
+                    for listener in stream_listeners:
+                        if final_chunk := listener.finalize():
+                            yield final_chunk
+
                     if include_final_prediction_in_output_stream:
                         yield value
                     elif (
@@ -203,6 +211,11 @@ def streamify(
                     ):
                         yield value
                     return
+                else:
+                    # This wildcard case allows for customized streaming behavior.
+                    # It is useful when a users have a custom LM which returns stream chunks in a custom format.
+                    # We let those chunks pass through to the user to handle them as needed.
+                    yield value
 
     if async_streaming:
         return async_streamer
@@ -261,10 +274,10 @@ async def streaming_response(streamer: AsyncGenerator) -> AsyncGenerator:
     async for value in streamer:
         if isinstance(value, Prediction):
             data = {"prediction": dict(value.items(include_dspy=False))}
-            yield f"data: {ujson.dumps(data)}\n\n"
-        elif isinstance(value, litellm.ModelResponseStream):
+            yield f"data: {orjson.dumps(data).decode()}\n\n"
+        elif _is_litellm_model_response_stream(value):
             data = {"chunk": value.json()}
-            yield f"data: {ujson.dumps(data)}\n\n"
+            yield f"data: {orjson.dumps(data).decode()}\n\n"
         elif isinstance(value, str) and value.startswith("data:"):
             # The chunk value is an OpenAI-compatible streaming chunk value,
             # e.g. "data: {"finish_reason": "stop", "index": 0, "is_finished": True, ...}",

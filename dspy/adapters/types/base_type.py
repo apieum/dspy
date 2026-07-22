@@ -1,9 +1,16 @@
 import json
 import re
-from typing import Any, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Optional, get_args, get_origin
 
 import json_repair
 import pydantic
+
+from dspy.clients.base_lm import BaseLM
+
+if TYPE_CHECKING:
+    from litellm import ModelResponseStream
+
+    from dspy.signatures.signature import Signature
 
 CUSTOM_TYPE_START_IDENTIFIER = "<<CUSTOM-TYPE-START-IDENTIFIER>>"
 CUSTOM_TYPE_END_IDENTIFIER = "<<CUSTOM-TYPE-END-IDENTIFIER>>"
@@ -15,7 +22,7 @@ class Type(pydantic.BaseModel):
     This is the parent class of DSPy custom types, e.g, dspy.Image. Subclasses must implement the `format` method to
     return a list of dictionaries (same as the Array of content parts in the OpenAI API user message's content field).
 
-    Example:
+    Examples:
 
         ```python
         class Image(Type):
@@ -42,7 +49,7 @@ class Type(pydantic.BaseModel):
         have arbitrary level of nesting. For example, we detect `Tool` is in `list[dict[str, Tool]]`.
         """
         # Direct match. Nested type like `list[dict[str, Event]]` passes `isinstance(annotation, type)` in python 3.10
-        # while fails in python 3.11. To accomodate users using python 3.10, we need to capture the error and ignore it.
+        # while fails in python 3.11. To accommodate users using python 3.10, we need to capture the error and ignore it.
         try:
             if isinstance(annotation, type) and issubclass(annotation, cls):
                 return [annotation]
@@ -64,8 +71,65 @@ class Type(pydantic.BaseModel):
     def serialize_model(self):
         formatted = self.format()
         if isinstance(formatted, list):
-            return f"{CUSTOM_TYPE_START_IDENTIFIER}{formatted}{CUSTOM_TYPE_END_IDENTIFIER}"
+            return (
+                f"{CUSTOM_TYPE_START_IDENTIFIER}{json.dumps(formatted, ensure_ascii=False)}{CUSTOM_TYPE_END_IDENTIFIER}"
+            )
         return formatted
+
+    @classmethod
+    def adapt_to_native_lm_feature(
+        cls,
+        signature: type["Signature"],
+        field_name: str,
+        lm: BaseLM,
+        lm_kwargs: dict[str, Any],
+    ) -> type["Signature"]:
+        """Adapt the custom type to the native LM feature if possible.
+
+        When the LM and configuration supports the related native LM feature, e.g., native tool calling, native
+        reasoning, etc., we adapt the signature and `lm_kwargs` to enable the native LM feature.
+
+        Args:
+            signature: The DSPy signature for the LM call.
+            field_name: The name of the field in the signature to adapt to the native LM feature.
+            lm: The LM instance.
+            lm_kwargs: The keyword arguments for the LM call, subject to in-place updates if adaptation if required.
+
+        Returns:
+            The adapted signature. If the custom type is not natively supported by the LM, return the original
+            signature.
+        """
+        return signature
+
+    @classmethod
+    def is_streamable(cls) -> bool:
+        """Whether the custom type is streamable."""
+        return False
+
+    @classmethod
+    def parse_stream_chunk(cls, chunk: "ModelResponseStream") -> Optional["Type"]:
+        """
+        Parse a stream chunk into the custom type.
+
+        Args:
+            chunk: A stream chunk.
+
+        Returns:
+            A custom type object or None if the chunk is not for this custom type.
+        """
+        return None
+
+    @classmethod
+    def parse_lm_response(cls, response: str | dict[str, Any]) -> Optional["Type"]:
+        """Parse a LM response into the custom type.
+
+        Args:
+            response: A LM response.
+
+        Returns:
+            A custom type object.
+        """
+        return None
 
 
 def split_message_content_for_custom_types(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -114,19 +178,21 @@ def split_message_content_for_custom_types(messages: list[dict[str, Any]]) -> li
 
             # Parse the JSON inside the block
             custom_type_content = match.group(1).strip()
-            try:
+            parsed = None
+
+            for parse_fn in [json.loads, _parse_doubly_quoted_json, json_repair.loads]:
                 try:
-                    # Replace single quotes with double quotes to make it valid JSON
-                    parsed = json.loads(custom_type_content.replace("'", '"'))
+                    parsed = parse_fn(custom_type_content)
+                    break
                 except json.JSONDecodeError:
-                    parsed = json_repair.loads(custom_type_content)
+                    continue
+
+            if parsed:
                 for custom_type_content in parsed:
                     result.append(custom_type_content)
-
-            except json.JSONDecodeError:
+            else:
                 # fallback to raw string if it's not valid JSON
-                parsed = {"type": "text", "text": custom_type_content}
-                result.append(parsed)
+                result.append({"type": "text", "text": custom_type_content})
 
             last_end = end
 
@@ -141,3 +207,11 @@ def split_message_content_for_custom_types(messages: list[dict[str, Any]]) -> li
         message["content"] = result
 
     return messages
+
+
+def _parse_doubly_quoted_json(json_str: str) -> Any:
+    """
+    Parse a doubly quoted JSON string into a Python dict.
+    `dspy.Type` can be json-encoded twice if included in either list or dict, e.g., `list[dspy.experimental.Document]`
+    """
+    return json.loads(json.loads(f'"{json_str}"'))

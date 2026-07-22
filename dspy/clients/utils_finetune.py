@@ -1,12 +1,14 @@
 import os
 from enum import Enum
-from typing import Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
-import ujson
+import orjson
 
 import dspy
-from dspy.adapters.base import Adapter
 from dspy.utils.caching import DSPY_CACHEDIR
+
+if TYPE_CHECKING:
+    from dspy.adapters.base import Adapter
 
 
 class TrainingStatus(str, Enum):
@@ -40,10 +42,20 @@ class GRPOChatData(TypedDict):
     reward: float
 
 
-GRPOGroup = list[GRPOChatData]
+class GRPOGroup(TypedDict):
+    batch_id: int | None
+    group: list[GRPOChatData]
+
+class GRPOStatus(TypedDict):
+    job_id: str
+    status: str | None = None
+    current_model: str
+    checkpoints: dict[str, str]
+    last_checkpoint: str | None = None
+    pending_batch_ids: list[int] = []
 
 
-def infer_data_format(adapter: Adapter) -> str:
+def infer_data_format(adapter: "Adapter") -> str:
     if isinstance(adapter, dspy.ChatAdapter):
         return TrainDataFormat.CHAT
     raise ValueError(f"Could not infer the data format for: {adapter}")
@@ -58,15 +70,15 @@ def get_finetune_directory() -> str:
 
 
 def write_lines(file_path, data):
-    with open(file_path, "w") as f:
+    with open(file_path, "wb") as f:
         for item in data:
-            f.write(ujson.dumps(item) + "\n")
+            f.write(orjson.dumps(item) + b"\n")
 
 
 def save_data(
     data: list[dict[str, Any]],
 ) -> str:
-    from datasets.fingerprint import Hasher
+    from dspy.utils.hasher import Hasher
 
     # Assign a unique name to the file based on the data hash
     hash = Hasher.hash(data)
@@ -75,9 +87,9 @@ def save_data(
     finetune_dir = get_finetune_directory()
     file_path = os.path.join(finetune_dir, file_name)
     file_path = os.path.abspath(file_path)
-    with open(file_path, "w") as f:
+    with open(file_path, "wb") as f:
         for item in data:
-            f.write(ujson.dumps(item) + "\n")
+            f.write(orjson.dumps(item) + b"\n")
     return file_path
 
 

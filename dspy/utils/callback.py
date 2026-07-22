@@ -2,12 +2,10 @@ import functools
 import inspect
 import logging
 import uuid
-from contextvars import ContextVar
 from typing import Any, Callable
 
 import dspy
-
-ACTIVE_CALL_ID = ContextVar("active_call_id", default=None)
+from dspy.utils.callback_context import ACTIVE_CALL_ID
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +16,11 @@ class BaseCallback:
     To use a callback, subclass this class and implement the desired handlers. Each handler
     will be called at the appropriate time before/after the execution of the corresponding component.  For example, if
     you want to print a message before and after an LM is called, implement `the on_llm_start` and `on_lm_end` handler.
-    Users can set the callback globally using `dspy.settings.configure` or locally by passing it to the component
+    Users can set the callback globally using `dspy.configure` or locally by passing it to the component
     constructor.
 
 
-    Example 1: Set a global callback using `dspy.settings.configure`.
+    Example 1: Set a global callback using `dspy.configure`.
 
     ```
     import dspy
@@ -36,7 +34,7 @@ class BaseCallback:
         def on_lm_end(self, call_id, outputs, exception):
             print(f"LM is finished with outputs: {outputs}")
 
-    dspy.settings.configure(
+    dspy.configure(
         callbacks=[LoggingCallback()]
     )
 
@@ -350,7 +348,7 @@ def with_callbacks(fn):
 
 def _get_on_start_handler(callback: BaseCallback, instance: Any, fn: Callable) -> Callable:
     """Selects the appropriate on_start handler of the callback based on the instance and function name."""
-    if isinstance(instance, dspy.LM):
+    if isinstance(instance, dspy.BaseLM):
         return callback.on_lm_start
     elif isinstance(instance, dspy.Evaluate):
         return callback.on_evaluate_start
@@ -372,7 +370,7 @@ def _get_on_start_handler(callback: BaseCallback, instance: Any, fn: Callable) -
 
 def _get_on_end_handler(callback: BaseCallback, instance: Any, fn: Callable) -> Callable:
     """Selects the appropriate on_end handler of the callback based on the instance and function name."""
-    if isinstance(instance, (dspy.LM)):
+    if isinstance(instance, dspy.BaseLM):
         return callback.on_lm_end
     elif isinstance(instance, dspy.Evaluate):
         return callback.on_evaluate_end

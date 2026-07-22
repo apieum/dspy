@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=40.8.0", "wheel"]
+requires = ["setuptools>=77.0.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,49 +8,43 @@ build-backend = "setuptools.build_meta"
 #replace_package_name_marker
 name="dspy"
 #replace_package_version_marker
-version="3.0.0b3"
+version="3.3.0b1"
 description = "DSPy"
 readme = "README.md"
 authors = [{ name = "Omar Khattab", email = "okhattab@stanford.edu" }]
-license = { text = "MIT License" }
-requires-python = ">=3.10, <3.14"
+license = {file = "LICENSE"}
+requires-python = ">=3.10, <3.15"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3"
 ]
 dependencies = [
-    "backoff>=2.2",
-    "joblib~=1.3",
-    "openai>=0.28.1",
-    "datasets>=2.14.6", # needed for Bootstrap's Hasher
+    "openai>=1.66.2",
     "regex>=2023.10.3",
-    "datasets>=2.14.6", # needed for Bootstrap's Hasher
-    "ujson>=5.8.0",
+    "orjson>=3.9.0",
     "tqdm>=4.66.1",
     "requests>=2.31.0",
-    "optuna>=3.4.0",
     "pydantic>=2.0",
-    "magicattr>=0.1.6",
-    "litellm>=1.64.0",
+    "litellm>=1.65.8",
     "diskcache>=5.6.0",
-    "json-repair>=0.30.0",
-    "tenacity>=8.2.3",
+    "json-repair>=0.54.2",
+    "tenacity>=8.2.3",  # undeclared runtime dep of litellm, needed for exponential_backoff_retry
     "anyio",
-    "asyncer==0.0.8",
     "cachetools>=5.5.0",
-    "cloudpickle>=3.0.0",
-    "rich>=13.7.1",
-    "numpy>=1.26.0",
+    "cloudpickle>=3.1.2",
+    "gepa[dspy]==0.1.1",
 ]
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.18.0,<1.0.0"]
-weaviate = ["weaviate-client~=4.5.4"]
+weaviate = ["weaviate-client>=4.5.4,<4.22.0"]
 mcp = ["mcp; python_version >= '3.10'"]
-langchain = ["langchain_core"]
+langchain = ["langchain_core>=0.3.0"]
+optuna = ["optuna>=3.4.0"]
+numpy = ["numpy>=1.26.0"]
+litellm = ["litellm>=1.65.8"]
 dev = [
     "pytest>=6.2.5",
     "pytest-mock>=3.12.0",
@@ -60,15 +54,17 @@ dev = [
     "pillow>=10.1.0",
     "datamodel_code_generator>=0.26.3",
     "build>=1.0.3",
-    "litellm>=1.64.0; sys_platform == 'win32'",
-    "litellm[proxy]>=1.64.0; sys_platform != 'win32'",
+    "numpy>=1.26.0",
+    "litellm>=1.65.8; sys_platform == 'win32' or python_version == '3.14'",
+    "litellm[proxy]>=1.65.8; sys_platform != 'win32' and python_version < '3.14'",  # Remove 3.14 condition once uvloop supports
 ]
 test_extras = [
     "mcp; python_version >= '3.10'",
     "datasets>=2.14.6",
     "pandas>=2.1.1",
     "optuna>=3.4.0",
-    "langchain_core",
+    "langchain_core>=0.3.0",
+    "numpy>=1.26.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -111,6 +107,14 @@ exclude_lines = [
     "except",
     "^\\s*self\\.\\w+(:\\s*[^=]+)?\\s*=.*$",
     "continue",
+]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    # litellm uses deprecated pydantic config classes sometimes.
+    # The issue has been fixed repeatedly, but still keeps showing up.
+    # For examples, see litellm PRs #6903, #7300, #8096, #9372, and #12528.
+    "ignore:.+class-based `config` is deprecated, use ConfigDict:DeprecationWarning",
 ]
 
 [tool.ruff]

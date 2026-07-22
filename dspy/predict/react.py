@@ -1,12 +1,11 @@
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
-from litellm import ContextWindowExceededError
-
 import dspy
 from dspy.adapters.types.tool import Tool
 from dspy.primitives.module import Module
 from dspy.signatures.signature import ensure_signature
+from dspy.utils.exceptions import ContextWindowExceededError
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +14,7 @@ if TYPE_CHECKING:
 
 
 class ReAct(Module):
-    def __init__(self, signature: type["Signature"], tools: list[Callable], max_iters: int = 10):
+    def __init__(self, signature: type["Signature"], tools: list[Callable], max_iters: int = 20):
         """
         ReAct stands for "Reasoning and Acting," a popular paradigm for building tool-using agents.
         In this approach, the language model is iteratively provided with a list of tools and has
@@ -28,7 +27,7 @@ class ReAct(Module):
             tools (list[Callable]): A list of functions, callable objects, or `dspy.Tool` instances.
             max_iters (Optional[int]): The maximum number of iterations to run. Defaults to 10.
 
-        Example:
+        Examples:
 
         ```python
         def get_weather(city: str) -> str:
@@ -153,6 +152,7 @@ class ReAct(Module):
             except ContextWindowExceededError:
                 logger.warning("Trajectory exceeded the context window, truncating the oldest tool call information.")
                 trajectory = self.truncate_trajectory(trajectory)
+        raise ValueError("The context window was exceeded even after 3 attempts to truncate the trajectory.")
 
     async def _async_call_with_potential_trajectory_truncation(self, module, trajectory, **input_args):
         for _ in range(3):
@@ -164,6 +164,7 @@ class ReAct(Module):
             except ContextWindowExceededError:
                 logger.warning("Trajectory exceeded the context window, truncating the oldest tool call information.")
                 trajectory = self.truncate_trajectory(trajectory)
+        raise ValueError("The context window was exceeded even after 3 attempts to truncate the trajectory.")
 
     def truncate_trajectory(self, trajectory):
         """Truncates the trajectory so that it fits in the context window.
@@ -210,7 +211,7 @@ One way to fix this is to support `format=fn` in the dspy.InputField() for "traj
 means that care must be taken that the adapter is accessed at `forward` runtime, not signature definition time.
 
 Another potential fix is to more natively support a "variadic" input field, where the input is a list of dictionaries,
-or a big dictionary, and have each adatper format it accordingly.
+or a big dictionary, and have each adapter format it accordingly.
 
 Trajectories also affect meta-programming modules that view the trace later. It's inefficient O(n^2) to view the
 trace of every module repeating the prefix.

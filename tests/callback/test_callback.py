@@ -4,6 +4,7 @@ import pytest
 
 import dspy
 from dspy.utils.callback import ACTIVE_CALL_ID, BaseCallback, with_callbacks
+from dspy.utils.callback_context import _bind_active_call_id
 from dspy.utils.dummies import DummyLM
 
 
@@ -14,7 +15,7 @@ def reset_settings():
 
     yield
 
-    dspy.settings.configure(**original_settings)
+    dspy.configure(**original_settings)
 
 
 class MyCallback(BaseCallback):
@@ -54,6 +55,26 @@ class MyCallback(BaseCallback):
         self.calls.append({"handler": "on_tool_end", "outputs": outputs, "exception": exception})
 
 
+def test_bind_active_call_id_restores_context_after_exception():
+    observed_call_ids = []
+
+    def fail():
+        observed_call_ids.append(ACTIVE_CALL_ID.get())
+        raise ValueError("boom")
+
+    token = ACTIVE_CALL_ID.set("parent-call")
+    try:
+        bound = _bind_active_call_id(fail)
+    finally:
+        ACTIVE_CALL_ID.reset(token)
+
+    with pytest.raises(ValueError, match="boom"):
+        bound()
+
+    assert observed_call_ids == ["parent-call"]
+    assert ACTIVE_CALL_ID.get() is None
+
+
 @pytest.mark.parametrize(
     ("args", "kwargs"),
     [
@@ -71,7 +92,7 @@ def test_callback_injection(args, kwargs):
             return x + int(y) + int(z)
 
     callback = MyCallback()
-    dspy.settings.configure(callbacks=[callback])
+    dspy.configure(callbacks=[callback])
 
     target = Target()
     result = target.forward(*args, **kwargs)
@@ -122,7 +143,7 @@ def test_callback_error_handling():
             raise ValueError("Error")
 
     callback = MyCallback()
-    dspy.settings.configure(callbacks=[callback])
+    dspy.configure(callbacks=[callback])
 
     target = Target()
 
@@ -144,7 +165,7 @@ def test_multiple_callbacks():
 
     callback_1 = MyCallback()
     callback_2 = MyCallback()
-    dspy.settings.configure(callbacks=[callback_1, callback_2])
+    dspy.configure(callbacks=[callback_1, callback_2])
 
     target = Target()
     result = target.forward(1, "2", 3.0)
@@ -157,7 +178,7 @@ def test_multiple_callbacks():
 
 def test_callback_complex_module():
     callback = MyCallback()
-    dspy.settings.configure(
+    dspy.configure(
         lm=DummyLM({"How are you?": {"answer": "test output", "reasoning": "No more responses"}}),
         callbacks=[callback],
     )
@@ -220,7 +241,7 @@ async def test_callback_async_module():
 
 def test_tool_calls():
     callback = MyCallback()
-    dspy.settings.configure(callbacks=[callback])
+    dspy.configure(callbacks=[callback])
 
     def tool_1(query: str) -> str:
         """A dummy tool function."""
@@ -279,7 +300,7 @@ def test_active_id():
             pass
 
     callback = CustomCallback()
-    dspy.settings.configure(callbacks=[callback])
+    dspy.configure(callbacks=[callback])
 
     parent = Parent()
     parent()

@@ -10,6 +10,9 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import tqdm
 
+from dspy.dsp.utils.settings import settings, thread_local_overrides
+from dspy.utils.callback_context import _bind_active_call_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,11 +28,9 @@ class ParallelExecutor:
         straggler_limit=3,
     ):
         """
-        Offers isolation between the tasks (dspy.settings) irrespective of whether num_threads == 1 or > 1.
-        Handles also straggler timeouts.
+        Propagates DSPy settings and callback ancestry into each task while isolating task-local changes,
+        irrespective of whether num_threads == 1 or > 1. Handles also straggler timeouts.
         """
-        from dspy.dsp.utils.settings import settings
-
         self.num_threads = num_threads or settings.num_threads
         self.max_errors = settings.max_errors if max_errors is None else max_errors
         self.disable_progress_bar = disable_progress_bar
@@ -41,10 +42,14 @@ class ParallelExecutor:
         self.error_count = 0
         self.error_lock = threading.Lock()
         self.cancel_jobs = threading.Event()
+        self.failed_indices = []
+        self.exceptions_map = {}
 
     def execute(self, function, data):
         tqdm.tqdm._instances.clear()
-        wrapped = self._wrap_function(function)
+        wrapped = self._wrap_function(_bind_active_call_id(function))
+        if self.num_threads == 1:
+            return self._execute_sequential(wrapped, data)
         return self._execute_parallel(wrapped, data)
 
     def _wrap_function(self, user_function):
@@ -62,9 +67,41 @@ class ParallelExecutor:
                     logger.error(f"Error for {item}: {e}\n{traceback.format_exc()}")
                 else:
                     logger.error(f"Error for {item}: {e}. Set `provide_traceback=True` for traceback.")
-                return None
+                return e
 
         return safe_func
+
+    def _execute_sequential(self, function, data):
+        """Execute items sequentially on the main thread."""
+        results = [None] * len(data)
+
+        pbar = tqdm.tqdm(
+            total=len(data),
+            dynamic_ncols=True,
+            disable=self.disable_progress_bar,
+            file=sys.stdout,
+        )
+
+        try:
+            for idx, item in enumerate(data):
+                if self.cancel_jobs.is_set():
+                    break
+
+                outcome = function(item)
+                self._process_outcome(results, idx, outcome)
+                self._report_progress(pbar, results, len(data))
+        except KeyboardInterrupt:
+            self.cancel_jobs.set()
+            logger.warning("SIGINT received. Cancelling.")
+            raise
+        finally:
+            pbar.close()
+
+        if self.cancel_jobs.is_set():
+            logger.warning("Execution cancelled due to errors or interruption.")
+            raise Exception("Execution cancelled due to errors or interruption.")
+
+        return results
 
     def _execute_parallel(self, function, data):
         results = [None] * len(data)
@@ -84,13 +121,12 @@ class ParallelExecutor:
                 start_time_map[submission_id] = time.time()
 
             # Apply parent's thread-local overrides
-            from dspy.dsp.utils.settings import thread_local_overrides
-
             original = thread_local_overrides.get()
-            token = thread_local_overrides.set({**original, **parent_overrides.copy()})
-            if parent_overrides.get("usage_tracker"):
+            new_overrides = {**original, **parent_overrides.copy()}
+            if new_overrides.get("usage_tracker"):
                 # Usage tracker needs to be deep copied across threads so that each thread tracks its own usage
-                thread_local_overrides.overrides["usage_tracker"] = copy.deepcopy(parent_overrides["usage_tracker"])
+                new_overrides["usage_tracker"] = copy.deepcopy(new_overrides["usage_tracker"])
+            token = thread_local_overrides.set(new_overrides)
 
             try:
                 return index, function(item)
@@ -119,8 +155,6 @@ class ParallelExecutor:
         executor = ThreadPoolExecutor(max_workers=self.num_threads)
         try:
             with interrupt_manager():
-                from dspy.dsp.utils.settings import thread_local_overrides
-
                 parent_overrides = thread_local_overrides.get().copy()
 
                 futures_map = {}
@@ -155,18 +189,9 @@ class ParallelExecutor:
                             pass
                         else:
                             if outcome != job_cancelled and results[index] is None:
-                                results[index] = outcome
+                                self._process_outcome(results, index, outcome)
 
-                            # Update progress
-                            if self.compare_results:
-                                vals = [r[-1] for r in results if r is not None]
-                                self._update_progress(pbar, sum(vals), len(vals))
-                            else:
-                                self._update_progress(
-                                    pbar,
-                                    len([r for r in results if r is not None]),
-                                    len(data),
-                                )
+                            self._report_progress(pbar, results, len(data))
 
                     if all_done():
                         break
@@ -203,6 +228,27 @@ class ParallelExecutor:
             raise Exception("Execution cancelled due to errors or interruption.")
 
         return results
+
+    def _process_outcome(self, results, idx, outcome):
+        """Store a single outcome and track errors."""
+        if isinstance(outcome, Exception):
+            with self.error_lock:
+                self.failed_indices.append(idx)
+                self.exceptions_map[idx] = outcome
+        else:
+            results[idx] = outcome
+
+    def _report_progress(self, pbar, results, total):
+        """Compute metrics and update the progress bar."""
+        if self.compare_results:
+            vals = [r[-1] for r in results if r is not None]
+            self._update_progress(pbar, sum(vals), len(vals))
+        else:
+            self._update_progress(
+                pbar,
+                len([r for r in results if r is not None]),
+                total,
+            )
 
     def _update_progress(self, pbar, nresults, ntotal):
         if self.compare_results:

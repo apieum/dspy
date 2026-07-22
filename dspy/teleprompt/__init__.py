@@ -2,6 +2,7 @@ from dspy.teleprompt.avatar_optimizer import AvatarOptimizer
 from dspy.teleprompt.bettertogether import BetterTogether
 from dspy.teleprompt.bootstrap import BootstrapFewShot
 from dspy.teleprompt.bootstrap_finetune import BootstrapFinetune
+from dspy.teleprompt.bootstrap_trace import bootstrap_trace_data
 from dspy.teleprompt.copro_optimizer import COPRO
 from dspy.teleprompt.ensemble import Ensemble
 from dspy.teleprompt.infer_rules import InferRules
@@ -14,6 +15,8 @@ from dspy.teleprompt.teleprompt_optuna import BootstrapFewShotWithOptuna
 from dspy.teleprompt.vanilla import LabeledFewShot
 from dspy.teleprompt.darwin import Darwin, GEPAMute, GEPAAdaptive
 
+from .gepa.gepa import GEPA
+
 __all__ = [
     "AvatarOptimizer",
     "BetterTogether",
@@ -21,6 +24,7 @@ __all__ = [
     "BootstrapFinetune",
     "COPRO",
     "Ensemble",
+    "GEPA",
     "KNNFewShot",
     "MIPROv2",
     "BootstrapFewShotWithRandomSearch",
@@ -28,7 +32,8 @@ __all__ = [
     "LabeledFewShot",
     "InferRules",
     "SIMBA",
+    "bootstrap_trace_data",
     "Darwin",
     "GEPAMute",
-    "GEPAAdaptive"
+    "GEPAAdaptive",
 ]

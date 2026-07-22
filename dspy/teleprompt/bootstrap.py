@@ -47,6 +47,9 @@ class BootstrapFewShot(Teleprompter):
         """A Teleprompter class that composes a set of demos/examples to go into a predictor's prompt.
         These demos come from a combination of labeled examples in the training set, and bootstrapped demos.
 
+        Each bootstrap round copies the LM with a new ``rollout_id`` at ``temperature=1.0`` to
+        bypass caches and gather diverse traces.
+
         Args:
             metric (Callable): A function that compares an expected value and predicted value,
                 outputting the result of that comparison.
@@ -59,8 +62,11 @@ class BootstrapFewShot(Teleprompter):
                 Defaults to 4.
             max_labeled_demos (int): Maximum number of labeled demonstrations to include.
                 Defaults to 16.
-            max_rounds (int): Number of iterations to attempt generating the required bootstrap
-                examples. If unsuccessful after `max_rounds`, the program ends. Defaults to 1.
+            max_rounds (int): Maximum number of bootstrap attempts per training example.
+                Each round after the first uses a fresh rollout with ``temperature=1.0``
+                to bypass caches and gather diverse traces. If a successful bootstrap is
+                found on any round, the example is accepted and the optimizer moves to the
+                next one. Defaults to 1.
             max_errors (Optional[int]): Maximum number of errors until program ends.
                 If ``None``, inherits from ``dspy.settings.max_errors``.
         """
@@ -179,12 +185,13 @@ class BootstrapFewShot(Teleprompter):
         predictor_cache = {}
 
         try:
-            with dspy.settings.context(trace=[], **self.teacher_settings):
+            with dspy.context(trace=[], **self.teacher_settings):
                 lm = dspy.settings.lm
-                lm = lm.copy(temperature=0.7 + 0.001 * round_idx) if round_idx > 0 else lm
+                # Use a fresh rollout with temperature=1.0 to bypass caches.
+                lm = lm.copy(rollout_id=round_idx, temperature=1.0) if round_idx > 0 else lm
                 new_settings = {"lm": lm} if round_idx > 0 else {}
 
-                with dspy.settings.context(**new_settings):
+                with dspy.context(**new_settings):
                     for name, predictor in teacher.named_predictors():
                         predictor_cache[name] = predictor.demos
                         predictor.demos = [x for x in predictor.demos if x != example]
@@ -241,7 +248,7 @@ class BootstrapFewShot(Teleprompter):
                 # If there are multiple traces for the same predictor in the sample example,
                 # sample 50/50 from the first N-1 traces or the last trace.
                 if len(demos) > 1:
-                    from datasets.fingerprint import Hasher
+                    from dspy.utils.hasher import Hasher
 
                     rng = random.Random(Hasher.hash(tuple(demos)))
                     demos = [rng.choice(demos[:-1]) if rng.random() < 0.5 else demos[-1]]

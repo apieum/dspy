@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from unittest.mock import patch
 
@@ -6,6 +7,7 @@ import pytest
 from cachetools import LRUCache
 from diskcache import FanoutCache
 
+import dspy
 from dspy.clients.cache import Cache
 
 
@@ -13,6 +15,12 @@ from dspy.clients.cache import Cache
 class DummyResponse:
     message: str
     usage: dict
+
+
+@dataclass
+class CacheValidationDataclass:
+    name: str
+    value: int
 
 
 @pytest.fixture
@@ -31,6 +39,19 @@ def cache_config(tmp_path):
 def cache(cache_config):
     """Create a cache instance with the default configuration."""
     return Cache(**cache_config)
+
+
+@pytest.fixture
+def restricted_cache(tmp_path):
+    """Create a cache instance with restricted pickle deserialization."""
+    return Cache(
+        enable_disk_cache=True,
+        enable_memory_cache=True,
+        disk_cache_dir=str(tmp_path / "restricted"),
+        disk_size_limit_bytes=1024 * 1024,
+        memory_max_entries=100,
+        restrict_pickle=True,
+    )
 
 
 def test_initialization(tmp_path):
@@ -68,6 +89,27 @@ def test_initialization(tmp_path):
     )
     assert disabled_cache.memory_cache == {}
     assert disabled_cache.disk_cache == {}
+
+
+def test_invalid_cache_initialization():
+    with pytest.raises(ValueError, match=r"`memory_max_entries` must be a positive number, but received -1"):
+        Cache(
+            enable_disk_cache=False,
+            enable_memory_cache=True,
+            disk_cache_dir="",
+            disk_size_limit_bytes=0,
+            memory_max_entries=-1,
+        )
+    with pytest.raises(
+        ValueError, match=r"`memory_max_entries` cannot be None. Use `math.inf` if you need an unbounded cache."
+    ):
+        Cache(
+            enable_disk_cache=False,
+            enable_memory_cache=True,
+            disk_cache_dir="",
+            disk_size_limit_bytes=0,
+            memory_max_entries=None,
+        )
 
 
 def test_cache_key_generation(cache):
@@ -122,26 +164,17 @@ def test_put_and_get(cache):
 
 def test_cache_miss(cache):
     """Test getting a non-existent key."""
-    request = {"prompt": "Non-existent", "model": "gpt-4"}
-    result = cache.get(request)
-    assert result is None
+    assert cache.get({"prompt": "Non-existent", "model": "gpt-4"}) is None
 
 
-def test_cache_key_error_handling(cache):
-    """Test error handling for unserializable objects."""
-
-    # Test with a request that can't be serialized to JSON
+def test_unserializable_key(cache):
+    """Unserializable request key returns None without raising."""
     class UnserializableObject:
         pass
 
     request = {"data": UnserializableObject()}
-
-    # Should not raise an exception
-    result = cache.get(request)
-    assert result is None
-
-    # Should not raise an exception
-    cache.put(request, "value")
+    assert cache.get(request) is None
+    cache.put(request, "value")  # should not raise
 
 
 def test_reset_memory_cache(cache):
@@ -188,8 +221,12 @@ def test_save_and_load_memory_cache(cache, tmp_path):
         memory_max_entries=100,
     )
 
-    # Load the memory cache
-    new_cache.load_memory_cache(str(temp_cache_file))
+    # Load the memory cache without allowing pickle (default)
+    with pytest.raises(ValueError):
+        new_cache.load_memory_cache(str(temp_cache_file))
+
+    # Load the memory cache with allow_pickle=True
+    new_cache.load_memory_cache(str(temp_cache_file), allow_pickle=True)
 
     # Verify items are in the new memory cache
     for req in requests:
@@ -316,4 +353,183 @@ def test_cache_consistency_with_lm_call_modifies_the_request(cache):
                 }
             )
             is not None
+        )
+
+
+def test_cache_fallback_on_restricted_environment():
+    """Test that DSPy gracefully falls back to memory-only cache when disk cache fails."""
+    old_env = os.environ.get("DSPY_CACHEDIR")
+    try:
+        # Set an invalid cache directory that can't be created
+        os.environ["DSPY_CACHEDIR"] = "/dev/null/invalid_path"
+
+        import dspy
+        from dspy.clients import _get_dspy_cache
+
+        dspy.cache = _get_dspy_cache()
+
+        # Cache should work with memory-only fallback despite invalid disk path
+        test_request = {"model": "test", "prompt": "hello"}
+        dspy.cache.put(test_request, "fallback_result")
+        result = dspy.cache.get(test_request)
+
+        assert result == "fallback_result", "Memory cache fallback should work"
+
+    finally:
+        if old_env is None:
+            os.environ.pop("DSPY_CACHEDIR", None)
+        else:
+            os.environ["DSPY_CACHEDIR"] = old_env
+
+
+def test_cache_init_with_disk_disabled_and_none_dir():
+    cache = Cache(
+        enable_disk_cache=False,
+        enable_memory_cache=True,
+        disk_cache_dir=None,
+    )
+    assert cache.disk_cache_dir is None
+    assert cache.enable_disk_cache is False
+
+
+# -- restrict_pickle tests --
+
+
+def test_model_response_roundtrip_in_restricted_mode(restricted_cache):
+    from litellm import ModelResponse
+
+    response = ModelResponse(
+        id="test-123",
+        choices=[{"message": {"content": "cached response"}, "index": 0, "finish_reason": "stop"}],
+        usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    )
+    request = {"model": "openai/gpt-5-nano", "prompt": "test"}
+
+    restricted_cache.put(request, response)
+    restricted_cache.reset_memory_cache()
+
+    result = restricted_cache.get(request)
+    assert isinstance(result, ModelResponse)
+    assert result.choices[0].message.content == "cached response"
+
+
+def test_registered_dataclass_roundtrip_in_restricted_mode(tmp_path):
+    cache = Cache(
+        enable_disk_cache=True,
+        enable_memory_cache=False,
+        disk_cache_dir=str(tmp_path),
+        restrict_pickle=True,
+        safe_types=[CacheValidationDataclass],
+    )
+    request = {
+        "model": "test",
+        "prompt": "registered_dataclass_test",
+        "payload": CacheValidationDataclass(name="request", value=1),
+    }
+    response = CacheValidationDataclass(name="hello", value=3)
+
+    cache.put(request, response)
+    result = cache.get(request)
+
+    assert isinstance(result, CacheValidationDataclass)
+    assert result == response
+
+
+def test_configure_cache_registers_safe_types(tmp_path):
+    original_cache = dspy.cache
+    try:
+        dspy.configure_cache(
+            enable_disk_cache=True,
+            enable_memory_cache=False,
+            disk_cache_dir=str(tmp_path / "configured"),
+            restrict_pickle=True,
+            safe_types=[CacheValidationDataclass],
+        )
+        request = {"model": "test", "prompt": "configured_safe_type"}
+        response = CacheValidationDataclass(name="configured", value=7)
+
+        dspy.cache.put(request, response)
+        result = dspy.cache.get(request)
+
+        assert isinstance(result, CacheValidationDataclass)
+        assert result == response
+    finally:
+        dspy.cache = original_cache
+
+
+def test_corrupt_disk_entries_return_none(tmp_path):
+    """Real pickle corruption in a cache entry must return None, not raise."""
+    import sqlite3
+
+    cache = Cache(
+        enable_disk_cache=True,
+        enable_memory_cache=False,
+        disk_cache_dir=str(tmp_path),
+        restrict_pickle=True,
+    )
+    request = {"model": "test", "prompt": "will_be_corrupted"}
+    cache.put(request, {"value": "good"})
+    key = cache.cache_key(request)
+
+    # Corrupt the pickle blob in the SQLite database
+    for shard_id in range(16):
+        db_path = os.path.join(str(tmp_path), f"{shard_id:03d}", "cache.db")
+        if not os.path.exists(db_path):
+            continue
+        conn = sqlite3.connect(db_path)
+        row = conn.execute("SELECT rowid, value FROM Cache WHERE key = ?", (key,)).fetchone()
+        if row:
+            conn.execute("UPDATE Cache SET value = X'DEADBEEF' WHERE rowid = ?", (row[0],))
+            conn.commit()
+        conn.close()
+
+    assert cache.get(request) is None
+
+
+def test_restricted_and_unrestricted_share_wire_format(tmp_path):
+    """Both modes use standard pickle, so entries written by one can be read by the other."""
+    shared_dir = tmp_path / "shared"
+    request = {"model": "test", "prompt": "shared"}
+
+    unrestricted = Cache(
+        enable_disk_cache=True, enable_memory_cache=False,
+        disk_cache_dir=shared_dir, disk_size_limit_bytes=1024 * 1024,
+    )
+    unrestricted.put(request, {"value": "hello"})
+    unrestricted.disk_cache.close()
+
+    restricted = Cache(
+        enable_disk_cache=True, enable_memory_cache=False,
+        disk_cache_dir=shared_dir, disk_size_limit_bytes=1024 * 1024,
+        restrict_pickle=True,
+    )
+    assert restricted.get(request) == {"value": "hello"}
+
+
+@dataclass
+class _UnlistedDataclass:
+    value: int
+
+
+def test_unlisted_type_rejected_on_read(restricted_cache):
+    request = {"model": "test", "prompt": "dataclass"}
+
+    restricted_cache.put(request, _UnlistedDataclass(value=1))
+
+    # Memory cache still works
+    assert restricted_cache.get(request) == _UnlistedDataclass(value=1)
+
+    # After clearing memory, restricted unpickler rejects the unlisted type
+    restricted_cache.reset_memory_cache()
+    assert restricted_cache.get(request) is None
+
+
+def test_safe_types_rejects_non_types(tmp_path):
+    with pytest.raises(TypeError, match="safe_types entries must be types"):
+        Cache(
+            enable_disk_cache=True,
+            enable_memory_cache=False,
+            disk_cache_dir=str(tmp_path),
+            restrict_pickle=True,
+            safe_types=["not_a_type"],
         )

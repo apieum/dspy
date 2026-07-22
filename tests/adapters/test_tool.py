@@ -2,10 +2,12 @@ import asyncio
 from typing import Any
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 import dspy
-from dspy.adapters.types.tool import Tool, ToolCalls, convert_input_schema_to_tool_args
+from dspy.adapters.types.tool import Tool, ToolCallResults, ToolCalls, convert_input_schema_to_tool_args
+from dspy.clients.openai_format import to_openai_chat_request
+from dspy.core.types import LMMessage, LMRequest, LMToolResultPart
 
 
 # Test fixtures
@@ -385,7 +387,7 @@ async def test_async_concurrent_calls():
 def test_async_tool_call_in_sync_mode():
     tool = Tool(async_dummy_function)
     with dspy.context(allow_tool_async_sync_conversion=False):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=r".*acall.*allow_tool_async_sync_conversion.*"):
             result = tool(x=1, y="hello")
 
     with dspy.context(allow_tool_async_sync_conversion=True):
@@ -394,42 +396,30 @@ def test_async_tool_call_in_sync_mode():
 
 
 TOOL_CALL_TEST_CASES = [
-    ([], [{"type": "tool_calls", "tool_calls": []}]),
+    ([], {"tool_calls": []}),
     (
         [{"name": "search", "args": {"query": "hello"}}],
-        [
-            {
-                "type": "tool_calls",
-                "tool_calls": [{"type": "function", "function": {"name": "search", "arguments": {"query": "hello"}}}],
-            }
-        ],
+        {
+            "tool_calls": [{"name": "search", "args": {"query": "hello"}}],
+        },
     ),
     (
         [
             {"name": "search", "args": {"query": "hello"}},
             {"name": "translate", "args": {"text": "world", "lang": "fr"}},
         ],
-        [
-            {
-                "type": "tool_calls",
-                "tool_calls": [
-                    {"type": "function", "function": {"name": "search", "arguments": {"query": "hello"}}},
-                    {
-                        "type": "function",
-                        "function": {"name": "translate", "arguments": {"text": "world", "lang": "fr"}},
-                    },
-                ],
-            }
-        ],
+        {
+            "tool_calls": [
+                {"name": "search", "args": {"query": "hello"}},
+                {"name": "translate", "args": {"text": "world", "lang": "fr"}},
+            ],
+        },
     ),
     (
         [{"name": "get_time", "args": {}}],
-        [
-            {
-                "type": "tool_calls",
-                "tool_calls": [{"type": "function", "function": {"name": "get_time", "arguments": {}}}],
-            }
-        ],
+        {
+            "tool_calls": [{"name": "get_time", "args": {}}],
+        },
     ),
 ]
 
@@ -454,40 +444,236 @@ def test_tool_calls_format_from_dict_list():
     tool_calls = ToolCalls.from_dict_list(tool_calls_dicts)
     result = tool_calls.format()
 
-    assert len(result[0]["tool_calls"]) == 2
-    assert result[0]["tool_calls"][0]["function"]["name"] == "search"
-    assert result[0]["tool_calls"][1]["function"]["name"] == "translate"
+    assert len(result["tool_calls"]) == 2
+    assert result["tool_calls"][0]["name"] == "search"
+    assert result["tool_calls"][1]["name"] == "translate"
 
 
-def test_tool_convert_input_schema_to_tool_args__no_input_params():
+def test_tool_calls_preserves_ids_from_dict_list_and_format_omits_ids():
+    tool_calls = ToolCalls.from_dict_list(
+        [
+            {"id": "call_1", "name": "search", "args": {"query": "hello"}},
+            {"name": "translate", "args": {"text": "world", "lang": "fr"}},
+        ]
+    )
+
+    assert tool_calls.tool_calls[0].id == "call_1"
+    assert tool_calls.tool_calls[1].id is None
+
+    formatted = tool_calls.format()["tool_calls"]
+    assert "id" not in formatted[0]
+    assert "id" not in formatted[1]
+
+
+def test_tool_calls_json_schema_omits_internal_id_field():
+    schema = TypeAdapter(ToolCalls).json_schema()
+
+    assert "tool_call_results" not in schema["properties"]
+    assert "id" not in schema["$defs"]["ToolCall"]["properties"]
+    assert schema["$defs"]["ToolCall"]["properties"]["args"]["additionalProperties"] is True
+    assert schema["$defs"]["ToolCall"]["required"] == ["name", "args"]
+
+
+def test_tool_calls_can_carry_results_without_formatting_them_for_lm():
+    tool_call = ToolCalls.ToolCall(id="call_1", name="search", args={"query": "hello"})
+    results = ToolCallResults.from_tool_calls_and_values([tool_call], [{"answer": "world"}])
+    tool_calls = ToolCalls(tool_calls=[tool_call], tool_call_results=results)
+
+    assert "tool_call_results" not in tool_calls.format()
+    assert tool_calls.model_dump(mode="json")["tool_call_results"] == {
+        "tool_call_results": [
+            {"call_id": "call_1", "name": "search", "value": {"answer": "world"}, "is_error": False}
+        ]
+    }
+
+
+def test_tool_call_results_from_tool_calls_and_values():
+    tool_calls = [
+        ToolCalls.ToolCall(id="call_1", name="search", args={"query": "hello"}),
+        ToolCalls.ToolCall(id="call_2", name="fetch", args={"url": "https://example.com"}),
+    ]
+
+    results = ToolCallResults.from_tool_calls_and_values(
+        tool_calls,
+        [{"items": [1, 2]}, "failed"],
+        is_errors=[False, True],
+    )
+
+    assert results.tool_call_results[0].call_id == "call_1"
+    assert results.tool_call_results[0].name == "search"
+    assert results.tool_call_results[0].value == {"items": [1, 2]}
+    assert results.tool_call_results[0].is_error is False
+    assert results.tool_call_results[1].call_id == "call_2"
+    assert results.tool_call_results[1].name == "fetch"
+    assert results.tool_call_results[1].value == "failed"
+    assert results.tool_call_results[1].is_error is True
+
+
+def test_tool_call_results_history_serialization_round_trip():
+    tool_call = ToolCalls.ToolCall(id="call_1", name="search", args={"query": "hello"})
+    results = ToolCallResults.from_tool_calls_and_values(
+        [tool_call],
+        [{"answer": "world"}],
+    )
+    tool_calls = ToolCalls(tool_calls=[tool_call], tool_call_results=results)
+
+    history = dspy.History(messages=[{"tool_calls": tool_calls}])
+    dumped = history.model_dump(mode="json")
+    restored = dspy.History.model_validate(dumped)
+
+    assert dumped == {
+        "messages": [
+            {
+                "tool_calls": {
+                    "tool_calls": [
+                        {"name": "search", "args": {"query": "hello"}}
+                    ],
+                    "tool_call_results": {
+                        "tool_call_results": [
+                            {"call_id": "call_1", "name": "search", "value": {"answer": "world"}, "is_error": False}
+                        ]
+                    },
+                }
+            }
+        ]
+    }
+    assert restored.messages == dumped["messages"]
+
+
+def test_tool_call_results_can_round_trip_as_native_tool_result_message():
+    tool_call = ToolCalls.ToolCall(id="call_1", name="search", args={"query": "cats"})
+    results = ToolCallResults.from_tool_calls_and_values([tool_call], ['{"items": ["cat"]}'])
+    result = results.tool_call_results[0]
+
+    message = LMMessage(role="tool", tool_call_id=result.call_id, name=result.name, content=result.value)
+
+    assert len(message.parts) == 1
+    assert isinstance(message.parts[0], LMToolResultPart)
+    assert message.parts[0].call_id == "call_1"
+    assert message.parts[0].name == "search"
+    assert message.parts[0].content[0].text == '{"items": ["cat"]}'
+
+    request = LMRequest(model="test-model", messages=[message])
+    assert to_openai_chat_request(request)["messages"] == [
+        {"role": "tool", "content": '{"items": ["cat"]}', "tool_call_id": "call_1", "name": "search"}
+    ]
+
+
+def test_toolcalls_vague_match():
+    """
+    Test that ToolCalls can parse the data with slightly off format:
+
+    - a single dict with "name" and "args"
+    - a list of dicts with "name" and "args"
+    - invalid input (should raise ValueError)
+    """
+    # Single dict with "name" and "args" should parse as one ToolCall
+    data_single = {"name": "search", "args": {"query": "hello"}}
+    tc = ToolCalls.model_validate(data_single)
+    assert isinstance(tc, ToolCalls)
+    assert len(tc.tool_calls) == 1
+    assert tc.tool_calls[0].name == "search"
+    assert tc.tool_calls[0].args == {"query": "hello"}
+
+    # List of dicts with "name" and "args" should parse as multiple ToolCalls
+    data_list = [
+        {"name": "search", "args": {"query": "hello"}},
+        {"name": "translate", "args": {"text": "world", "lang": "fr"}},
+    ]
+    tc = ToolCalls.model_validate(data_list)
+    assert isinstance(tc, ToolCalls)
+    assert len(tc.tool_calls) == 2
+    assert tc.tool_calls[0].name == "search"
+    assert tc.tool_calls[1].name == "translate"
+
+    # Dict with "tool_calls" key containing a list of dicts
+    data_tool_calls = {
+        "tool_calls": [
+            {"name": "search", "args": {"query": "hello"}},
+            {"name": "get_time", "args": {}},
+        ]
+    }
+    tc = ToolCalls.model_validate(data_tool_calls)
+    assert isinstance(tc, ToolCalls)
+    assert len(tc.tool_calls) == 2
+    assert tc.tool_calls[0].name == "search"
+    assert tc.tool_calls[1].name == "get_time"
+
+    # Top-level "arguments" should be accepted as an alias for "args".
+    tc = ToolCalls.model_validate({"name": "search", "arguments": {"query": "hello"}})
+    assert len(tc.tool_calls) == 1
+    assert tc.tool_calls[0].name == "search"
+    assert tc.tool_calls[0].args == {"query": "hello"}
+
+    # List entries with "arguments" should normalize to ToolCall.args.
+    tc = ToolCalls.model_validate(
+        [
+            {"name": "search", "arguments": {"query": "hello"}},
+            {"name": "get_time", "arguments": {}},
+        ]
+    )
+    assert len(tc.tool_calls) == 2
+    assert tc.tool_calls[0].args == {"query": "hello"}
+    assert tc.tool_calls[1].args == {}
+
+    # "tool_calls" wrappers may also use "arguments".
+    tc = ToolCalls.model_validate({"tool_calls": [{"name": "search", "arguments": {"query": "hello"}}]})
+    assert len(tc.tool_calls) == 1
+    assert tc.tool_calls[0].args == {"query": "hello"}
+
+    # Provider-style nested function.arguments should accept dict and JSON-string values.
+    tc = ToolCalls.model_validate(
+        {"type": "function", "function": {"name": "search", "arguments": {"query": "hello"}}}
+    )
+    assert len(tc.tool_calls) == 1
+    assert tc.tool_calls[0].args == {"query": "hello"}
+
+    tc = ToolCalls.model_validate(
+        {"type": "function", "function": {"name": "search", "arguments": '{"query":"hello"}'}}
+    )
+    assert len(tc.tool_calls) == 1
+    assert tc.tool_calls[0].args == {"query": "hello"}
+
+    # Invalid input should raise ValueError
+    with pytest.raises(ValueError):
+        ToolCalls.model_validate({"foo": "bar"})
+    with pytest.raises(ValueError):
+        ToolCalls.model_validate([{"foo": "bar"}])
+    with pytest.raises(ValueError, match="function value"):
+        ToolCalls.from_dict_list([{"function": "bad"}])
+
+
+def test_tool_convert_input_schema_to_tool_args_no_input_params():
     args, arg_types, arg_desc = convert_input_schema_to_tool_args(schema={"properties": {}})
     assert args == {}
     assert arg_types == {}
     assert arg_desc == {}
 
 
-def test_tool_convert_input_schema_to_tool_args__lang_chain():
+def test_tool_convert_input_schema_to_tool_args_lang_chain():
     # Example from langchain docs:
     # https://web.archive.org/web/20250723101359/https://api.python.langchain.com/en/latest/tools/langchain_core.tools.tool.html
-    args, arg_types, arg_desc = convert_input_schema_to_tool_args(schema={
-        "title": "fooSchema",
-        "description": "The foo.",
-        "type": "object",
-        "properties": {
-            "bar": {
-                "title": "Bar",
-                "description": "The bar.",
-                "type": "string",
+    args, arg_types, arg_desc = convert_input_schema_to_tool_args(
+        schema={
+            "title": "fooSchema",
+            "description": "The foo.",
+            "type": "object",
+            "properties": {
+                "bar": {
+                    "title": "Bar",
+                    "description": "The bar.",
+                    "type": "string",
+                },
+                "baz": {
+                    "title": "Baz",
+                    "type": "integer",
+                },
             },
-            "baz": {
-                "title": "Baz",
-                "type": "integer",
-            }
-        },
-        "required": [
-            "baz",
-        ],
-    })
+            "required": [
+                "baz",
+            ],
+        }
+    )
     assert args == {
         "bar": {"title": "Bar", "description": "The bar.", "type": "string"},
         "baz": {"title": "Baz", "type": "integer"},
@@ -500,3 +686,70 @@ def test_tool_convert_input_schema_to_tool_args__lang_chain():
         "bar": "The bar.",
         "baz": "No description provided. (Required)",
     }
+
+
+
+
+def test_tool_call_execute():
+    def get_weather(city: str) -> str:
+        return f"The weather in {city} is sunny"
+
+    def add_numbers(a: int, b: int) -> int:
+        return a + b
+
+    tools = [
+        dspy.Tool(get_weather),
+        dspy.Tool(add_numbers)
+    ]
+
+    tool_call = dspy.ToolCalls.ToolCall(name="get_weather", args={"city": "Berlin"})
+    result = tool_call.execute(functions=tools)
+    assert result == "The weather in Berlin is sunny"
+
+    # Test individual tool call with function dict
+    tool_call2 = dspy.ToolCalls.ToolCall(name="add_numbers", args={"a": 7, "b": 13})
+    result2 = tool_call2.execute(functions={"add_numbers": add_numbers})
+    assert result2 == 20
+
+    # Test individual tool call with no arguments
+    def get_pi():
+        return 3.14159
+
+    tool_call3 = dspy.ToolCalls.ToolCall(name="get_pi", args={})
+    result3 = tool_call3.execute(functions={"get_pi": get_pi})
+    assert result3 == 3.14159
+
+    # Test error case
+    tool_call4 = dspy.ToolCalls.ToolCall(name="nonexistent", args={})
+    with pytest.raises(ValueError) as exc_info:
+        tool_call4.execute(functions=tools)
+    assert "not found" in str(exc_info.value)
+
+
+def test_tool_call_execute_with_local_functions():
+    def main():
+        def local_add(a: int, b: int) -> int:
+            return a + b
+
+        def local_multiply(x: int, y: int) -> int:
+            return x * y
+
+        # Test individual execution with local function
+        tool_call1 = dspy.ToolCalls.ToolCall(name="local_add", args={"a": 10, "b": 15})
+        result1 = tool_call1.execute()  # Should find local function automatically
+        assert result1 == 25
+
+        tool_call2 = dspy.ToolCalls.ToolCall(name="local_multiply", args={"x": 4, "y": 7})
+        result2 = tool_call2.execute()  # Should find local function automatically
+        assert result2 == 28
+
+        # Test locals take precedence over globals
+        try:
+            globals()["local_add"] = lambda a, b: a + b + 1000
+            precedence_call = dspy.ToolCalls.ToolCall(name="local_add", args={"a": 1, "b": 2})
+            result = precedence_call.execute()
+            assert result == 3  # Should use local function (1+2=3), not global (1+2+1000=1003)
+        finally:
+            globals().pop("local_add", None)
+
+    main()

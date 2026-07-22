@@ -69,7 +69,7 @@ this example it is the `answer` field. `Prediction` is the program's final outpu
 implemented in a sidecar fashion: we enable streaming on the LM so that LM outputs a stream of tokens. We send these
 tokens to a side channel, which is being continuously read by the user-defined listeners. Listeners keep interpreting
 the stream, and decides if the `signature_field_name` it is listening to has started to appear and has finalized.
-Once it decides that the field appears, the listener begins outputing tokens to the async generator users can
+Once it decides that the field appears, the listener begins outputting tokens to the async generator users can
 read. Listeners' internal mechanism changes according to the adapter behind the scene, and because usually
 we cannot decide if a field has finalized until seeing the next field, the listener buffers the output tokens
 before sending to the final generator, which is why you will usually see the last chunk of type `StreamResponse`
@@ -84,12 +84,13 @@ import asyncio
 async def read_output_stream():
   output_stream = stream_predict(question="Why did a chicken cross the kitchen?")
 
+  return_value = None
   async for chunk in output_stream:
-    return_value = None
     if isinstance(chunk, dspy.streaming.StreamResponse):
       print(f"Output token of field {chunk.signature_field_name}: {chunk.chunk}")
     elif isinstance(chunk, dspy.Prediction):
       return_value = chunk
+  return return_value
 
 
 program_output = asyncio.run(read_output_stream())
@@ -130,7 +131,7 @@ import asyncio
 import dspy
 
 lm = dspy.LM("openai/gpt-4o-mini", cache=False)
-dspy.settings.configure(lm=lm)
+dspy.configure(lm=lm)
 
 
 class MyModule(dspy.Module):
@@ -204,7 +205,7 @@ import asyncio
 import dspy
 
 lm = dspy.LM("openai/gpt-4o-mini", cache=False)
-dspy.settings.configure(lm=lm)
+dspy.configure(lm=lm)
 
 
 def fetch_user_info(user_name: str):
@@ -259,7 +260,7 @@ import asyncio
 import dspy
 
 lm = dspy.LM("openai/gpt-4o-mini", cache=False)
-dspy.settings.configure(lm=lm)
+dspy.configure(lm=lm)
 
 
 class MyModule(dspy.Module):
@@ -354,7 +355,7 @@ Available hooks:
 - lm_start_status_message: status message at the start of calling dspy.LM.
 - lm_end_status_message: status message at the end of calling dspy.LM.
 - module_start_status_message: status message at the start of calling a dspy.Module.
-- module_end_status_message: status message at the start of calling a dspy.Module.
+- module_end_status_message: status message at the end of calling a dspy.Module.
 - tool_start_status_message: status message at the start of calling dspy.Tool.
 - tool_end_status_message: status message at the end of calling dspy.Tool.
 
@@ -371,7 +372,7 @@ import asyncio
 import dspy
 
 lm = dspy.LM("openai/gpt-4o-mini", cache=False)
-dspy.settings.configure(lm=lm)
+dspy.configure(lm=lm)
 
 
 class MyModule(dspy.Module):

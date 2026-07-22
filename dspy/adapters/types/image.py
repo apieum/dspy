@@ -2,6 +2,8 @@ import base64
 import io
 import mimetypes
 import os
+import warnings
+from functools import lru_cache
 from typing import Any, Union
 from urllib.parse import urlparse
 
@@ -21,13 +23,54 @@ except ImportError:
 class Image(Type):
     url: str
 
-    model_config = {
-        "frozen": True,
-        "str_strip_whitespace": True,
-        "validate_assignment": True,
-        "extra": "forbid",
-    }
+    model_config = pydantic.ConfigDict(
+        frozen=True,
+        str_strip_whitespace=True,
+        validate_assignment=True,
+        extra="forbid",
+    )
 
+    def __init__(self, url: Any = None, *, download: bool = False, verify: bool = True, **data):
+        """Create an Image.
+
+        Parameters
+        ----------
+        url:
+            The image source. Supported values include
+
+            - ``str``: HTTP(S)/GS URL or local file path
+            - ``bytes``: raw image bytes
+            - ``PIL.Image.Image``: a PIL image instance
+            - ``dict`` with a single ``{"url": value}`` entry (legacy form)
+            - already encoded data URI
+
+        download:
+            Whether remote URLs should be downloaded to infer their MIME type.
+
+        verify:
+            Whether to verify SSL certificates when downloading images from URLs.
+            Set to False for self-signed certificates. Default is True.
+
+        Any additional keyword arguments are passed to :class:`pydantic.BaseModel`.
+        """
+
+        if url is not None and "url" not in data:
+            # Support a positional argument while allowing ``url=`` in **data.
+            if isinstance(url, dict) and set(url.keys()) == {"url"}:
+                # Legacy dict form from previous model validator.
+                data["url"] = url["url"]
+            else:
+                # ``url`` may be a string, bytes, or a PIL image.
+                data["url"] = url
+
+        if "url" in data:
+            # Normalize any accepted input into a base64 data URI or plain URL.
+            data["url"] = encode_image(data["url"], download_images=download, verify=verify)
+
+        # Delegate the rest of initialization to pydantic's BaseModel.
+        super().__init__(**data)
+
+    @lru_cache(maxsize=32)
     def format(self) -> list[dict[str, Any]] | str:
         try:
             image_url = encode_image(self.url)
@@ -35,33 +78,32 @@ class Image(Type):
             raise ValueError(f"Failed to format image for DSPy: {e}")
         return [{"type": "image_url", "image_url": {"url": image_url}}]
 
-    @pydantic.model_validator(mode="before")
-    @classmethod
-    def validate_input(cls, values):
-        # Allow the model to accept either a URL string or a dictionary with a single 'url' key
-        if isinstance(values, str):
-            # if a string, assume it's the URL directly and wrap it in a dict
-            return {"url": values}
-        elif isinstance(values, dict) and set(values.keys()) == {"url"}:
-            # if it's a dict, ensure it has only the 'url' key
-            return values
-        elif isinstance(values, cls):
-            return values.model_dump()
-        else:
-            raise TypeError("Expected a string URL or a dictionary with a key 'url'.")
-
-    # If all my inits just call encode_image, should that be in this class
     @classmethod
     def from_url(cls, url: str, download: bool = False):
-        return cls(url=encode_image(url, download))
+        warnings.warn(
+            "Image.from_url is deprecated; use Image(url) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return cls(url, download=download)
 
     @classmethod
     def from_file(cls, file_path: str):
-        return cls(url=encode_image(file_path))
+        warnings.warn(
+            "Image.from_file is deprecated; use Image(file_path) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return cls(file_path)
 
     @classmethod
     def from_PIL(cls, pil_image):  # noqa: N802
-        return cls(url=encode_image(pil_image))
+        warnings.warn(
+            "Image.from_PIL is deprecated; use Image(pil_image) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return cls(pil_image)
 
     def __str__(self):
         return self.serialize_model()
@@ -83,13 +125,14 @@ def is_url(string: str) -> bool:
         return False
 
 
-def encode_image(image: Union[str, bytes, "PILImage.Image", dict], download_images: bool = False) -> str:
+def encode_image(image: Union[str, bytes, "PILImage.Image", dict], download_images: bool = False, verify: bool = True) -> str:
     """
     Encode an image or file to a base64 data URI.
 
     Args:
         image: The image or file to encode. Can be a PIL Image, file path, URL, or data URI.
         download_images: Whether to download images from URLs.
+        verify: Whether to verify SSL certificates when downloading images.
 
     Returns:
         str: The data URI of the file or the URL if download_images is False.
@@ -110,14 +153,13 @@ def encode_image(image: Union[str, bytes, "PILImage.Image", dict], download_imag
         elif is_url(image):
             # URL
             if download_images:
-                return _encode_image_from_url(image)
+                return _encode_image_from_url(image, verify=verify)
             else:
                 # Return the URL as is
                 return image
         else:
             # Unsupported string format
-            print(f"Unsupported file string: {image}")
-            raise ValueError(f"Unsupported file string: {image}")
+            raise ValueError(f"Unrecognized file string: {image}; If this file type should be supported, please open an issue.")
     elif PIL_AVAILABLE and isinstance(image, PILImage.Image):
         # PIL Image
         return _encode_pil_image(image)
@@ -148,9 +190,14 @@ def _encode_image_from_file(file_path: str) -> str:
     return f"data:{mime_type};base64,{encoded_data}"
 
 
-def _encode_image_from_url(image_url: str) -> str:
-    """Encode a file from a URL to a base64 data URI."""
-    response = requests.get(image_url)
+def _encode_image_from_url(image_url: str, verify: bool = True) -> str:
+    """Encode a file from a URL to a base64 data URI.
+    
+    Args:
+        image_url: The URL of the image to download.
+        verify: Whether to verify SSL certificates. Set to False for self-signed certs.
+    """
+    response = requests.get(image_url, verify=verify)
     response.raise_for_status()
     content_type = response.headers.get("Content-Type", "")
 

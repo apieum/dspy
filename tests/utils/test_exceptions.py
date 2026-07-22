@@ -1,5 +1,76 @@
 import dspy
-from dspy.utils.exceptions import AdapterParseError
+from dspy.utils.exceptions import (
+    AdapterParseError,
+    ContextWindowExceededError,
+    DSPyError,
+    LMError,
+    LMInvalidRequestError,
+)
+
+
+def test_lm_errors_are_exported_from_dspy():
+    assert dspy.DSPyError is not None
+    assert dspy.LMError is LMError
+    assert dspy.LMUnexpectedError is not None
+    assert dspy.AdapterParseError is AdapterParseError
+    assert dspy.is_retryable_lm_error is not None
+
+
+def test_retryable_lm_errors_classification():
+    assert dspy.is_retryable_lm_error(dspy.LMRateLimitError())
+    assert dspy.is_retryable_lm_error(dspy.LMTimeoutError())
+    assert dspy.is_retryable_lm_error(dspy.LMServerError())
+    assert dspy.is_retryable_lm_error(dspy.LMTransportError())
+    assert not dspy.is_retryable_lm_error(dspy.LMAuthError())
+    assert not dspy.is_retryable_lm_error(dspy.LMInvalidRequestError())
+    assert not dspy.is_retryable_lm_error(dspy.LMUnexpectedError())
+    assert not dspy.is_retryable_lm_error(ValueError("not an LM error"))
+
+
+def test_lm_error_metadata():
+    error = dspy.LMRateLimitError(
+        "rate limited",
+        model="openai/gpt-4o",
+        provider="openai",
+        status=429,
+        request_id="req-123",
+        retry_after=2.5,
+    )
+
+    assert error.code == "rate_limit"
+    assert error.model == "openai/gpt-4o"
+    assert error.provider == "openai"
+    assert error.status == 429
+    assert error.request_id == "req-123"
+    assert error.retry_after == 2.5
+    assert str(error) == "[openai/gpt-4o] rate limited"
+
+
+def test_context_window_exceeded_error_defaults():
+    error = ContextWindowExceededError()
+    assert isinstance(error, LMInvalidRequestError)
+    assert isinstance(error, LMError)
+    assert error.code == "context_window_exceeded"
+    assert error.model is None
+    assert str(error) == "Context window exceeded"
+
+
+def test_context_window_exceeded_error_with_model():
+    error = ContextWindowExceededError(model="openai/gpt-4o")
+    assert error.model == "openai/gpt-4o"
+    assert str(error) == "[openai/gpt-4o] Context window exceeded"
+
+
+def test_context_window_exceeded_error_with_message():
+    error = ContextWindowExceededError(model="openai/gpt-4o", message="Input is 200k tokens, limit is 128k")
+    assert error.model == "openai/gpt-4o"
+    assert str(error) == "[openai/gpt-4o] Input is 200k tokens, limit is 128k"
+
+
+def test_context_window_exceeded_error_message_without_model():
+    error = ContextWindowExceededError(message="Too many tokens")
+    assert error.model is None
+    assert str(error) == "Too many tokens"
 
 
 def test_adapter_parse_error_basic():
@@ -9,6 +80,8 @@ def test_adapter_parse_error_basic():
 
     error = AdapterParseError(adapter_name=adapter_name, signature=signature, lm_response=lm_response)
 
+    assert isinstance(error, DSPyError)
+    assert error.code == "adapter_parse_error"
     assert error.adapter_name == adapter_name
     assert error.signature == signature
     assert error.lm_response == lm_response

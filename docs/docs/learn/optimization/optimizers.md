@@ -23,7 +23,7 @@ If you happen to have a lot of data, DSPy can leverage that. But you can start s
 
 ## What does a DSPy Optimizer tune? How does it tune them?
 
-Different optimizers in DSPy will tune your program's quality by **synthesizing good few-shot examples** for every module, like `dspy.BootstrapRS`,<sup>[1](https://arxiv.org/abs/2310.03714)</sup> **proposing and intelligently exploring better natural-language instructions** for every prompt, like `dspy.MIPROv2`,<sup>[2](https://arxiv.org/abs/2406.11695)</sup> and **building datasets for your modules and using them to finetune the LM weights** in your system, like `dspy.BootstrapFinetune`.<sup>[3](https://arxiv.org/abs/2407.10930)</sup>
+Different optimizers in DSPy will tune your program's quality by **synthesizing good few-shot examples** for every module, like `dspy.BootstrapRS`,<sup>[1](https://arxiv.org/abs/2310.03714)</sup> **proposing and intelligently exploring better natural-language instructions** for every prompt, like `dspy.MIPROv2`,<sup>[2](https://arxiv.org/abs/2406.11695)</sup> and `dspy.GEPA`,<sup>[3](https://arxiv.org/abs/2507.19457)</sup> and **building datasets for your modules and using them to finetune the LM weights** in your system, like `dspy.BootstrapFinetune`.<sup>[4](https://arxiv.org/abs/2407.10930)</sup>
 
 ??? "What's an example of a DSPy optimizer? How do different optimizers work?"
 
@@ -35,7 +35,7 @@ Different optimizers in DSPy will tune your program's quality by **synthesizing 
 
 ## What DSPy Optimizers are currently available?
 
-Optimizers can be accessed via `from dspy.teleprompt import *`.
+Optimizers can be accessed as `dspy.<OptimizerName>` (e.g., `dspy.MIPROv2`, `dspy.BootstrapFewShot`).
 
 ### Automatic Few-Shot Learning
 
@@ -58,17 +58,24 @@ These optimizers produce optimal instructions for the prompt and, in the case of
 
 6. [**`MIPROv2`**](../../api/optimizers/MIPROv2.md): Generates instructions *and* few-shot examples in each step. The instruction generation is data-aware and demonstration-aware. Uses Bayesian Optimization to effectively search over the space of generation instructions/demonstrations across your modules.
 
+7. [**`SIMBA`**](../../api/optimizers/SIMBA.md): Uses stochastic mini-batch sampling to identify challenging examples with high output variability, then applies the LLM to introspectively analyze failures and generate self-reflective improvement rules or add successful demonstrations.
+
+8. [**`GEPA`**](../../api/optimizers/GEPA/overview.md): Uses LM's to reflect on the DSPy program's trajectory, to identify what worked, what didn't and propose prompts addressing the gaps. Additionally, GEPA can leverage domain-specific textual feedback to rapidly improve the DSPy program. Detailed tutorials on using GEPA are available at [dspy.GEPA Tutorials](../../tutorials/gepa_ai_program/index.md).
 
 ### Automatic Finetuning
 
 This optimizer is used to fine-tune the underlying LLM(s).
 
-7. [**`BootstrapFinetune`**](../../api/optimizers/BootstrapFinetune.md): Distills a prompt-based DSPy program into weight updates. The output is a DSPy program that has the same steps, but where each step is conducted by a finetuned model instead of a prompted LM.
+9. [**`BootstrapFinetune`**](/api/optimizers/BootstrapFinetune): Distills a prompt-based DSPy program into weight updates. The output is a DSPy program that has the same steps, but where each step is conducted by a finetuned model instead of a prompted LM. [See the classification fine-tuning tutorial](https://dspy.ai/tutorials/classification_finetuning/) for a complete example.
 
 
 ### Program Transformations
 
-8. [**`Ensemble`**](../../api/optimizers/Ensemble.md): Ensembles a set of DSPy programs and either uses the full set or randomly samples a subset into a single program.
+10. [**`Ensemble`**](../../api/optimizers/Ensemble.md): Ensembles a set of DSPy programs and either uses the full set or randomly samples a subset into a single program.
+
+### Meta-Optimizers
+
+11. [**`BetterTogether`**](../../api/optimizers/BetterTogether.md): A meta-optimizer that combines prompt optimization and weight optimization (fine-tuning) in configurable sequences. Prompt optimization can discover effective task decompositions and reasoning strategies, while weight optimization can specialize the model to execute these patterns more efficiently. Using these approaches together in sequences (e.g., prompt → weight → prompt) may allow each to build on the improvements made by the other. Empirically, this approach often outperforms either strategy alone. 
 
 
 ## Which optimizer should I use?
@@ -90,13 +97,13 @@ They all share this general interface, with some differences in the keyword argu
 Let's see this with the most common one, `BootstrapFewShotWithRandomSearch`.
 
 ```python
-from dspy.teleprompt import BootstrapFewShotWithRandomSearch
+import dspy
 
 # Set up the optimizer: we want to "bootstrap" (i.e., self-generate) 8-shot examples of your program's steps.
 # The optimizer will repeat this 10 times (plus some initial attempts) before selecting its best attempt on the devset.
 config = dict(max_bootstrapped_demos=4, max_labeled_demos=4, num_candidate_programs=10, num_threads=4)
 
-teleprompter = BootstrapFewShotWithRandomSearch(metric=YOUR_METRIC_HERE, **config)
+teleprompter = dspy.BootstrapFewShotWithRandomSearch(metric=YOUR_METRIC_HERE, **config)
 optimized_program = teleprompter.compile(YOUR_PROGRAM_HERE, trainset=YOUR_TRAINSET_HERE)
 ```
 
@@ -176,17 +183,20 @@ optimized_program = teleprompter.compile(YOUR_PROGRAM_HERE, trainset=YOUR_TRAINS
 
         ```python linenums="1"
         import dspy
-        dspy.configure(lm=dspy.LM('openai/gpt-4o-mini-2024-07-18'))
+        lm=dspy.LM('openai/gpt-4o-mini-2024-07-18')
 
         # Define the DSPy module for classification. It will use the hint at training time, if available.
         signature = dspy.Signature("text, hint -> label").with_updated_fields('label', type_=Literal[tuple(CLASSES)])
         classify = dspy.ChainOfThought(signature)
+        classify.set_lm(lm)
 
         # Optimize via BootstrapFinetune.
         optimizer = dspy.BootstrapFinetune(metric=(lambda x, y, trace=None: x.label == y.label), num_threads=24)
         optimized = optimizer.compile(classify, trainset=trainset)
 
         optimized(text="What does a pending cash withdrawal mean?")
+        
+        # For a complete fine-tuning tutorial, see: https://dspy.ai/tutorials/classification_finetuning/
         ```
 
         **Possible Output (from the last line):**
@@ -208,7 +218,7 @@ After running a program through an optimizer, it's useful to also save it. At a 
 optimized_program.save(YOUR_SAVE_PATH)
 ```
 
-The resulting file is in plain-text JSON format. It contains all the parameters and steps in the source program. You can always read it and see what the optimizer generated. You can add `save_field_meta` to additionally save the list of fields with the keys, `name`, `field_type`, `description`, and `prefix` with: `optimized_program.save(YOUR_SAVE_PATH, save_field_meta=True).
+The resulting file is in plain-text JSON format. It contains all the parameters and steps in the source program. You can always read it and see what the optimizer generated.
 
 
 To load a program from a file, you can instantiate an object from that class and then call the load method on it.

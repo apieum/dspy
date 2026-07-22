@@ -1,7 +1,6 @@
 import logging
+import math
 import random
-
-import numpy as np
 
 import dspy
 from dspy.evaluate.evaluate import Evaluate
@@ -32,7 +31,7 @@ class InferRules(BootstrapFewShot):
         all_predictors = [p for p in original_program.predictors() if hasattr(p, "signature")]
         instructions_list = [p.signature.instructions for p in all_predictors]
 
-        best_score = -np.inf
+        best_score = -math.inf
         best_program = None
 
         for candidate_idx in range(self.num_candidates):
@@ -142,9 +141,12 @@ class RulesInductionProgram(dspy.Module):
         self.rng = random.Random(0)
 
     def forward(self, examples_text):
-        with dspy.settings.context(**self.teacher_settings):
-            lm = dspy.settings.lm.copy(temperature=self.rng.uniform(0.9, 1.0))
-            with dspy.settings.context(lm=lm):
+        with dspy.context(**self.teacher_settings):
+            # Generate rules with a fresh rollout and non-zero temperature.
+            lm = dspy.settings.lm.copy(
+                rollout_id=self.rng.randint(0, 10**9), temperature=1.0
+            )
+            with dspy.context(lm=lm):
                 rules = self.rules_induction(examples_text=examples_text).natural_language_rules
 
         return rules.strip()

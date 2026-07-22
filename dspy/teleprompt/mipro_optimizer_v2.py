@@ -1,12 +1,8 @@
 import logging
+import math
 import random
-import sys
-import textwrap
-import time
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Callable, Literal
-
-import numpy as np
 
 import dspy
 from dspy.evaluate.evaluate import Evaluate
@@ -27,6 +23,20 @@ if TYPE_CHECKING:
     import optuna
 
 logger = logging.getLogger(__name__)
+
+
+def _import_optuna():
+    try:
+        import optuna
+    except ModuleNotFoundError as exc:
+        if exc.name == "optuna":
+            raise ImportError(
+                "MIPROv2 requires optional dependency 'optuna'. "
+                "Install it with `pip install dspy[optuna]`."
+            ) from exc
+        raise
+    return optuna
+
 
 # Constants
 BOOTSTRAPPED_FEWSHOT_EXAMPLES_IN_CONTEXT = 3
@@ -61,7 +71,7 @@ class MIPROv2(Teleprompter):
         num_threads: int | None = None,
         max_errors: int | None = None,
         seed: int = 9,
-        init_temperature: float = 0.5,
+        init_temperature: float = 1.0,
         verbose: bool = False,
         track_stats: bool = True,
         log_dir: str | None = None,
@@ -93,6 +103,9 @@ class MIPROv2(Teleprompter):
         self.seed = seed
         self.rng = None
 
+        if not self.prompt_model or not self.task_model:
+            raise ValueError("Either provide both prompt_model and task_model or set a default LM through dspy.configure(lm=...)")
+
     def compile(
         self,
         student: Any,
@@ -112,15 +125,30 @@ class MIPROv2(Teleprompter):
         view_data_batch_size: int = 10,
         tip_aware_proposer: bool = True,
         fewshot_aware_proposer: bool = True,
-        requires_permission_to_run: bool = True,
+        requires_permission_to_run: bool | None = None, # deprecated
         provide_traceback: bool | None = None,
     ) -> Any:
+        if requires_permission_to_run == False:
+            logger.warning(
+                "'requires_permission_to_run' is deprecated and will be removed in a future version."
+            )
+        elif requires_permission_to_run == True:
+            raise ValueError("User confirmation is removed from MIPROv2. Please remove the 'requires_permission_to_run' argument.")
+
         effective_max_errors = (
             self.max_errors
             if self.max_errors is not None
             else dspy.settings.max_errors
         )
-        zeroshot_opt = (self.max_bootstrapped_demos == 0) and (self.max_labeled_demos == 0)
+
+        effective_max_bootstrapped_demos = (
+            max_bootstrapped_demos if max_bootstrapped_demos is not None else self.max_bootstrapped_demos
+        )
+        effective_max_labeled_demos = (
+            max_labeled_demos if max_labeled_demos is not None else self.max_labeled_demos
+        )
+
+        zeroshot_opt = (effective_max_bootstrapped_demos == 0) and (effective_max_labeled_demos == 0)
 
         # If auto is None, and num_trials is not provided (but num_candidates is), raise an error that suggests a good num_trials value
         if self.auto is None and (self.num_candidates is not None and num_trials is None):
@@ -135,46 +163,56 @@ class MIPROv2(Teleprompter):
         # If auto is provided, and either num_candidates or num_trials is not None, raise an error
         if self.auto is not None and (self.num_candidates is not None or num_trials is not None):
             raise ValueError(
-                "If auto is not None, num_candidates and num_trials cannot be set, since they would be overrided by the auto settings. Please either set auto to None, or do not specify num_candidates and num_trials."
+                "If auto is not None, num_candidates and num_trials cannot be set, since they would be overridden by the auto settings. Please either set auto to None, or do not specify num_candidates and num_trials."
             )
 
         # Set random seeds
         seed = seed or self.seed
         self._set_random_seeds(seed)
 
-        # Update max demos if specified
-        if max_bootstrapped_demos is not None:
-            self.max_bootstrapped_demos = max_bootstrapped_demos
-        if max_labeled_demos is not None:
-            self.max_labeled_demos = max_labeled_demos
 
         # Set training & validation sets
         trainset, valset = self._set_and_validate_datasets(trainset, valset)
 
+        num_instruct_candidates = (
+            self.num_instruct_candidates
+            if self.num_instruct_candidates is not None
+            else self.num_candidates
+        )
+        num_fewshot_candidates = (
+            self.num_fewshot_candidates
+            if self.num_fewshot_candidates is not None
+            else self.num_candidates
+        )
+
         # Set hyperparameters based on run mode (if set)
-        num_trials, valset, minibatch = self._set_hyperparams_from_run_mode(
-            student, num_trials, minibatch, zeroshot_opt, valset
+        (
+            num_trials,
+            valset,
+            minibatch,
+            num_instruct_candidates,
+            num_fewshot_candidates,
+        ) = self._set_hyperparams_from_run_mode(
+            student,
+            num_trials,
+            minibatch,
+            zeroshot_opt,
+            valset,
+            num_instruct_candidates,
+            num_fewshot_candidates,
         )
 
         if self.auto:
-            self._print_auto_run_settings(num_trials, minibatch, valset)
+            self._print_auto_run_settings(
+                num_trials,
+                minibatch,
+                valset,
+                num_fewshot_candidates,
+                num_instruct_candidates,
+            )
 
         if minibatch and minibatch_size > len(valset):
             raise ValueError(f"Minibatch size cannot exceed the size of the valset. Valset size: {len(valset)}.")
-
-        # Estimate LM calls and get user confirmation
-        if requires_permission_to_run:
-            if not self._get_user_confirmation(
-                student,
-                num_trials,
-                minibatch,
-                minibatch_size,
-                minibatch_full_eval_steps,
-                valset,
-                program_aware_proposer,
-            ):
-                logger.info("Compilation aborted by the user.")
-                return student  # Return the original student program
 
         # Initialize program and evaluator
         program = student.deepcopy()
@@ -188,8 +226,19 @@ class MIPROv2(Teleprompter):
             provide_traceback=provide_traceback,
         )
 
-        # Step 1: Bootstrap few-shot examples
-        demo_candidates = self._bootstrap_fewshot_examples(program, trainset, seed, teacher)
+        with dspy.context(lm=self.task_model):
+            # Step 1: Bootstrap few-shot examples
+            demo_candidates = self._bootstrap_fewshot_examples(
+                program,
+                trainset,
+                seed,
+                teacher,
+                num_fewshot_candidates=num_fewshot_candidates,
+                max_bootstrapped_demos=effective_max_bootstrapped_demos,
+                max_labeled_demos=effective_max_labeled_demos,
+                max_errors=effective_max_errors,
+                metric_threshold=self.metric_threshold,
+            )
 
         # Step 2: Propose instruction candidates
         instruction_candidates = self._propose_instructions(
@@ -201,51 +250,56 @@ class MIPROv2(Teleprompter):
             data_aware_proposer,
             tip_aware_proposer,
             fewshot_aware_proposer,
+            num_instruct_candidates=num_instruct_candidates,
         )
 
         # If zero-shot, discard demos
         if zeroshot_opt:
             demo_candidates = None
 
-        # Step 3: Find optimal prompt parameters
-        best_program = self._optimize_prompt_parameters(
-            program,
-            instruction_candidates,
-            demo_candidates,
-            evaluate,
-            valset,
-            num_trials,
-            minibatch,
-            minibatch_size,
-            minibatch_full_eval_steps,
-            seed,
-        )
+        with dspy.context(lm=self.task_model):
+            # Step 3: Find optimal prompt parameters
+            best_program = self._optimize_prompt_parameters(
+                program,
+                instruction_candidates,
+                demo_candidates,
+                evaluate,
+                valset,
+                num_trials,
+                minibatch,
+                minibatch_size,
+                minibatch_full_eval_steps,
+                seed,
+            )
 
         return best_program
 
     def _set_random_seeds(self, seed):
         self.rng = random.Random(seed)
-        np.random.seed(seed)
 
     def _set_num_trials_from_num_candidates(self, program, zeroshot_opt, num_candidates):
         num_vars = len(program.predictors())
         if not zeroshot_opt:
             num_vars *= 2  # Account for few-shot examples + instruction variables
         # Trials = MAX(c*M*log(N), c=2, 3/2*N)
-        num_trials = int(max(2 * num_vars * np.log2(num_candidates), 1.5 * num_candidates))
+        num_trials = int(max(2 * num_vars * math.log2(num_candidates), 1.5 * num_candidates))
 
         return num_trials
 
     def _set_hyperparams_from_run_mode(
         self,
         program: Any,
-        num_trials: int,
+        num_trials: int | None,
         minibatch: bool,
         zeroshot_opt: bool,
         valset: list,
-    ) -> tuple[int, list, bool]:
+        num_instruct_candidates: int | None,
+        num_fewshot_candidates: int | None,
+    ) -> tuple[int, list, bool, int, int]:
         if self.auto is None:
-            return num_trials, valset, minibatch
+            if num_instruct_candidates is None or num_fewshot_candidates is None:
+                raise ValueError("num_candidates must be provided when auto is None.")
+            return num_trials, valset, minibatch, num_instruct_candidates, num_fewshot_candidates
 
         auto_settings = AUTO_RUN_SETTINGS[self.auto]
 
@@ -255,12 +309,12 @@ class MIPROv2(Teleprompter):
         # Set num instruct candidates to 1/2 of N if optimizing with few-shot examples, otherwise set to N
         # This is because we've found that it's generally better to spend optimization budget on few-shot examples
         # When they are allowed.
-        self.num_instruct_candidates = auto_settings["n"] if zeroshot_opt else int(auto_settings["n"] * 0.5)
-        self.num_fewshot_candidates = auto_settings["n"]
+        num_instruct_candidates = auto_settings["n"] if zeroshot_opt else int(auto_settings["n"] * 0.5)
+        num_fewshot_candidates = auto_settings["n"]
 
         num_trials = self._set_num_trials_from_num_candidates(program, zeroshot_opt, auto_settings["n"])
 
-        return num_trials, valset, minibatch
+        return num_trials, valset, minibatch, num_instruct_candidates, num_fewshot_candidates
 
     def _set_and_validate_datasets(self, trainset: list, valset: list | None):
         if not trainset:
@@ -279,13 +333,20 @@ class MIPROv2(Teleprompter):
 
         return trainset, valset
 
-    def _print_auto_run_settings(self, num_trials: int, minibatch: bool, valset: list):
+    def _print_auto_run_settings(
+        self,
+        num_trials: int,
+        minibatch: bool,
+        valset: list,
+        num_fewshot_candidates: int,
+        num_instruct_candidates: int,
+    ):
         logger.info(
             f"\nRUNNING WITH THE FOLLOWING {self.auto.upper()} AUTO RUN SETTINGS:"
             f"\nnum_trials: {num_trials}"
             f"\nminibatch: {minibatch}"
-            f"\nnum_fewshot_candidates: {self.num_fewshot_candidates}"
-            f"\nnum_instruct_candidates: {self.num_instruct_candidates}"
+            f"\nnum_fewshot_candidates: {num_fewshot_candidates}"
+            f"\nnum_instruct_candidates: {num_instruct_candidates}"
             f"\nvalset size: {len(valset)}\n"
         )
 
@@ -298,18 +359,19 @@ class MIPROv2(Teleprompter):
         minibatch_full_eval_steps: int,
         valset: list,
         program_aware_proposer: bool,
+        num_instruct_candidates: int,
     ) -> tuple[str, str]:
         num_predictors = len(program.predictors())
 
         # Estimate prompt model calls
         estimated_prompt_model_calls = (
             10  # Data summarizer calls
-            + self.num_instruct_candidates * num_predictors  # Candidate generation
+            + num_instruct_candidates * num_predictors  # Candidate generation
             + (num_predictors + 1 if program_aware_proposer else 0)  # Program-aware proposer
         )
         prompt_model_line = (
             f"{YELLOW}- Prompt Generation: {BLUE}{BOLD}10{ENDC}{YELLOW} data summarizer calls + "
-            f"{BLUE}{BOLD}{self.num_instruct_candidates}{ENDC}{YELLOW} * "
+            f"{BLUE}{BOLD}{num_instruct_candidates}{ENDC}{YELLOW} * "
             f"{BLUE}{BOLD}{num_predictors}{ENDC}{YELLOW} lm calls in program "
             f"+ ({BLUE}{BOLD}{num_predictors + 1}{ENDC}{YELLOW}) lm calls in program-aware proposer "
             f"= {BLUE}{BOLD}{estimated_prompt_model_calls}{ENDC}{YELLOW} prompt model calls{ENDC}"
@@ -336,112 +398,48 @@ class MIPROv2(Teleprompter):
 
         return prompt_model_line, task_model_line
 
-    def _get_user_confirmation(
+    def _bootstrap_fewshot_examples(
         self,
         program: Any,
-        num_trials: int,
-        minibatch: bool,
-        minibatch_size: int,
-        minibatch_full_eval_steps: int,
-        valset: list,
-        program_aware_proposer: bool,
-    ) -> bool:
-        prompt_model_line, task_model_line = self._estimate_lm_calls(
-            program,
-            num_trials,
-            minibatch,
-            minibatch_size,
-            minibatch_full_eval_steps,
-            valset,
-            program_aware_proposer,
-        )
-
-        user_message = textwrap.dedent(
-            f"""\
-            {YELLOW}{BOLD}Projected Language Model (LM) Calls{ENDC}
-
-            Based on the parameters you have set, the maximum number of LM calls is projected as follows:
-
-            {prompt_model_line}
-            {task_model_line}
-
-            {YELLOW}{BOLD}Estimated Cost Calculation:{ENDC}
-
-            {YELLOW}Total Cost = (Number of calls to task model * (Avg Input Token Length per Call * Task Model Price per Input Token + Avg Output Token Length per Call * Task Model Price per Output Token)
-                        + (Number of program calls * (Avg Input Token Length per Call * Task Prompt Price per Input Token + Avg Output Token Length per Call * Prompt Model Price per Output Token).{ENDC}
-
-            For a preliminary estimate of potential costs, we recommend you perform your own calculations based on the task
-            and prompt models you intend to use. If the projected costs exceed your budget or expectations, you may consider:
-
-            {YELLOW}- Reducing the number of trials (`num_trials`), the size of the valset, or the number of LM calls in your program.{ENDC}
-            {YELLOW}- Using a cheaper task model to optimize the prompt.{ENDC}
-            {YELLOW}- Setting `minibatch=True` if you haven't already.{ENDC}\n"""
-        )
-
-        user_confirmation_message = textwrap.dedent(
-            f"""\
-            To proceed with the execution of this program, please confirm by typing {BLUE}'y'{ENDC} for yes or {BLUE}'n'{ENDC} for no.
-            If no input is received within 20 seconds, the program will proceed automatically.
-
-            If you would like to bypass this confirmation step in future executions, set the {YELLOW}`requires_permission_to_run`{ENDC} flag to {YELLOW}`False`{ENDC} when calling compile.
-
-            {YELLOW}Awaiting your input...{ENDC}
-        """
-        )
-
-        print(f"{user_message}\n{user_confirmation_message}\nDo you wish to continue? (y/n): ", end="", flush=True)
-
-        # Wait for input with timeout
-        start_time = time.time()
-        while time.time() - start_time < 20:
-            if sys.platform == "win32":
-                import msvcrt
-                if msvcrt.kbhit():
-                    user_input = msvcrt.getch().decode("utf-8").strip().lower()
-                    print(user_input)  # Echo the input
-                    return user_input == "y"
-            else:
-                import select
-                if select.select([sys.stdin], [], [], 0.1)[0]:
-                    user_input = sys.stdin.readline().strip().lower()
-                    return user_input == "y"
-            time.sleep(0.1)
-
-        print("\nNo input received within 20 seconds. Proceeding with execution...")
-        return True
-
-    def _bootstrap_fewshot_examples(self, program: Any, trainset: list, seed: int, teacher: Any) -> list | None:
+        trainset: list,
+        seed: int,
+        teacher: Any,
+        *,
+        num_fewshot_candidates: int,
+        max_bootstrapped_demos: int,
+        max_labeled_demos: int,
+        max_errors: int | None,
+        metric_threshold: float | None,
+    ) -> list | None:
         logger.info("\n==> STEP 1: BOOTSTRAP FEWSHOT EXAMPLES <==")
-        if self.max_bootstrapped_demos > 0:
+        if max_bootstrapped_demos > 0:
             logger.info(
                 "These will be used as few-shot example candidates for our program and for creating instructions.\n"
             )
         else:
             logger.info("These will be used for informing instruction proposal.\n")
 
-        logger.info(f"Bootstrapping N={self.num_fewshot_candidates} sets of demonstrations...")
+        logger.info(f"Bootstrapping N={num_fewshot_candidates} sets of demonstrations...")
 
-        zeroshot = self.max_bootstrapped_demos == 0 and self.max_labeled_demos == 0
+        zeroshot = max_bootstrapped_demos == 0 and max_labeled_demos == 0
 
-        # try:
-        effective_max_errors = (
-            self.max_errors if self.max_errors is not None else dspy.settings.max_errors
-        )
+        if max_errors is None:
+            max_errors = dspy.settings.max_errors
 
         demo_candidates = create_n_fewshot_demo_sets(
             student=program,
-            num_candidate_sets=self.num_fewshot_candidates,
+            num_candidate_sets=num_fewshot_candidates,
             trainset=trainset,
-            max_labeled_demos=(LABELED_FEWSHOT_EXAMPLES_IN_CONTEXT if zeroshot else self.max_labeled_demos),
+            max_labeled_demos=(LABELED_FEWSHOT_EXAMPLES_IN_CONTEXT if zeroshot else max_labeled_demos),
             max_bootstrapped_demos=(
-                BOOTSTRAPPED_FEWSHOT_EXAMPLES_IN_CONTEXT if zeroshot else self.max_bootstrapped_demos
+                BOOTSTRAPPED_FEWSHOT_EXAMPLES_IN_CONTEXT if zeroshot else max_bootstrapped_demos
             ),
             metric=self.metric,
-            max_errors=effective_max_errors,
+            max_errors=max_errors,
             teacher=teacher,
             teacher_settings=self.teacher_settings,
             seed=seed,
-            metric_threshold=self.metric_threshold,
+            metric_threshold=metric_threshold,
             rng=self.rng,
         )
         # NOTE: Bootstrapping is essential to MIPRO!
@@ -463,6 +461,7 @@ class MIPROv2(Teleprompter):
         data_aware_proposer: bool,
         tip_aware_proposer: bool,
         fewshot_aware_proposer: bool,
+        num_instruct_candidates: int,
     ) -> dict[int, list[str]]:
         logger.info("\n==> STEP 2: PROPOSE INSTRUCTION CANDIDATES <==")
         logger.info(
@@ -484,15 +483,15 @@ class MIPROv2(Teleprompter):
             set_history_randomly=False,
             verbose=self.verbose,
             rng=self.rng,
+            init_temperature=self.init_temperature,
         )
 
-        logger.info(f"\nProposing N={self.num_instruct_candidates} instructions...\n")
+        logger.info(f"\nProposing N={num_instruct_candidates} instructions...\n")
         instruction_candidates = proposer.propose_instructions_for_program(
             trainset=trainset,
             program=program,
             demo_candidates=demo_candidates,
-            N=self.num_instruct_candidates,
-            T=self.init_temperature,
+            N=num_instruct_candidates,
             trial_logs={},
         )
 
@@ -518,7 +517,7 @@ class MIPROv2(Teleprompter):
         minibatch_full_eval_steps: int,
         seed: int,
     ) -> Any | None:
-        import optuna
+        optuna = _import_optuna()
 
         # Run optimization
         optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -779,12 +778,13 @@ class MIPROv2(Teleprompter):
                 predictor.demos = demo_candidates[i][demos_idx]
                 trial_logs[trial_num][f"{i}_predictor_demos"] = demos_idx
                 chosen_params.append(f"Predictor {i}: Few-Shot Set {demos_idx}")
-                raw_chosen_params[f"{i}_predictor_demos"] = instruction_idx
+                raw_chosen_params[f"{i}_predictor_demos"] = demos_idx
 
         return chosen_params, raw_chosen_params
 
     def _get_param_distributions(self, program, instruction_candidates, demo_candidates):
-        from optuna.distributions import CategoricalDistribution
+        optuna = _import_optuna()
+        CategoricalDistribution = optuna.distributions.CategoricalDistribution
 
         param_distributions = {}
 
@@ -814,7 +814,7 @@ class MIPROv2(Teleprompter):
         instruction_candidates: list,
         demo_candidates: list,
     ):
-        import optuna
+        optuna = _import_optuna()
 
         logger.info(f"===== Trial {trial_num + 1} / {adjusted_num_trials} - Full Evaluation =====")
 

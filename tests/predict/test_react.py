@@ -1,11 +1,58 @@
 import re
 
-import litellm
 import pytest
 from pydantic import BaseModel
 
 import dspy
+import dspy.adapters.base as adapter_base
+import dspy.adapters.utils as adapter_utils
 from dspy.utils.dummies import DummyLM
+from dspy.utils.exceptions import ContextWindowExceededError
+
+
+@pytest.mark.extra
+def test_tool_observation_preserves_custom_type():
+    pytest.importorskip("PIL.Image")
+    from PIL import Image
+
+    captured_calls = []
+
+    class SpyChatAdapter(dspy.ChatAdapter):
+        def format_user_message_content(self, signature, inputs, *args, **kwargs):
+            captured_calls.append((signature, dict(inputs)))
+            return super().format_user_message_content(signature, inputs, *args, **kwargs)
+
+    def make_images():
+        return dspy.Image("https://example.com/test.png"), dspy.Image(Image.new("RGB", (100, 100), "red"))
+
+
+    adapter = SpyChatAdapter()
+    lm = DummyLM(
+        [
+            {
+                "next_thought": "I should call the image tool.",
+                "next_tool_name": "make_images",
+                "next_tool_args": {},
+            },
+            {
+                "next_thought": "I now have the image so I can finish.",
+                "next_tool_name": "finish",
+                "next_tool_args": {},
+            },
+            {"reasoning": "image ready", "answer": "done"},
+        ],
+        adapter=adapter,
+    )
+    dspy.configure(lm=lm, adapter=adapter)
+
+    react = dspy.ReAct("question -> answer", tools=[make_images])
+    react(question="Draw me something red")
+
+    sigs_with_obs = [sig for sig, inputs in captured_calls if "observation_0" in inputs]
+    assert sigs_with_obs, "Expected ReAct to format a trajectory containing observation_0"
+
+    observation_content = lm.history[1]["messages"][1]["content"]
+    assert sum(1 for part in observation_content if isinstance(part, dict) and part.get("type") == "image_url") == 2
 
 
 def test_tool_calling_with_pydantic_args():
@@ -54,7 +101,7 @@ def test_tool_calling_with_pydantic_args():
             },
         ]
     )
-    dspy.settings.configure(lm=lm)
+    dspy.configure(lm=lm)
 
     outputs = react(
         participant_name="Alice",
@@ -86,6 +133,52 @@ def test_tool_calling_with_pydantic_args():
     assert outputs.trajectory == expected_trajectory
 
 
+def test_react_with_tools_skips_native_response_issubclass_for_generic_alias(monkeypatch):
+    def get_user_info(name: str):
+        return {"name": name}
+
+    class CustomerService(dspy.Signature):
+        user_request: str = dspy.InputField()
+        process_result: str = dspy.OutputField()
+
+    react = dspy.ReAct(CustomerService, tools=[get_user_info])
+    problem_annotation = react.react.signature.output_fields["next_tool_args"].annotation
+
+    def guarded_issubclass(cls, class_or_tuple):
+        if cls == problem_annotation:
+            raise TypeError("issubclass() arg 1 must be a class")
+        return issubclass(cls, class_or_tuple)
+
+    monkeypatch.setattr(adapter_base, "issubclass", guarded_issubclass, raising=False)
+    monkeypatch.setattr(adapter_utils, "issubclass", guarded_issubclass, raising=False)
+
+    lm = DummyLM(
+        [
+            {
+                "next_thought": "I should look up the user first.",
+                "next_tool_name": "get_user_info",
+                "next_tool_args": {"name": "Adam"},
+            },
+            {
+                "next_thought": "I have the information I need, so I can finish now.",
+                "next_tool_name": "finish",
+                "next_tool_args": {},
+            },
+            {
+                "reasoning": "I fetched the user profile and can answer the request.",
+                "process_result": "Resolved Adam's request.",
+            },
+        ]
+    )
+
+    with dspy.context(lm=lm):
+        result = react(user_request="Help me, my name is Adam")
+
+    assert result.process_result == "Resolved Adam's request."
+    assert result.trajectory["tool_name_0"] == "get_user_info"
+    assert result.trajectory["tool_args_0"] == {"name": "Adam"}
+
+
 def test_tool_calling_without_typehint():
     def foo(a, b):
         """Add two numbers."""
@@ -99,7 +192,7 @@ def test_tool_calling_without_typehint():
             {"reasoning": "I added the numbers successfully", "c": 3},
         ]
     )
-    dspy.settings.configure(lm=lm)
+    dspy.configure(lm=lm)
     outputs = react(a=1, b=2)
 
     expected_trajectory = {
@@ -142,7 +235,7 @@ def test_trajectory_truncation():
             )
         elif call_count == 3:
             # The 3rd call raises context window exceeded error
-            raise litellm.ContextWindowExceededError("Context window exceeded", "dummy_model", "dummy_provider")
+            raise ContextWindowExceededError()
         else:
             # The 4th call finishes
             return dspy.Prediction(next_thought="Final thought", next_tool_name="finish", next_tool_args={})
@@ -157,6 +250,54 @@ def test_trajectory_truncation():
     assert "thought_0" not in result.trajectory
     assert "thought_2" in result.trajectory
     assert result.output_text == "Final output"
+
+
+@pytest.mark.asyncio
+async def test_context_window_exceeded_after_retries():
+    def echo(text: str) -> str:
+        return f"Echoed: {text}"
+
+    react = dspy.ReAct("input_text -> output_text", tools=[echo])
+
+    def mock_react(**kwargs):
+        raise ContextWindowExceededError()
+
+    # Test sync version
+    extract_calls = []
+
+    def mock_extract(**kwargs):
+        extract_calls.append(kwargs)
+        return dspy.Prediction(output_text="Fallback output")
+
+    react.react = mock_react
+    react.extract = mock_extract
+
+    result = react(input_text="test input")
+    assert result.trajectory == {}
+    assert result.output_text == "Fallback output"
+    assert len(extract_calls) == 1
+    assert extract_calls[0]["input_text"] == "test input"
+    assert "trajectory" in extract_calls[0]
+
+    # Test async version
+    async_extract_calls = []
+
+    async def mock_react_async(**kwargs):
+        raise ContextWindowExceededError()
+
+    async def mock_extract_async(**kwargs):
+        async_extract_calls.append(kwargs)
+        return dspy.Prediction(output_text="Fallback output")
+
+    react.react.acall = mock_react_async
+    react.extract.acall = mock_extract_async
+
+    result = await react.acall(input_text="test input")
+    assert result.trajectory == {}
+    assert result.output_text == "Fallback output"
+    assert len(async_extract_calls) == 1
+    assert async_extract_calls[0]["input_text"] == "test input"
+    assert "trajectory" in async_extract_calls[0]
 
 
 def test_error_retry():
@@ -182,7 +323,7 @@ def test_error_retry():
             {"reasoning": "I added the numbers successfully", "c": 3},
         ]
     )
-    dspy.settings.configure(lm=lm)
+    dspy.configure(lm=lm)
 
     outputs = react(a=1, b=2, max_iters=2)
     traj = outputs.trajectory

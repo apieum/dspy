@@ -37,9 +37,47 @@ dspy.configure(lm=lm)
 
         ```python linenums="1"
         import dspy
-        lm = dspy.LM('anthropic/claude-3-opus-20240229', api_key='YOUR_ANTHROPIC_API_KEY')
+        lm = dspy.LM('anthropic/claude-sonnet-4-5-20250929', api_key='YOUR_ANTHROPIC_API_KEY')
         dspy.configure(lm=lm)
         ```
+
+    === "Vertex AI (GCP)"
+        For Google Cloud's Vertex AI, authenticate with a service account JSON key or Application Default Credentials. You can pass credentials directly in code or set environment variables.
+
+        ```python linenums="1"
+        import dspy
+        import json
+
+        # Load the service account JSON and convert to a string
+        with open("service_account.json") as f:
+            credentials = json.dumps(json.load(f))
+
+        lm = dspy.LM(
+            "vertex_ai/gemini-2.0-flash",
+            vertex_credentials=credentials,
+            vertex_project="your-gcp-project-id",
+            vertex_location="us-central1",
+        )
+        dspy.configure(lm=lm)
+        ```
+
+        Alternatively, set environment variables and skip the kwargs:
+
+        ```bash
+        export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service_account.json"
+        export VERTEXAI_PROJECT="your-gcp-project-id"
+        export VERTEXAI_LOCATION="us-central1"
+        ```
+
+        ```python linenums="1"
+        import dspy
+        lm = dspy.LM("vertex_ai/gemini-2.0-flash")
+        dspy.configure(lm=lm)
+        ```
+
+        !!! warning "Common pitfalls"
+            - Use the `vertex_ai/` model prefix, not `gemini/`. The `gemini/` prefix routes to the Gemini API which requires an API key instead of GCP credentials.
+            - Use `vertex_project` and `vertex_location`, not `project` or `location`. Parameters without the `vertex_` prefix are silently ignored and LiteLLM falls back to defaults, which may cause requests to land in an unintended region.
 
     === "Databricks"
         If you're on the Databricks platform, authentication is automatic via their SDK. If not, you can set the env variables `DATABRICKS_API_KEY` and `DATABRICKS_API_BASE`, or pass `api_key` and `api_base` below.
@@ -166,6 +204,36 @@ gpt_4o_mini = dspy.LM('openai/gpt-4o-mini', temperature=0.9, max_tokens=3000, st
 
 By default LMs in DSPy are cached. If you repeat the same call, you will get the same outputs. But you can turn off caching by setting `cache=False`.
 
+If you want to keep caching enabled but force a new request (for example, to obtain diverse outputs),
+pass a unique `rollout_id` and set a non-zero `temperature` in your call. DSPy hashes both the inputs
+and the `rollout_id` when looking up a cache entry, so different values force a new LM request while
+still caching future calls with the same inputs and `rollout_id`. The ID is also recorded in
+`lm.history`, which makes it easy to track or compare different rollouts during experiments. Changing
+only the `rollout_id` while keeping `temperature=0` will not affect the LM's output.
+
+```python linenums="1"
+lm("Say this is a test!", rollout_id=1, temperature=1.0)
+```
+
+You can pass these LM kwargs directly to DSPy modules as well. Supplying them at
+initialization sets the defaults for every call:
+
+```python linenums="1"
+predict = dspy.Predict("question -> answer", rollout_id=1, temperature=1.0)
+```
+
+To override them for a single invocation, provide a ``config`` dictionary when
+calling the module:
+
+```python linenums="1"
+predict = dspy.Predict("question -> answer")
+predict(question="What is 1 + 52?", config={"rollout_id": 5, "temperature": 1.0})
+```
+
+In both cases, ``rollout_id`` is forwarded to the underlying LM, affects
+its caching behavior, and is stored alongside each response so you can
+replay or analyze specific rollouts later.
+
 
 ## Inspecting output and usage metadata.
 
@@ -179,10 +247,100 @@ lm.history[-1].keys()  # access the last call to the LM, with all metadata
 
 **Output:**
 ```text
-dict_keys(['prompt', 'messages', 'kwargs', 'response', 'outputs', 'usage', 'cost'])
+dict_keys(['prompt', 'messages', 'kwargs', 'response', 'outputs', 'usage', 'cost', 'timestamp', 'uuid', 'model', 'response_model', 'model_type])
 ```
 
-### Advanced: Building custom LMs and writing your own Adapters.
+## Handling LM errors
+
+DSPy's built-in `dspy.LM` wraps provider and LiteLLM failures in structured DSPy exceptions. Catch `dspy.LMError` to handle any LM failure, or catch a more specific subclass for targeted behavior.
+
+```python linenums="1"
+try:
+    answer = qa(question="...")
+except dspy.ContextWindowExceededError:
+    # Reduce prompt size, retrieved passages, or demos before retrying.
+    raise
+except dspy.LMRateLimitError as e:
+    print(f"Rate limited by {e.provider}; retry after {e.retry_after} seconds")
+except dspy.LMError as e:
+    print(f"LM failed: code={e.code}, model={e.model}, request_id={e.request_id}")
+```
+
+All DSPy LM errors expose a stable `code` and may include `model`, `provider`, provider `status`, `request_id`, and `retry_after`. If an unknown exception is raised at the LM backend boundary, DSPy raises `dspy.LMUnexpectedError` instead of treating it as an adapter parse failure. See the [Errors API reference](../../api/utils/Errors.md) for the full hierarchy.
+
+## Using the Responses API
+
+By default, DSPy calls language models (LMs) using LiteLLM's [Chat Completions API](https://docs.litellm.ai/docs/completion), which is suitable for most standard models and tasks. However, some advanced models, such as OpenAI's reasoning models (e.g., `gpt-5` or other future models), may offer improved quality or additional features when accessed via the [Responses API](https://docs.litellm.ai/docs/response_api), which is supported in DSPy.
+
+**When should you use the Responses API?**
+
+- If you are working with models that support or require the `responses` endpoint (such as OpenAI's reasoning models).
+- When you want to leverage enhanced reasoning, multi-turn, or richer output capabilities provided by certain models.
+
+**How to enable the Responses API in DSPy:**
+
+To enable the Responses API, just set `model_type="responses"` when creating the `dspy.LM` instance.
+
+```python
+import dspy
+
+# Configure DSPy to use the Responses API for your language model
+dspy.configure(
+    lm=dspy.LM(
+        "openai/gpt-5-mini",
+        model_type="responses",
+        temperature=1.0,
+        max_tokens=16000,
+    ),
+)
+```
+
+Please note that not all models or providers support the Responses API, check [LiteLLM's documentation](https://docs.litellm.ai/docs/response_api) for more details.
+
+
+## Advanced: Building custom LMs and writing your own Adapters.
 
 Though rarely needed, you can write custom LMs by inheriting from `dspy.BaseLM`. Another advanced layer in the DSPy ecosystem is that of _adapters_, which sit between DSPy signatures and LMs. A future version of this guide will discuss these advanced features, though you likely don't need them.
+
+### Saving programs that use custom LMs
+
+When a DSPy program is saved, each LM attached to a module is serialized with `lm.dump_state()`. The built-in `dspy.LM` and `dspy.BaseLM` subclasses whose state is captured by `BaseLM.__init__` can use the default state format. If your custom LM needs extra constructor arguments or runtime state, override both `dump_state` and `load_state`.
+
+```python linenums="1"
+import dspy
+
+
+class MyLM(dspy.BaseLM):
+    def __init__(self, model: str, *, deployment: str, **kwargs):
+        super().__init__(model=model, **kwargs)
+        self.deployment = deployment
+
+    def dump_state(self):
+        state = super().dump_state()
+        state["deployment"] = self.deployment
+        return state
+
+    @classmethod
+    def load_state(cls, state):
+        state = dict(state)
+        state.pop("_dspy_lm_class", None)
+        return cls(**state)
+
+    def forward(self, prompt=None, messages=None, **kwargs):
+        ...
+```
+
+Custom LM classes are reloaded from their module-qualified class path, so they must be importable when you load the saved program. Loading a saved state that imports a custom LM class requires trusted opt-in:
+
+```python linenums="1"
+program.load("program.json", allow_unsafe_lm_state=True)
+```
+
+Use this only for files you trust. The flag also preserves serialized LM endpoint configuration such as `api_base`, `base_url`, and `model_list`.
+
+### Copying custom LMs
+
+DSPy uses `lm.copy(...)` when it needs the same LM with different request parameters, such as a different `temperature` or `rollout_id`. The default `BaseLM.copy()` implementation makes a shallow runtime copy: provider clients, sessions, and local model handles are shared by reference, while DSPy-owned mutable state (`history`, the `callbacks` list, and `kwargs`) is isolated on the copy. The callback list is copied, but callback objects themselves are shared.
+
+If your custom LM stores additional mutable DSPy-owned state that should not be shared across copies, override `copy()` and isolate that state explicitly. Runtime handles that are expensive or unsafe to duplicate should usually continue to be shared by reference.
 

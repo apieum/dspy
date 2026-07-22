@@ -18,11 +18,11 @@ class History(pydantic.BaseModel):
 
     Then the history should be a list of dictionaries with keys "question" and "answer".
 
-    Example:
+    Examples:
         ```
         import dspy
 
-        dspy.settings.configure(lm=dspy.LM("openai/gpt-4o-mini"))
+        dspy.configure(lm=dspy.LM("openai/gpt-4o-mini"))
 
         class MySignature(dspy.Signature):
             question: str = dspy.InputField()
@@ -44,7 +44,7 @@ class History(pydantic.BaseModel):
         ```
         import dspy
 
-        dspy.settings.configure(lm=dspy.LM("openai/gpt-4o-mini"))
+        dspy.configure(lm=dspy.LM("openai/gpt-4o-mini"))
 
         class MySignature(dspy.Signature):
             question: str = dspy.InputField()
@@ -60,9 +60,9 @@ class History(pydantic.BaseModel):
 
     messages: list[dict[str, Any]]
 
-    model_config = {
-        "frozen": True,
-        "str_strip_whitespace": True,
-        "validate_assignment": True,
-        "extra": "forbid",
-    }
+    model_config = pydantic.ConfigDict(
+        frozen=True,
+        str_strip_whitespace=True,
+        validate_assignment=True,
+        extra="forbid",
+    )

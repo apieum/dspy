@@ -5,7 +5,7 @@ from collections.abc import Generator
 from pathlib import Path
 
 import cloudpickle
-import ujson
+import orjson
 
 from dspy.utils.saving import get_dependency_versions
 
@@ -153,13 +153,21 @@ class BaseModule:
 
         return new_instance
 
-    def dump_state(self):
-        return {name: param.dump_state() for name, param in self.named_parameters()}
+    def dump_state(self, json_mode=True):
+        return {name: param.dump_state(json_mode=json_mode) for name, param in self.named_parameters()}
 
-    def load_state(self, state):
-        for name, param in self.named_parameters():
-            param.load_state(state[name])
+    def load_state(self, state, *, allow_unsafe_lm_state=False):
+        from dspy.predict.predict import Predict
 
+        def _apply(module):
+            for name, param in module.named_parameters():
+                if isinstance(param, Predict):
+                    param.load_state(state[name], allow_unsafe_lm_state=allow_unsafe_lm_state)
+                else:
+                    param.load_state(state[name])
+
+        _apply(self.deepcopy())  # trial run raises before self is touched
+        _apply(self)
     def save(self, path, save_program=False, modules_to_serialize=None):
         """Save the module.
 
@@ -169,10 +177,10 @@ class BaseModule:
         - `save_program=True`: Save the whole module to a directory via cloudpickle, which contains both the state and
             architecture of the model.
 
-        If `save_program=True` and `modules_to_serialize` are provided, it will register those modules for serialization 
-        with cloudpickle's `register_pickle_by_value`. This causes cloudpickle to serialize the module by value rather 
-        than by reference, ensuring the module is fully preserved along with the saved program. This is useful 
-        when you have custom modules that need to be serialized alongside your program. If None, then no modules 
+        If `save_program=True` and `modules_to_serialize` are provided, it will register those modules for serialization
+        with cloudpickle's `register_pickle_by_value`. This causes cloudpickle to serialize the module by value rather
+        than by reference, ensuring the module is fully preserved along with the saved program. This is useful
+        when you have custom modules that need to be serialized alongside your program. If None, then no modules
         will be registered for serialization.
 
         We also save the dependency versions, so that the loaded model can check if there is a version mismatch on
@@ -202,7 +210,8 @@ class BaseModule:
             if not path.exists():
                 # Create the directory (and any parent directories)
                 path.mkdir(parents=True)
-
+            logger.warning("Loading untrusted .pkl files can run arbitrary code, which may be dangerous. To avoid "
+                          'this, prefer saving using json format using module.save("module.json").')
             try:
                 modules_to_serialize = modules_to_serialize or []
                 for module in modules_to_serialize:
@@ -215,17 +224,17 @@ class BaseModule:
                     f"Saving failed with error: {e}. Please remove the non-picklable attributes from your DSPy program, "
                     "or consider using state-only saving by setting `save_program=False`."
                 )
-            with open(path / "metadata.json", "w", encoding="utf-8") as f:
-                ujson.dump(metadata, f, indent=2, ensure_ascii=False)
+            with open(path / "metadata.json", "wb") as f:
+                f.write(orjson.dumps(metadata, option=orjson.OPT_INDENT_2 | orjson.OPT_APPEND_NEWLINE))
 
             return
 
-        state = self.dump_state()
-        state["metadata"] = metadata
         if path.suffix == ".json":
+            state = self.dump_state()
+            state["metadata"] = metadata
             try:
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(ujson.dumps(state, indent=2 , ensure_ascii=False))
+                with open(path, "wb") as f:
+                    f.write(orjson.dumps(state, option=orjson.OPT_INDENT_2 | orjson.OPT_APPEND_NEWLINE))
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to save state to {path} with error: {e}. Your DSPy program may contain non "
@@ -233,24 +242,37 @@ class BaseModule:
                     "with `.pkl`, or saving the whole program by setting `save_program=True`."
                 )
         elif path.suffix == ".pkl":
+            logger.warning("Loading untrusted .pkl files can run arbitrary code, which may be dangerous. To avoid "
+                          'this, prefer saving using json format using module.save("module.json").')
+            state = self.dump_state(json_mode=False)
+            state["metadata"] = metadata
             with open(path, "wb") as f:
                 cloudpickle.dump(state, f)
         else:
             raise ValueError(f"`path` must end with `.json` or `.pkl` when `save_program=False`, but received: {path}")
 
-    def load(self, path):
+    def load(self, path, allow_pickle=False, allow_unsafe_lm_state=False):
         """Load the saved module. You may also want to check out dspy.load, if you want to
         load an entire program, not just the state for an existing program.
 
         Args:
             path (str): Path to the saved state file, which should be a .json or a .pkl file
+            allow_pickle (bool): If True, allow loading .pkl files, which can run arbitrary code.
+                This is dangerous and should only be used if you are sure about the source of the file and in a trusted environment.
+            allow_unsafe_lm_state (bool): If True, preserves unsafe LM endpoint keys (e.g.,
+                `api_base`, `base_url`, and `model_list`) from loaded state and allows importing custom LM classes.
+                Enable only for trusted files.
         """
         path = Path(path)
 
         if path.suffix == ".json":
-            with open(path, encoding="utf-8") as f:
-                state = ujson.loads(f.read())
+            with open(path, "rb") as f:
+                state = orjson.loads(f.read())
         elif path.suffix == ".pkl":
+            if not allow_pickle:
+                raise ValueError("Loading .pkl files can run arbitrary code, which may be dangerous. Prefer "
+                                 "saving with .json files if possible. Set `allow_pickle=True` "
+                                 "if you are sure about the source of the file and in a trusted environment.")
             with open(path, "rb") as f:
                 state = cloudpickle.load(f)
         else:
@@ -267,4 +289,4 @@ class BaseModule:
                     "on the loaded model, please consider loading the model in the same environment as the "
                     "saving environment."
                 )
-        self.load_state(state)
+        self.load_state(state, allow_unsafe_lm_state=allow_unsafe_lm_state)

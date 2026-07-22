@@ -1,0 +1,121 @@
+"""Tests for the refactored Darwin strategy API."""
+
+import pytest
+
+import dspy
+from dspy.primitives.example import Example
+from dspy.primitives.module import Module
+from dspy.teleprompt.darwin import (
+    Budget,
+    Candidate,
+    Channel,
+    Cohort,
+    Darwin,
+    DarwinConfig,
+    Evaluator,
+    Failure,
+    FeedbackProvider,
+    FullTaskScores,
+    GEPAStrategy,
+    GEPATwoPhasesEval,
+    Generator,
+    LMCallsBudget,
+    ParetoFrontier,
+    ReflectivePromptMutation,
+    Selector,
+    Success,
+)
+from dspy.utils.dummies import DummyLM
+
+
+class SimpleQA(Module):
+    def __init__(self):
+        super().__init__()
+        self.answer = dspy.Predict("question -> answer")
+
+    def forward(self, question):
+        return self.answer(question=question)
+
+
+def simple_metric(example, prediction, trace=None):
+    expected = example.answer.lower() if hasattr(example, "answer") else ""
+    actual = prediction.answer.lower() if hasattr(prediction, "answer") else ""
+    return 1.0 if expected == actual else 0.0
+
+
+@pytest.fixture
+def simple_trainset():
+    return [
+        Example(question="What is 2+2?", answer="4").with_inputs("question"),
+        Example(question="What color is the sky?", answer="blue").with_inputs("question"),
+        Example(question="What is the capital of France?", answer="Paris").with_inputs("question"),
+        Example(question="How many legs does a cat have?", answer="4").with_inputs("question"),
+        Example(question="What planet do we live on?", answer="Earth").with_inputs("question"),
+    ]
+
+
+@pytest.fixture
+def dummy_lm():
+    return DummyLM([
+        {"answer": "4"},
+        {"answer": "blue"},
+        {"answer": "Paris"},
+        {"answer": "4"},
+        {"answer": "Earth"},
+        {"response": "Improved instruction: Answer questions accurately and concisely."},
+    ])
+
+
+def test_refactored_darwin_returns_compiled_program(simple_trainset, dummy_lm):
+    with dspy.context(lm=dummy_lm):
+        student = SimpleQA()
+        optimizer = Darwin(GEPAStrategy, DarwinConfig(max_lm_calls=2, minibatch_size=2))
+        compiled_module = optimizer.compile(student, trainset=simple_trainset[:1], devset=simple_trainset[1:])
+        result = optimizer.get_last_result()
+
+    assert isinstance(result, Success)
+    assert isinstance(compiled_module, Module)
+    assert compiled_module is not student
+    assert compiled_module._compiled is True
+
+
+def test_refactored_darwin_exposes_strategy_components():
+    optimizer = Darwin(GEPAStrategy, DarwinConfig(max_lm_calls=2))
+    assert isinstance(optimizer, Darwin)
+    assert hasattr(optimizer.strategy, "budget")
+    assert hasattr(optimizer.strategy, "selector")
+    assert hasattr(optimizer.strategy, "generator")
+    assert hasattr(optimizer.strategy, "evaluator")
+
+
+def test_darwin_algorithm_phases(simple_trainset, dummy_lm):
+    """The Darwin strategy should execute its optimization phases."""
+    with dspy.context(lm=dummy_lm):
+        student = SimpleQA()
+        optimizer = Darwin(GEPAStrategy, DarwinConfig(max_lm_calls=2, minibatch_size=2))
+        compiled_module = optimizer.compile(
+            student,
+            trainset=simple_trainset[:1],
+            devset=simple_trainset[1:],
+        )
+        result = optimizer.get_last_result()
+
+    assert isinstance(result, Success)
+    assert compiled_module is not None
+    assert compiled_module._compiled is True
+    assert optimizer.strategy.current_generation >= 0
+
+
+def test_darwin_factory_configuration_creates_optimizer():
+    """A Darwin configuration should construct a usable strategy instance."""
+    optimizer = Darwin(
+        GEPAStrategy,
+        DarwinConfig(max_lm_calls=2, patience=3, minibatch_size=2),
+    )
+
+    assert isinstance(optimizer, Darwin)
+    assert hasattr(optimizer, "strategy")
+    assert hasattr(optimizer.strategy, "budget")
+    assert hasattr(optimizer.strategy, "selector")
+    assert hasattr(optimizer.strategy, "generator")
+    assert hasattr(optimizer.strategy, "evaluator")

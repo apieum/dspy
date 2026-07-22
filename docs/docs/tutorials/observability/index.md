@@ -147,7 +147,7 @@ Click on the most recent trace to view its detailed breakdown:
 ![MLflow Trace View](./mlflow_trace_view.png)
 
 Here, you can examine the input and output of every step in your workflow. For example, the screenshot above shows the `retrieve` function's input and output. By inspecting the retriever's output, you can see that it returned outdated information, which is not sufficient to determine which team Shohei Ohtani plays for in June 2025. You can also inspect
-other steps, e.g, anguage model's input, output, and configuration.
+other steps, e.g, language model's input, output, and configuration.
 
 To address the issue of outdated information, you can replace the `retrieve` function with a web search tool powered by [Tavily search](https://www.tavily.com/).
 
@@ -188,7 +188,7 @@ the [MLflow Tracing Guide](https://mlflow.org/docs/3.0.0rc0/tracing).
 
 
 
-!!! info Learn more about MLflow
+!!! info "Learn more about MLflow"
 
     MLflow is an end-to-end LLMOps platform that offers extensive features like experiment tracking, evaluation, and deployment. To learn more about DSPy and MLflow integration, visit [this tutorial](../deployment/index.md#deploying-with-mlflow).
 
@@ -242,6 +242,6 @@ dspy.configure(callbacks=[AgentLoggingCallback()])
 ...
 ```
 
-!!! info Handling Inputs and Outputs in Callbacks
+!!! info "Handling Inputs and Outputs in Callbacks"
 
     Be cautious when working with input or output data in callbacks. Mutating them in-place can modify the original data passed to the program, potentially leading to unexpected behavior. To avoid this, it's strongly recommended to create a copy of the data before performing any operations that may alter it.

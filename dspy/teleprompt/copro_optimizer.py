@@ -1,4 +1,5 @@
 import logging
+import statistics
 from collections import defaultdict
 
 import dspy
@@ -20,7 +21,7 @@ eval_score = evaluate(compiled_prompt_opt, devset=evalset[:EVAL_NUM], **kwargs)
 
 Note that this teleprompter takes in the following parameters:
 
-* prompt_model: The model used for prompt generation. When unspecified, defaults to the model set in settings (ie. dspy.settings.configure(lm=task_model)).
+* prompt_model: The model used for prompt generation. When unspecified, defaults to the model set in settings (ie. dspy.configure(lm=task_model)).
 * metric: The task metric used for optimization.
 * breadth: The number of new prompts to generate at each iteration. Default=10.
 * depth: The number of times we should ask our prompt model to generate new prompts, with the history of the past prompts as input. Default=3.
@@ -142,9 +143,6 @@ class COPRO(Teleprompter):
             id(p): {"depth": [], "max": [], "average": [], "min": [], "std": []} for p in module.predictors()
         }
 
-        if self.track_stats:
-            import numpy as np
-
         candidates = {}
         evaluated_candidates = defaultdict(dict)
 
@@ -156,7 +154,7 @@ class COPRO(Teleprompter):
             basic_instruction = self._get_signature(predictor).instructions
             basic_prefix = self._get_signature(predictor).fields[last_key].json_schema_extra["prefix"]
             if self.prompt_model:
-                with dspy.settings.context(lm=self.prompt_model):
+                with dspy.context(lm=self.prompt_model):
                     instruct = dspy.Predict(
                         BasicGenerateInstruction,
                         n=self.breadth - 1,
@@ -254,7 +252,7 @@ class COPRO(Teleprompter):
                     results_latest[id(p_old)]["max"].append(max(latest_scores))
                     results_latest[id(p_old)]["average"].append(sum(latest_scores) / len(latest_scores))
                     results_latest[id(p_old)]["min"].append(min(latest_scores))
-                    results_latest[id(p_old)]["std"].append(np.std(latest_scores))
+                    results_latest[id(p_old)]["std"].append(statistics.pstdev(latest_scores))
 
                 # Now that we've evaluated the candidates, set this predictor to the best performing version
                 # to ensure the next round of scores reflect the best possible version
@@ -296,7 +294,7 @@ class COPRO(Teleprompter):
                     results_best[id(p_base)]["max"].append(max(scores))
                     results_best[id(p_base)]["average"].append(sum(scores) / len(scores))
                     results_best[id(p_base)]["min"].append(min(scores))
-                    results_best[id(p_base)]["std"].append(np.std(scores))
+                    results_best[id(p_base)]["std"].append(statistics.pstdev(scores))
 
                 for i in range(shortest_len - 1, -1, -1):
                     # breakpoint()
@@ -306,7 +304,7 @@ class COPRO(Teleprompter):
 
                 # Generate next batch of potential prompts to optimize, with previous attempts as input
                 if self.prompt_model:
-                    with dspy.settings.context(lm=self.prompt_model):
+                    with dspy.context(lm=self.prompt_model):
                         instr = dspy.Predict(
                             GenerateInstructionGivenAttempts,
                             n=self.breadth,
@@ -341,7 +339,7 @@ class COPRO(Teleprompter):
                 results_best[id(predictor)]["max"].append(max(scores))
                 results_best[id(predictor)]["average"].append(sum(scores) / len(scores))
                 results_best[id(predictor)]["min"].append(min(scores))
-                results_best[id(predictor)]["std"].append(np.std(scores))
+                results_best[id(predictor)]["std"].append(statistics.pstdev(scores))
 
         candidates.sort(key=lambda x: x["score"], reverse=True)
 

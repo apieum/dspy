@@ -65,7 +65,7 @@ def known_failing_models(models: list[str]):
 @contextmanager
 def judge_dspy_configuration(**extra_judge_config):
     """
-    Context manager to temporarily configure the DSPy to use the the judge model
+    Context manager to temporarily configure DSPy to use the judge model
     from `reliability_conf.yaml`.
 
     Args:
@@ -80,7 +80,7 @@ def judge_dspy_configuration(**extra_judge_config):
     if judge_params is None:
         raise ValueError(f"No LiteLLM configuration found for judge model: {JUDGE_MODEL_NAME}")
 
-    with dspy.settings.context(lm=dspy.LM(**judge_params, **extra_judge_config), adapter=adapter):
+    with dspy.context(lm=dspy.LM(**judge_params, **extra_judge_config), adapter=adapter):
         yield
 
 

@@ -2,10 +2,10 @@ import re
 import textwrap
 from typing import Any, NamedTuple
 
-from litellm import ContextWindowExceededError
 from pydantic.fields import FieldInfo
 
 from dspy.adapters.base import Adapter
+from dspy.adapters.types.tool import ToolCalls
 from dspy.adapters.utils import (
     format_field_value,
     get_annotation_name,
@@ -13,9 +13,10 @@ from dspy.adapters.utils import (
     parse_value,
     translate_field_type,
 )
-from dspy.clients.lm import LM
+from dspy.clients.base_lm import BaseLM
 from dspy.signatures.signature import Signature
-from dspy.utils.exceptions import AdapterParseError
+from dspy.utils.callback import BaseCallback
+from dspy.utils.exceptions import AdapterParseError, LMError
 
 field_header_pattern = re.compile(r"\[\[ ## (\w+) ## \]\]")
 
@@ -26,9 +27,55 @@ class FieldInfoWithName(NamedTuple):
 
 
 class ChatAdapter(Adapter):
+    """Default Adapter for most language models.
+
+    The ChatAdapter formats DSPy signatures into a format compatible with most language models.
+    It uses delimiter patterns like `[[ ## field_name ## ]]` to clearly separate input and output fields in
+    the message content.
+
+    Key features:
+        - Structures inputs and outputs using field header markers for clear field delineation.
+        - Provides automatic fallback to JSONAdapter if the chat format fails.
+    """
+
+    def __init__(
+        self,
+        callbacks: list[BaseCallback] | None = None,
+        use_native_function_calling: bool = False,
+        native_response_types: list[type[type]] | None = None,
+        use_json_adapter_fallback: bool = True,
+        parallel_tool_calls: bool | None = None,
+    ):
+        """
+        Args:
+            callbacks: List of callback functions to execute during adapter methods.
+            use_native_function_calling: Whether to enable native function calling capabilities.
+            native_response_types: List of output field types handled by native LM features.
+            use_json_adapter_fallback: Whether to automatically fallback to JSONAdapter if the ChatAdapter fails.
+                If True, when an error occurs (except ContextWindowExceededError), the adapter will retry using
+                JSONAdapter. Defaults to True.
+            parallel_tool_calls: Whether to request provider-side parallel tool-call generation when native function
+                calling is active. If None, the adapter does not set the provider option.
+        """
+        super().__init__(
+            callbacks=callbacks,
+            use_native_function_calling=use_native_function_calling,
+            parallel_tool_calls=parallel_tool_calls,
+            native_response_types=native_response_types,
+        )
+        self.use_json_adapter_fallback = use_json_adapter_fallback
+
+    def _make_json_adapter_fallback(self):
+        from dspy.adapters.json_adapter import JSONAdapter
+
+        return JSONAdapter(
+            use_native_function_calling=self.use_native_function_calling,
+            parallel_tool_calls=self.parallel_tool_calls,
+        )
+
     def __call__(
         self,
-        lm: LM,
+        lm: BaseLM,
         lm_kwargs: dict[str, Any],
         signature: type[Signature],
         demos: list[dict[str, Any]],
@@ -40,15 +87,15 @@ class ChatAdapter(Adapter):
             # fallback to JSONAdapter
             from dspy.adapters.json_adapter import JSONAdapter
 
-            if isinstance(e, ContextWindowExceededError) or isinstance(self, JSONAdapter):
-                # On context window exceeded error or already using JSONAdapter, we don't want to retry with a different
-                # adapter.
-                raise e
-            return JSONAdapter()(lm, lm_kwargs, signature, demos, inputs)
+            if isinstance(e, LMError) or isinstance(self, JSONAdapter) or not self.use_json_adapter_fallback:
+                # On LM errors, already using JSONAdapter, or use_json_adapter_fallback is False, we don't want to
+                # retry with a different adapter. Raise the original error instead of the fallback error.
+                raise
+            return self._make_json_adapter_fallback()(lm, lm_kwargs, signature, demos, inputs)
 
     async def acall(
         self,
-        lm: LM,
+        lm: BaseLM,
         lm_kwargs: dict[str, Any],
         signature: type[Signature],
         demos: list[dict[str, Any]],
@@ -60,11 +107,11 @@ class ChatAdapter(Adapter):
             # fallback to JSONAdapter
             from dspy.adapters.json_adapter import JSONAdapter
 
-            if isinstance(e, ContextWindowExceededError) or isinstance(self, JSONAdapter):
-                # On context window exceeded error or already using JSONAdapter, we don't want to retry with a different
-                # adapter.
-                raise e
-            return await JSONAdapter().acall(lm, lm_kwargs, signature, demos, inputs)
+            if isinstance(e, LMError) or isinstance(self, JSONAdapter) or not self.use_json_adapter_fallback:
+                # On LM errors, already using JSONAdapter, or use_json_adapter_fallback is False, we don't want to
+                # retry with a different adapter. Raise the original error instead of the fallback error.
+                raise
+            return await self._make_json_adapter_fallback().acall(lm, lm_kwargs, signature, demos, inputs)
 
     def format_field_description(self, signature: type[Signature]) -> str:
         return (
@@ -141,6 +188,8 @@ class ChatAdapter(Adapter):
         """
 
         def type_info(v):
+            if v.annotation == ToolCalls:
+                return ' (must be a JSON object like {"tool_calls": [{"name": "...", "args": {...}}]})'
             if v.annotation is not str:
                 return f" (must be formatted as a valid Python {get_annotation_name(v.annotation)})"
             else:
@@ -207,7 +256,7 @@ class ChatAdapter(Adapter):
         """
         Formats the values of the specified fields according to the field's DSPy type (input or output),
         annotation (e.g. str, int, etc.), and the type of the value itself. Joins the formatted values
-        into a single string, which is is a multiline string if there are multiple fields.
+        into a single string, which is a multiline string if there are multiple fields.
 
         Args:
             fields_with_values: A dictionary mapping information about a field to its corresponding

@@ -1,5 +1,12 @@
+import json
+import tempfile
+from pathlib import Path
+
+import pytest
+
 import dspy
-from dspy.primitives.module import Module, set_attribute_by_name  # Adjust the import based on your file structure
+from dspy.primitives.example import Example
+from dspy.primitives.module import Module, set_attribute_by_name
 from dspy.utils import DummyLM
 
 
@@ -23,7 +30,7 @@ def test_named_predictors():
     module = HopModule()
     named_preds = module.named_predictors()
     assert len(named_preds) == 2, "Should identify correct number of Predict instances"
-    names, preds = zip(*named_preds, strict=False)
+    names, _preds = zip(*named_preds, strict=False)
     assert "predict1" in names and "predict2" in names, "Named predictors should include 'predict1' and 'predict2'"
 
 
@@ -36,7 +43,7 @@ def test_predictors():
 
 def test_forward():
     program = HopModule()
-    dspy.settings.configure(
+    dspy.configure(
         lm=DummyLM(
             {
                 "What is 1+1?": {"query": "let me check"},
@@ -114,9 +121,9 @@ def test_complex_module_traversal():
     }
     found_names = {name for name, _ in root.named_sub_modules()}
 
-    assert (
-        found_names == expected_names
-    ), f"Missing or extra modules found. Missing: {expected_names-found_names}, Extra: {found_names-expected_names}"
+    assert found_names == expected_names, (
+        f"Missing or extra modules found. Missing: {expected_names - found_names}, Extra: {found_names - expected_names}"
+    )
 
 
 def test_complex_module_traversal_with_same_module():
@@ -135,9 +142,9 @@ def test_complex_module_traversal_with_same_module():
     }
     found_names = {name for name, _ in root.named_sub_modules()}
 
-    assert (
-        found_names == expected_names
-    ), f"Missing or extra modules found. Missing: {expected_names-found_names}, Extra: {found_names-expected_names}"
+    assert found_names == expected_names, (
+        f"Missing or extra modules found. Missing: {expected_names - found_names}, Extra: {found_names - expected_names}"
+    )
 
 
 def test_complex_module_set_attribute_by_name():
@@ -174,3 +181,65 @@ def test_named_parameters_duplicate_references():
     # Only testing for whether exceptions are thrown or not
     # As Module.named_parameters() is recursive, this is mainly for catching infinite recursion
     module.named_parameters()
+
+
+def test_load_dspy_program_cross_version():
+    """
+    Test backward compatibility for loading a saved DSPy program.
+
+    This test verifies that DSPy can load a program saved in version 3.0.1, ensuring compatibility with older versions.
+    The saved state is located in 'test/primitives/resources/saved_program.json' and represents an optimized
+    `dspy.ReAct` program.
+    """
+    path = Path(__file__).parent / "resources" / "saved_program.json"
+    loaded_react = dspy.ReAct("question->answer", tools=[])
+    loaded_react.load(path)
+    assert (
+        "Imagine you are a detective racing against time to solve a high-profile"
+        in loaded_react.react.signature.instructions
+    )
+    assert "Given the very verbose fields `question`" in loaded_react.extract.predict.signature.instructions
+
+    assert len(loaded_react.react.demos) == 2
+    assert len(loaded_react.extract.predict.demos) == 2
+
+def test_load_state_is_transactional():
+    """
+    Regression test for https://github.com/stanfordnlp/dspy/issues/9589
+
+    load_state must be all-or-nothing. If it fails mid-load (missing key
+    or malformed value), the module must be completely unchanged.
+    """
+
+    class Sig(dspy.Signature):
+        question: str = dspy.InputField()
+        answer: str = dspy.OutputField()
+
+    class Prog(dspy.Module):
+        def __init__(self):
+            super().__init__()
+            self.a = dspy.ChainOfThought(Sig)
+            self.b = dspy.ChainOfThought(Sig)
+
+    source = Prog()
+    sentinel = Example(question="q1", answer="a1").with_inputs("question")
+    source.a.predict.demos = [sentinel]
+    source.b.predict.demos = [sentinel]
+
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "state.json"
+        source.save(str(path), save_program=False)
+
+        raw = json.loads(path.read_text())
+        corrupted = {k: v for k, v in raw.items() if "b." not in k}
+        path.write_text(json.dumps(corrupted))
+
+        template = Prog()
+        assert template.a.predict.demos == []
+
+        with pytest.raises(KeyError):
+            template.load(str(path))
+
+        assert template.a.predict.demos == [], (
+            "load_state partially mutated module before failing"
+        )
