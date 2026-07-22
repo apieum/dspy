@@ -32,6 +32,8 @@ class DarwinConfig:
 
     # Optional strategic choices
     crossover: Optional[Type['Generator']] = SystemAwareMerge  # Optional crossover generator
+    use_merge: bool = False
+    max_merge_invocations: int = 5
     enhanced_feedback: Optional[Assessor] = F1Score()  # Optional feedback-generating metric
     acceptance_criterion: Any = StrictImprovementAcceptance
     proposal_selection: Any = AllImprovements
@@ -85,3 +87,5 @@ class DarwinConfig:
             raise TypeError("batch_sampler must provide a sample(data, count, rng=...) method")
         if self.archive_capacity <= 0:
             raise ValueError("archive_capacity must be positive")
+        if self.max_merge_invocations < 0:
+            raise ValueError("max_merge_invocations must be non-negative")

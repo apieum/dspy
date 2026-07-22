@@ -61,11 +61,14 @@ class GEPAStrategy(BaseStrategy[Result]):
         self._budget = None
         self._selector = None
         self._generator = None
+        self._crossover = None
         self._evaluator = None
         self.current_generation = 0
         self.best_candidate = None
         self.generations_without_improvement = 0
         self.history = []
+        self._merge_due = False
+        self._merge_attempts = 0
         self.rng = random.Random(self.config.seed)
         self.batch_sampler = self.config.batch_sampler or EpochShuffledBatchSampler(
             self.config.mutation_config.minibatch_size,
@@ -275,6 +278,16 @@ class GEPAStrategy(BaseStrategy[Result]):
             self.algorithm_state = "generate"
             return
 
+        if self.config.use_merge and self._merge_attempts < self.config.max_merge_invocations:
+            # Official GEPA schedules a merge opportunity only after a
+            # reflective mutation was accepted. The seed candidate and merge
+            # children do not schedule another merge opportunity.
+            self._merge_due = any(
+                candidate.parents
+                and candidate.creation_metadata.get("merge_type") != "system_aware"
+                for candidate in self.current_survivors
+            )
+
         # Promote survivors to parents for next generation
         self.current_parents = self.selector.promote(self.current_survivors)
         if self._iteration_started:
@@ -298,15 +311,27 @@ class GEPAStrategy(BaseStrategy[Result]):
         self._notify("start_iteration", self.current_generation, self.current_parents, self.budget)
         self._iteration_started = True
 
-        # Generate new candidates
-        self.current_newborns = self.generator.generate_batch(
-            self.current_parents,
-            self.config.proposals_per_generation,
-            self.budget,
-            sampling_strategy=self.config.sampling_strategy or SingleMutationSampling(),
-            batch_sampler=self.batch_sampler,
-            rng=self.rng,
-        )
+        # Official GEPA gives a merge one opportunity after a successful
+        # mutation, then falls back to reflective mutation if no merge is
+        # possible. This keeps merging opt-in while preserving the separate
+        # GEPAAdaptive strategy for merge-anytime experiments.
+        self.current_newborns = None
+        if self._merge_due:
+            self._merge_due = False
+            self._merge_attempts += 1
+            merged = self.crossover_generator.generate(self.current_parents, self.budget)
+            if not merged.is_empty():
+                self.current_newborns = merged
+
+        if self.current_newborns is None:
+            self.current_newborns = self.generator.generate_batch(
+                self.current_parents,
+                self.config.proposals_per_generation,
+                self.budget,
+                sampling_strategy=self.config.sampling_strategy or SingleMutationSampling(),
+                batch_sampler=self.batch_sampler,
+                rng=self.rng,
+            )
 
         if self.current_newborns.is_empty() and self.budget <= 0:
             self._notify("budget_exhausted", self.budget)

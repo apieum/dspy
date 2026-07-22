@@ -42,6 +42,7 @@ class BaseStrategy(ABC, Generic[R]):
         self._budget: Optional['Budget'] = None
         self._selector: Optional['Selector'] = None
         self._generator: Optional['Generator'] = None
+        self._crossover: Optional['Generator'] = None
         self._evaluator: Optional['Evaluator'] = None
 
         # Evolutionary state
@@ -128,6 +129,15 @@ class BaseStrategy(ABC, Generic[R]):
         if self._generator is None:
             self._generator = self._instantiate_generator(self.config.mutation)
         return self._generator
+
+    @property
+    def crossover_generator(self) -> 'Generator':
+        """Get the optional merge generator used by a strategy."""
+        if self._crossover is None:
+            if self.config.crossover is None:
+                raise RuntimeError("No crossover generator is configured")
+            self._crossover = self._instantiate_generator(self.config.crossover)
+        return self._crossover
 
     @property
     def evaluator(self) -> 'Evaluator':
