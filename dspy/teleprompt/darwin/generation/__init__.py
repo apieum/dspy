@@ -2,6 +2,13 @@
 
 from ..data.cohort import Cohort
 from .generator import Generator
+from .sampling import (
+    SamplingStrategy,
+    SingleMutationSampling,
+    SameParentSampling,
+    IndependentSampling,
+    PxNSampling,
+)
 from .system_aware_merge import SystemAwareMerge
 
 # DSPy-native implementation (reuses DSPy's built-in systems)
@@ -25,6 +32,11 @@ __all__ = [
     # Core components
     'Cohort',
     'Generator',
+    'SamplingStrategy',
+    'SingleMutationSampling',
+    'SameParentSampling',
+    'IndependentSampling',
+    'PxNSampling',
     'ReflectivePromptMutation',
     'FeedbackProvider',
     'SystemAwareMerge',

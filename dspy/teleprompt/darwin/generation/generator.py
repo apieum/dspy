@@ -34,7 +34,15 @@ class Generator(Channel):
         """
         ...
 
-    def generate_batch(self, parents: "Parents", count: int, budget=None) -> "NewBorns":
+    def generate_batch(
+        self,
+        parents: "Parents",
+        count: int,
+        budget=None,
+        *,
+        sampling_strategy=None,
+        rng=None,
+    ) -> "NewBorns":
         """Generate a batch of independent proposals from the same parents.
 
         GEPA evaluates proposal batches before promotion. Keeping batching in
@@ -46,9 +54,14 @@ class Generator(Channel):
             raise ValueError("count must be positive")
         from ..data.cohort import NewBorns
 
+        parent_tasks = (
+            sampling_strategy.sample(parents, count, rng=rng)
+            if sampling_strategy is not None
+            else [parents] * count
+        )
         proposals = []
-        for _ in range(count):
-            proposals.extend(self.generate(parents, budget).to_list())
+        for task_parents in parent_tasks:
+            proposals.extend(self.generate(task_parents, budget).to_list())
         return NewBorns(*proposals, iteration=parents.iteration)
 
     def start_compilation(

@@ -12,7 +12,14 @@ from .data.cohort import Cohort
 # Protocol interfaces
 from .budget import Budget
 from .selection import Selector
-from .generation import Generator
+from .generation import (
+    Generator,
+    SamplingStrategy,
+    SingleMutationSampling,
+    SameParentSampling,
+    IndependentSampling,
+    PxNSampling,
+)
 from .evaluation import Evaluator
 
 # Business step implementations
@@ -83,6 +90,11 @@ __all__ = [
     'Budget',
     'Selector',
     'Generator',
+    'SamplingStrategy',
+    'SingleMutationSampling',
+    'SameParentSampling',
+    'IndependentSampling',
+    'PxNSampling',
     'Evaluator',
 
     # Business step implementations

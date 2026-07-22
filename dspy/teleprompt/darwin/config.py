@@ -6,6 +6,7 @@ from typing import Type, Optional, Tuple, Any
 from .budget import Budget, LMCallsBudget
 from .selection import Selector, ParetoFrontier
 from .generation import Generator, SystemAwareMerge, ReflectivePromptMutation
+from .generation import SamplingStrategy, SingleMutationSampling
 from .generation.config import ReflectiveMutationConfig
 from .evaluation import Evaluator, GEPATwoPhasesEval
 from .evaluation.metrics import Assessor, F1Score
@@ -40,6 +41,7 @@ class DarwinConfig:
     candidate_selection_strategy: str = "pareto"
     frontier_type: str = "instance"
     proposals_per_generation: int = 1
+    sampling_strategy: Optional[SamplingStrategy] = None
     mutation_config: ReflectiveMutationConfig = None
 
     # System parameters we actually have
@@ -76,5 +78,7 @@ class DarwinConfig:
             )
         if self.proposals_per_generation <= 0:
             raise ValueError("proposals_per_generation must be positive")
+        if self.sampling_strategy is not None and not callable(getattr(self.sampling_strategy, "sample", None)):
+            raise TypeError("sampling_strategy must provide a sample(parents, count, rng=...) method")
         if self.archive_capacity <= 0:
             raise ValueError("archive_capacity must be positive")
