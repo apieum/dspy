@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
 
 import dspy
+from dspy.teleprompt.utils import get_signature
 from .base import BaseStrategy
 from ..data.candidate import Candidate
 from ..data.cohort import NewBorns, Survivors, Parents
@@ -143,6 +144,15 @@ class GEPAStrategy(BaseStrategy[Result]):
                     "generation": candidate.generation_number,
                     "score": candidate.average_score(),
                     "parents": [id(parent) for parent in candidate.parents],
+                    "instructions": [
+                        getattr(get_signature(predictor), "instructions", "")
+                        for predictor in candidate.module.predictors()
+                    ],
+                    "creation_metadata": {
+                        str(key): value
+                        for key, value in candidate.creation_metadata.items()
+                        if isinstance(value, (str, int, float, bool, type(None)))
+                    },
                 })
         remaining = self.budget.get_remaining()
         return OptimizationCheckpoint(

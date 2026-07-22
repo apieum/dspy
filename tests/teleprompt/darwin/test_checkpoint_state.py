@@ -23,3 +23,5 @@ def test_checkpoint_manifest_is_written_and_json_safe(tmp_path):
     assert checkpoint.completed is True
     assert checkpoint.history
     assert "calls" in checkpoint.budget
+    assert checkpoint.candidates
+    assert "instructions" in checkpoint.candidates[0]
