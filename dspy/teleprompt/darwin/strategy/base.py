@@ -147,6 +147,11 @@ class BaseStrategy(ABC, Generic[R]):
                     if isinstance(self.config.proposal_selection, type)
                     else self.config.proposal_selection
                 ),
+                validation_policy=(
+                    self.config.validation_policy()
+                    if isinstance(self.config.validation_policy, type)
+                    else self.config.validation_policy
+                ),
             )
             self._evaluator.start_compilation(
                 getattr(self, "student", None),

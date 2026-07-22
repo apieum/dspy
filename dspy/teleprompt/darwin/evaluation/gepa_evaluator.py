@@ -15,6 +15,7 @@ from ..budget import Budget
 from .acceptance import StrictImprovementAcceptance
 from .cache import EvaluationCache
 from .proposal_selection import AllImprovements
+from .policy import FullEvaluationPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +152,7 @@ class FullTaskScores(Evaluator):
     """
 
     def __init__(self, assessor: Assessor, validation_data: List[dspy.Example] = None,
-                 evaluation_cache=None, **kwargs):
+                 evaluation_cache=None, validation_policy=None, **kwargs):
         """
         Args:
             assessor: The assessor to evaluate predictions against examples.
@@ -161,6 +162,8 @@ class FullTaskScores(Evaluator):
         self.assessor = assessor
         self.validation_data = validation_data or []
         self.evaluation_cache = evaluation_cache or EvaluationCache()
+        self.validation_policy = validation_policy or FullEvaluationPolicy()
+        self._iteration = 0
         self.verbose = False
 
     def start_compilation(self, student: dspy.Module, dataset_manager=None, verbose: bool=False) -> None:
@@ -182,17 +185,20 @@ class FullTaskScores(Evaluator):
 
         evaluated_candidates = []
         for candidate in new_borns.candidates:
+            eval_data = self.validation_policy.get_eval_batch(
+                self.validation_data, iteration=self._iteration, candidate=candidate
+            )
             # Always score the seed program so a constrained run still has a
             # valid result. Subsequent proposals must fit the evaluation
             # domain budget before they are evaluated.
             if evaluated_candidates or candidate.parents:
                 budget_exhausted = hasattr(budget, "can_spend") and not budget.can_spend(
-                "evaluation", len(self.validation_data)
+                "evaluation", len(eval_data)
                 )
                 if budget_exhausted:
                     break
             # Comprehensive evaluation on complete validation set - now returns List[Metric] directly
-            scores = self._evaluate(candidate, self.validation_data)
+            scores = self._evaluate(candidate, eval_data)
 
             # Report final candidate performance
             avg_score = candidate.average_score()
@@ -202,12 +208,13 @@ class FullTaskScores(Evaluator):
 
             budget.spend_on_evaluation(
                 candidate.module,
-                {"phase": "full_evaluation", "examples": len(self.validation_data)}
+                {"phase": "full_evaluation", "examples": len(eval_data)}
             )
             evaluated_candidates.append(candidate)
 
         self.publish('comprehensive_evaluation_complete',
                     {'candidates_count': len(new_borns.candidates), 'tasks_count': len(self.validation_data)})
+        self._iteration += 1
         # All candidates that get a full evaluation are considered "survivors" of this stage.
         return Survivors(*evaluated_candidates, iteration=new_borns.iteration)
 

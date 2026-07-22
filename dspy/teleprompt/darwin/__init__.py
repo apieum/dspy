@@ -25,6 +25,7 @@ from .evaluation.gepa_evaluator import FullTaskScores, ParentFastCompare, GEPATw
 from .evaluation.acceptance import StrictImprovementAcceptance, ImprovementOrEqualAcceptance
 from .evaluation.cache import EvaluationCache
 from .evaluation.proposal_selection import AllImprovements, BestImprovement, TopKImprovements
+from .evaluation.policy import EvaluationPolicy, FullEvaluationPolicy, MinibatchEvaluationPolicy
 from .evaluation.trace_collector import EnhancedTraceCollector
 from .evaluation.feedback import FeedbackResult, EvaluationTrace, ModuleFeedback
 from .evaluation.metrics import (
@@ -98,6 +99,9 @@ __all__ = [
     'AllImprovements',
     'BestImprovement',
     'TopKImprovements',
+    'EvaluationPolicy',
+    'FullEvaluationPolicy',
+    'MinibatchEvaluationPolicy',
     'GEPATwoPhasesEval',
     'EnhancedTraceCollector',
     'FeedbackResult',

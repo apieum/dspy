@@ -6,6 +6,7 @@ from .gepa_evaluator import GEPATwoPhasesEval, FullTaskScores, ParentFastCompare
 from .acceptance import StrictImprovementAcceptance, ImprovementOrEqualAcceptance
 from .cache import EvaluationCache
 from .proposal_selection import AllImprovements, BestImprovement, TopKImprovements
+from .policy import EvaluationPolicy, FullEvaluationPolicy, MinibatchEvaluationPolicy
 from .metrics import (
     Assessor,
     Metric,
@@ -33,6 +34,9 @@ __all__ = [
     'AllImprovements',
     'BestImprovement',
     'TopKImprovements',
+    'EvaluationPolicy',
+    'FullEvaluationPolicy',
+    'MinibatchEvaluationPolicy',
     'Assessor',
     'Metric',
     'BaseAssessor',
