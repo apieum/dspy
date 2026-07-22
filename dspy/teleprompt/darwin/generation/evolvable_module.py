@@ -92,7 +92,12 @@ class EvolvableModule(Module):
                 diagnostics.append(f"ERROR: {str(e)}")
                 traces.append([])
         
-        return FeedbackResult(scores=scores, diagnostics=diagnostics, traces=traces)
+        return FeedbackResult(
+            scores=scores,
+            diagnostics=diagnostics,
+            traces=traces,
+            examples=list(examples.values()),
+        )
     
     def evolve(self, 
                feedback: FeedbackResult, 

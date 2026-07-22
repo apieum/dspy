@@ -13,6 +13,22 @@ from dspy.dsp.utils.settings import settings
 from dspy.utils.parallelizer import ParallelExecutor
 
 
+def example_id(example: Example) -> str:
+    """Return a stable task ID for Pareto comparisons.
+
+    Some DSPy versions do not attach ``dspy_uuid`` to ``Example`` instances.
+    Falling back to a new UUID at metric construction time would make the same
+    task look different on every evaluation and would corrupt GEPA's
+    per-example Pareto frontier.  Object identity is stable for the lifetime
+    of a compilation and is the correct fallback for those examples.
+    """
+    return str(
+        getattr(example, "dspy_uuid", None)
+        or getattr(example, "uuid", None)
+        or id(example)
+    )
+
+
 @dataclass
 class Candidate:
     """A candidate solution that encapsulates a DSPy module.
@@ -58,7 +74,7 @@ class Candidate:
             trace['prediction'] = prediction
             return assessor(task, prediction, trace)
         except Exception as e:
-            return Metric(0.0, "", errors={"evaluate_on_task":e}, trace=trace)  # Failed evaluation
+            return Metric(0.0, example_id(task), errors={"evaluate_on_task":e}, trace=trace)  # Failed evaluation
 
     def evaluate_on_batch(self, examples: List[Example], assessor: "Assessor",
         num_threads=None,
@@ -108,9 +124,9 @@ class Candidate:
                 if not isinstance(result, Metric):
                     if isinstance(result, tuple) and len(result) == 2:
                         value, feedback = result
-                        result = Metric(value, id=getattr(example, "dspy_uuid", ""), feedback=str(feedback), trace=trace)
+                        result = Metric(value, id=example_id(example), feedback=str(feedback), trace=trace)
                     else:
-                        result = Metric(result, id=getattr(example, "dspy_uuid", ""), trace=trace)
+                        result = Metric(result, id=example_id(example), trace=trace)
 
                 # Publish evaluation event to observers via channel
                 channel.publish('example_evaluated', {

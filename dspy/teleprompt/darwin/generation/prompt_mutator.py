@@ -117,6 +117,15 @@ class ReflectivePromptMutator(PromptMutator):
 
         formatted_parts = []
         for i, (score, diagnostic) in enumerate(zip(feedback.scores, feedback.diagnostics)):
+            example = feedback.examples[i] if i < len(feedback.examples) else None
+            expected = ""
+            if example is not None:
+                expected_outputs = {
+                    key: value
+                    for key, value in example.items()
+                    if key not in example.inputs()
+                }
+                expected = f"\nExpected: {expected_outputs}"
             # Extract trace information using DSPy's standard trace format
             trace_info = "No trace"
             if (feedback.traces and i < len(feedback.traces) and
@@ -161,7 +170,7 @@ class ReflectivePromptMutator(PromptMutator):
 
             example_text = f"""Example {i+1}:
 Score: {score:.2f}
-Feedback: {diagnostic}
+Feedback: {diagnostic}{expected}
 Execution: {trace_info}"""
             formatted_parts.append(example_text)
 
@@ -281,7 +290,6 @@ Execution: {trace_info}"""
 
         print("=" * 80)
         print()
-
 
 
 

@@ -37,6 +37,7 @@ class FeedbackResult:
     traces: List[List]  # DSPy traces: List of (predictor, inputs, outputs) tuples
     diagnostics: List[str]  # Textual diagnostic feedback
     scores: List[float]  # Scalar scores for each example
+    examples: List[Any] = None  # Labeled examples used for the feedback
     # Enhanced Feedback Function μf fields
     evaluation_traces: List[EvaluationTrace] = None  # Rich evaluation traces
     module_feedback: List[ModuleFeedback] = None  # Module-level feedback
@@ -46,6 +47,8 @@ class FeedbackResult:
     def __post_init__(self):
         if self.evaluation_traces is None:
             self.evaluation_traces = []
+        if self.examples is None:
+            self.examples = []
         if self.module_feedback is None:
             self.module_feedback = []
         if self.feedback_text is None:

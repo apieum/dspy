@@ -7,6 +7,7 @@ as described in the GEPA paper.
 import inspect
 from typing import Optional, Callable, Any
 from .optimizer import Darwin
+from .data.candidate import example_id
 from .generation.mutation import ReflectivePromptMutation
 from .generation.adaptive_generator import GEPAAdaptiveGenerator
 from .generation.config import ReflectiveMutationConfig
@@ -41,8 +42,8 @@ def _as_assessor(metric: Callable[[Any, Any, Optional[Any]], float]):
                 return result
             if isinstance(result, tuple) and len(result) == 2:
                 value, feedback = result
-                return Metric(value, id=getattr(example, "dspy_uuid", ""), feedback=str(feedback), trace=trace)
-            return Metric(result, id=getattr(example, "dspy_uuid", ""), trace=trace)
+                return Metric(value, id=example_id(example), feedback=str(feedback), trace=trace)
+            return Metric(result, id=example_id(example), trace=trace)
 
         return assessor
 

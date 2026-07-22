@@ -9,6 +9,7 @@ from dspy.teleprompt.darwin.generation import ReflectivePromptMutation
 from dspy.teleprompt.darwin.generation.feedback import FeedbackProvider
 from dspy.teleprompt.darwin.generation import Generator
 from dspy.teleprompt.darwin.data import Candidate, NewBorns
+from dspy.teleprompt.darwin.data.candidate import example_id
 from dspy.teleprompt.darwin.evaluation import GEPATwoPhasesEval
 from dspy.teleprompt.darwin.evaluation import Metric
 from dspy.teleprompt.darwin.result import Success
@@ -56,6 +57,22 @@ class ImprovingGenerator(Generator):
 
 class TestFunctional:
     """Test real-world functionality and edge cases."""
+
+    def test_evaluation_reuses_task_identity_for_pareto_selection(self):
+        """Repeated scoring must identify the same example as the same task."""
+        examples = [
+            dspy.Example(question="one", answer="correct").with_inputs("question"),
+            dspy.Example(question="two", answer="correct").with_inputs("question"),
+        ]
+        candidate = Candidate(DeterministicQualityModule(quality=True))
+
+        scores = candidate.evaluate_on_batch(
+            examples,
+            assessor=lambda example, prediction, trace=None: 1.0,
+            disable_progress_bar=True,
+        )
+
+        assert [score.id for score in scores] == [example_id(example) for example in examples]
 
     def test_optimization_improves_performance(self):
         """Test that optimization actually improves performance over multiple iterations."""

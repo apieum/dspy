@@ -41,7 +41,7 @@ class GEPAReflectionSignature(dspy.Signature):
         desc="Current instruction text that needs improvement based on performance feedback"
     )
     formatted_examples: str = dspy.InputField(
-        desc="Abstract performance patterns showing structural issues, response quality metrics, and improvement opportunities without revealing specific content"
+        desc="Labeled execution examples containing inputs, expected outputs, actual outputs, scores, and feedback used to diagnose failures and improve the instruction"
     )
     
     task_analysis: str = dspy.OutputField(
@@ -165,5 +165,4 @@ def create_optimized_reflection_strategy(reflection_trainset=None, optimizer_typ
     except Exception as e:
         logger.warning(f"Failed to create optimized reflection strategy: {e}")
         return GEPAReflection()
-
 
