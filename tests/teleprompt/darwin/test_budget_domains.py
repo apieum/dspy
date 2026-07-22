@@ -27,6 +27,17 @@ def test_lm_budget_rejects_unknown_domain():
         LMCallsBudget(10).can_spend("reflection")
 
 
+def test_non_billable_generation_failure_does_not_consume_budget():
+    budget = LMCallsBudget(10)
+    budget.spend_on_generation(
+        None,
+        {"type": "failed_mutation_attempt", "cost": 5, "billable": False},
+    )
+
+    assert budget.consumed_calls == 0
+    assert budget.generation_calls == 0
+
+
 def test_strategy_stops_when_the_active_budget_domain_is_exhausted():
     strategy = GEPAStrategy(DarwinConfig(max_lm_calls=10))
     strategy._budget = LMCallsBudget(

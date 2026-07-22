@@ -64,6 +64,9 @@ class LMCallsBudget(Budget):
         one additional reflection call. Generators can pass that exact cost in
         metadata; custom generators retain the historical default of one.
         """
+        if metadata and metadata.get("billable") is False:
+            logger.debug("Non-billable generation failure: %s", metadata)
+            return
         generation_cost = int((metadata or {}).get("cost", 1))
         self._spend(generation_cost, "generation")
         logger.debug(f"Generation cost: {generation_cost} calls - {metadata}")

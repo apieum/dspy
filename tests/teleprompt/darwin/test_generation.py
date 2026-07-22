@@ -259,7 +259,9 @@ class TestGeneration:
         result = generator.generate(Parents(parent), budget)
 
         assert result.is_empty()
-        assert budget.consumed_calls == 4
+        # The failed attempts are bounded by max_retries but are not
+        # financially charged when no LM call completed.
+        assert budget.consumed_calls == 0
         assert budget.consumed_calls <= 4
 
     def test_richer_metric_exports(self):

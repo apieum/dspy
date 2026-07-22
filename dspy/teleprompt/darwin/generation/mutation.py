@@ -237,6 +237,7 @@ class ReflectivePromptMutation(Generator):
                             "type": "failed_mutation_attempt",
                             "error": str(e),
                             "cost": generation_cost,
+                            "billable": False,
                         })
                         attempts_charged += 1
 
@@ -247,7 +248,11 @@ class ReflectivePromptMutation(Generator):
         except Exception as e:
             self.publish('mutation_failure', None, {'reason': f'Reflective prompt mutation failed: {e}'})
             if budget and 'attempts_charged' not in locals():
-                budget.spend_on_generation(None, {"type": "failed_mutation", "error": str(e)})
+                budget.spend_on_generation(None, {
+                    "type": "failed_mutation",
+                    "error": str(e),
+                    "billable": False,
+                })
             return NewBorns()
 
     def _select_parent(self, parents: Parents) -> Optional[Candidate]:
