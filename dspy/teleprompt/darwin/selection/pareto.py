@@ -13,6 +13,7 @@ Key Features:
 """
 
 import logging
+import random
 from typing import List, Optional, Dict, TYPE_CHECKING
 from collections import defaultdict
 
@@ -124,6 +125,31 @@ class ParetoFrontier(Selector):
             self.publish('final_instruction', {'instruction': instruction})
 
         return best
+
+    def select_candidate(self, strategy: str = "pareto", rng=None) -> Candidate:
+        """Select a final candidate using GEPA's configurable selectors."""
+        if not self.task_wins:
+            raise RuntimeError("No candidates found in selector - optimization failed")
+        rng = rng or random.Random(0)
+        candidates = list(self.task_wins)
+
+        if strategy == "current_best":
+            return max(candidates, key=lambda c: c.average_score())
+        if strategy == "epsilon_greedy":
+            if rng.random() < 0.1:
+                return rng.choice(candidates)
+            return max(candidates, key=lambda c: c.average_score())
+        if strategy == "top_k_pareto":
+            candidates = sorted(candidates, key=lambda c: c.average_score(), reverse=True)
+            candidates = candidates[: min(3, len(candidates))]
+        elif strategy != "pareto":
+            raise ValueError(f"Unknown candidate selection strategy: {strategy}")
+
+        # GEPA samples Pareto candidates proportional to the number of
+        # validation examples each candidate wins, preserving specialists.
+        return rng.choices(
+            candidates, weights=[self.task_wins[c] for c in candidates], k=1
+        )[0]
 
     def update_score(self, example_uuid: str, candidate: Candidate, score: "Metric") -> None:
         """Update the example scores with a candidate for a specific example UUID."""

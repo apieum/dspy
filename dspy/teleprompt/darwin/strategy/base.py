@@ -135,7 +135,12 @@ class BaseStrategy(ABC, Generic[R]):
             self._evaluator = self.config.evaluation(
                 assessor=self.config.fitness_function,
                 minibatch_data=minibatch_data,         # Intelligently sampled minibatch for quick validation
-                validation_data=self.validation_data  # Full set for comprehensive evaluation
+                validation_data=self.validation_data,  # Full set for comprehensive evaluation
+                acceptance_criterion=(
+                    self.config.acceptance_criterion()
+                    if isinstance(self.config.acceptance_criterion, type)
+                    else self.config.acceptance_criterion
+                ),
             )
             self._evaluator.start_compilation(
                 getattr(self, "student", None),

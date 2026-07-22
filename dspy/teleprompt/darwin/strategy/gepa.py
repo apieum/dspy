@@ -2,6 +2,7 @@
 
 import logging
 import inspect
+import random
 from typing import List, Optional, TYPE_CHECKING
 
 import dspy
@@ -126,7 +127,21 @@ class GEPAStrategy(BaseStrategy[Result]):
         selectors that do not expose a final-candidate method.
         """
         candidate = self.best_candidate
-        selector_best = getattr(self.selector, "best_candidate", None)
+        selector_best = getattr(self.selector, "select_candidate", None)
+        if callable(selector_best):
+            try:
+                selected = selector_best(
+                    strategy=self.config.candidate_selection_strategy,
+                    rng=random.Random(self.config.seed),
+                )
+                if isinstance(selected, Candidate):
+                    candidate = selected
+            except (RuntimeError, ValueError):
+                pass
+        if not callable(getattr(self.selector, "select_candidate", None)):
+            selector_best = getattr(self.selector, "best_candidate", None)
+        else:
+            selector_best = None
         if callable(selector_best):
             try:
                 selected = selector_best()

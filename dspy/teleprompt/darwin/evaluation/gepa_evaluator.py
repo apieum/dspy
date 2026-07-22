@@ -12,6 +12,7 @@ from .evaluator import Evaluator
 from .metrics import Assessor
 from ..data.cohort import NewBorns, Survivors
 from ..budget import Budget
+from .acceptance import StrictImprovementAcceptance
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,8 @@ class ParentFastCompare(Evaluator):
     This corresponds to Phase 1 of the original GEPA evaluation logic.
     """
 
-    def __init__(self, assessor: Assessor, minibatch_data: List[dspy.Example] = None, **kwargs):
+    def __init__(self, assessor: Assessor, minibatch_data: List[dspy.Example] = None,
+                 acceptance_criterion=None, **kwargs):
         """
         Args:
             assessor: The assessor to evaluate predictions against examples.
@@ -33,6 +35,7 @@ class ParentFastCompare(Evaluator):
         super().__init__()
         self.assessor = assessor
         self.minibatch_data = minibatch_data or []
+        self.acceptance_criterion = acceptance_criterion or StrictImprovementAcceptance()
         self.verbose = False
 
     def start_compilation(self, student: dspy.Module, dataset_manager=None, verbose: bool = False) -> None:
@@ -79,20 +82,26 @@ class ParentFastCompare(Evaluator):
             child_scores = child.evaluate_on_batch(
                 self.minibatch_data, assessor=self.assessor, channel=self, persist_scores=False
             )
-            parent_avg_scores = []
+            parent_scores = []
             for parent in child.parents:
-                parent_scores = parent.evaluate_on_batch(
+                scores = parent.evaluate_on_batch(
                     self.minibatch_data, assessor=self.assessor, channel=self, persist_scores=False
                 )
-                parent_avg = sum(float(score.value) for score in parent_scores) / len(parent_scores) if parent_scores else 0.0
-                parent_avg_scores.append(parent_avg)
+                parent_scores.append([float(score.value) for score in scores])
 
-            avg_child = sum(float(score.value) for score in child_scores) / len(child_scores) if child_scores else 0.0
-            avg_parent = min(parent_avg_scores) if parent_avg_scores else 0.0 # get the weakest parent score for comparison
-
-            # Allow small tolerance for floating point precision and enable progression when equal
-            tolerance = 0.01  # 1% tolerance
-            is_improved = (avg_child >= avg_parent - tolerance)  # Accept equal or better scores
+            child_values = [float(score.value) for score in child_scores]
+            # Crossover proposals must improve every parent they were derived
+            # from. This is conservative for multi-parent proposals and is
+            # identical to the single-parent GEPA path.
+            is_improved = all(
+                self.acceptance_criterion.should_accept(child_values, values)
+                for values in parent_scores
+            )
+            avg_child = sum(child_values) / len(child_values) if child_values else 0.0
+            avg_parent = min(
+                (sum(values) / len(values) for values in parent_scores if values),
+                default=0.0,
+            )
             cost = len(self.minibatch_data) * (len(child.parents) + 1)  # Cost for evaluating both child and parents
             budget.spend_on_evaluation(child.module, {"phase": "validation", "cost": cost})
 

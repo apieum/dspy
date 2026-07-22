@@ -3,6 +3,7 @@
 from .feedback import FeedbackResult, EvaluationTrace, ModuleFeedback
 from .evaluator import Evaluator
 from .gepa_evaluator import GEPATwoPhasesEval, FullTaskScores, ParentFastCompare
+from .acceptance import StrictImprovementAcceptance, ImprovementOrEqualAcceptance
 from .metrics import (
     Assessor,
     Metric,
@@ -24,6 +25,8 @@ __all__ = [
     'GEPATwoPhasesEval',
     'FullTaskScores',
     'ParentFastCompare',
+    'StrictImprovementAcceptance',
+    'ImprovementOrEqualAcceptance',
     'Assessor',
     'Metric',
     'BaseAssessor',
