@@ -165,6 +165,9 @@ class BaseStrategy(ABC, Generic[R]):
         """Decide if optimization should terminate."""
         # Check budget exhaustion
         if self.budget <= 0:
+            if not getattr(self, "_budget_exhaustion_notified", False):
+                self._notify("budget_exhausted", self.budget)
+                self._budget_exhaustion_notified = True
             return True
 
         # Check patience (generations without improvement)

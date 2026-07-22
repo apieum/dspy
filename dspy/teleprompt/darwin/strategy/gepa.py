@@ -38,6 +38,7 @@ class GEPAStrategy(BaseStrategy[Result]):
         self.history = []
         from ..evaluation import EvaluationCache
         self.evaluation_cache = EvaluationCache()
+        self._budget_exhaustion_notified = False
 
     def start_compilation(
         self, student: dspy.Module, *, trainset: list[dspy.Example], devset: list[dspy.Example] | None = None, teacher: dspy.Module | None = None, **kwargs
@@ -168,6 +169,10 @@ class GEPAStrategy(BaseStrategy[Result]):
         # Evaluate the newborns (including initial candidate)
         self.current_survivors = self.evaluator.evaluate(self.current_newborns, self.budget)
 
+        survivors = set(self.current_survivors.candidates)
+        for candidate in self.current_newborns:
+            self._notify("candidate_evaluated", candidate, candidate in survivors)
+
         generation_best_score = None
 
         # Update best candidate tracking
@@ -231,6 +236,9 @@ class GEPAStrategy(BaseStrategy[Result]):
             self.config.proposals_per_generation,
             self.budget,
         )
+
+        if self.current_newborns.is_empty() and self.budget <= 0:
+            self._notify("budget_exhausted", self.budget)
 
         # Cycle back to evaluation
         self.algorithm_state = "evaluate"
