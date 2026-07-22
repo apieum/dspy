@@ -189,6 +189,27 @@ class BaseStrategy(ABC, Generic[R]):
                 self._budget_exhaustion_notified = True
             return True
 
+        # LMCallsBudget can impose independent evaluation and generation
+        # limits.  A positive aggregate budget is not useful when the phase
+        # needed by the current state is exhausted; otherwise the state
+        # machine can spin through empty proposals until the other domain is
+        # consumed as well.  Custom budgets without these fields keep their
+        # existing behavior.
+        remaining = self.budget.get_remaining()
+        if isinstance(remaining, dict):
+            if (
+                getattr(self, "algorithm_state", None) == "generate"
+                and "generation_calls" in remaining
+                and remaining["generation_calls"] <= 0
+            ):
+                return True
+            if (
+                getattr(self, "algorithm_state", None) in {"select", "generate"}
+                and "evaluation_calls" in remaining
+                and remaining["evaluation_calls"] <= 0
+            ):
+                return True
+
         # Check patience (generations without improvement)
         # GEPA is budget-driven by default.  A patience limit remains useful
         # for bounded experiments, but it must be explicitly configured; an
