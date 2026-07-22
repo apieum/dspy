@@ -28,6 +28,7 @@ class ReflectivePromptMutation(Generator):
                  reflection_strategy: Optional[ReflectionStrategy] = None,
                  reflection_lm: Optional[Any] = None,
                  module_selection: str = "round_robin",
+                 candidate_selection_strategy: Any = "pareto",
                  max_retries: int = 1,
                  config: Optional[ReflectiveMutationConfig] = None,
                  assessor=None,
@@ -52,6 +53,7 @@ class ReflectivePromptMutation(Generator):
         self.reflection_lm = reflection_lm
         self.reuse_parent_rollouts = True
         self.module_selection = module_selection
+        self.candidate_selection_strategy = candidate_selection_strategy
         self.max_retries = max(1, max_retries)
         self.use_abstract_feedback = config.use_abstract_feedback if config is not None else False
         self.perfect_score = getattr(config, "perfect_score", 1.0) if config is not None else 1.0
@@ -93,13 +95,11 @@ class ReflectivePromptMutation(Generator):
             return NewBorns()
 
         try:
-            selected_parents = parents.sample_stochastic(1, rng=self.rng)
-            if selected_parents.is_empty():
+            parent = self._select_parent(parents)
+            if parent is None:
                 if budget:
                     budget.spend_on_generation(None, {"type": "no_selected_parent"})
                 return NewBorns()
-
-            parent = list(selected_parents)[0]
 
             predictors = get_predictors(parent.module)
             if not predictors:
@@ -249,6 +249,58 @@ class ReflectivePromptMutation(Generator):
             if budget and 'attempts_charged' not in locals():
                 budget.spend_on_generation(None, {"type": "failed_mutation", "error": str(e)})
             return NewBorns()
+
+    def _select_parent(self, parents: Parents) -> Optional[Candidate]:
+        """Select the parent used for the next proposal.
+
+        GEPA's candidate selector controls every proposal task.  Keeping this
+        decision in the generator lets Darwin retain its component-oriented
+        architecture while making the configured strategy effective during
+        search, not only when choosing the final result.
+        """
+        if parents.is_empty():
+            return None
+
+        selector = self.candidate_selection_strategy
+        if callable(selector) and not isinstance(selector, str):
+            selected = selector(parents, self.rng)
+            if isinstance(selected, Candidate):
+                return selected
+            if hasattr(selected, "first") and not selected.is_empty():
+                return selected.first()
+            raise TypeError("candidate selector must return a Candidate or non-empty cohort")
+
+        candidates = parents.to_list()
+        if selector == "current_best":
+            return max(candidates, key=lambda candidate: candidate.average_score())
+
+        if selector == "epsilon_greedy":
+            if self.rng.random() < 0.1:
+                return self.rng.choice(candidates)
+            return max(candidates, key=lambda candidate: candidate.average_score())
+
+        if selector == "top_k_pareto":
+            top_candidates = sorted(
+                candidates,
+                key=lambda candidate: candidate.average_score(),
+                reverse=True,
+            )[:5]
+            if len(top_candidates) == 1:
+                return top_candidates[0]
+            top_cohort = parents.__class__(
+                *top_candidates,
+                iteration=parents.iteration,
+                **parents._new_weights(top_candidates),
+            )
+            return top_cohort.sample_stochastic(1, rng=self.rng).first()
+
+        if selector == "pareto":
+            return parents.sample_stochastic(1, rng=self.rng).first()
+
+        raise ValueError(
+            "candidate_selection_strategy must be one of: pareto, current_best, "
+            "epsilon_greedy, top_k_pareto, or a callable"
+        )
 
     def _select_target_module(self, num_modules: int, parent: Optional[Candidate] = None) -> int:
         """Select module to mutate."""

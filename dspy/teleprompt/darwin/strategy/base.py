@@ -268,6 +268,8 @@ class BaseStrategy(ABC, Generic[R]):
                 kwargs["val_overlap_floor"] = self.config.merge_val_overlap_floor
             if "reflection_lm" in inspect.signature(generator_factory).parameters:
                 kwargs["reflection_lm"] = self.config.reflection_lm
+            if "candidate_selection_strategy" in inspect.signature(generator_factory).parameters:
+                kwargs["candidate_selection_strategy"] = self.config.candidate_selection_strategy
         except (TypeError, ValueError):
             pass
         if mutation_config:

@@ -414,34 +414,14 @@ class GEPAStrategy(BaseStrategy[Result]):
         )
 
     def _select_final_candidate(self) -> Optional[Candidate]:
-        """Select the final candidate from the accumulated Pareto state.
+        """Select the best aggregate candidate after optimization.
 
-        The selector has the global task-level view required by GEPA.  Keep
-        the strategy's best-per-generation candidate as a fallback for custom
-        selectors that do not expose a final-candidate method.
+        ``candidate_selection_strategy`` belongs to proposal-parent sampling.
+        GEPA's final result is the best generalist, so exploration strategies
+        must not randomly replace it at termination.
         """
         candidate = self.best_candidate
-        selector_best = getattr(self.selector, "select_candidate", None)
-        if callable(selector_best):
-            try:
-                selected = selector_best(
-                    strategy=self.config.candidate_selection_strategy,
-                    rng=random.Random(self.config.seed),
-                )
-                if (
-                    isinstance(selected, Candidate)
-                    and (
-                        candidate is None
-                        or selected.average_score() >= candidate.average_score()
-                    )
-                ):
-                    candidate = selected
-            except (RuntimeError, ValueError):
-                pass
-        if not callable(getattr(self.selector, "select_candidate", None)):
-            selector_best = getattr(self.selector, "best_candidate", None)
-        else:
-            selector_best = None
+        selector_best = getattr(self.selector, "best_candidate", None)
         if callable(selector_best):
             try:
                 selected = selector_best()

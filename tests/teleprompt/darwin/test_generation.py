@@ -150,6 +150,46 @@ class TestGeneration:
         assert generator._select_target_module(3) == 2
         assert generator._select_target_module(3) == 0
 
+    def test_candidate_selection_strategy_controls_parent_sampling(self):
+        provider = FeedbackProvider(assessor=simple_metric)
+        weaker = Candidate(dspy.Predict("question -> answer"))
+        stronger = Candidate(dspy.Predict("question -> answer"))
+        from dspy.teleprompt.darwin.evaluation.metrics import Metric
+
+        weaker.scores = [Metric(0.2, id="task")]
+        stronger.scores = [Metric(0.9, id="task")]
+        parents = Parents(
+            weaker,
+            stronger,
+            task_wins={weaker: 10, stronger: 1},
+        )
+        generator = ReflectivePromptMutation(
+            feedback_provider=provider,
+            candidate_selection_strategy="current_best",
+        )
+
+        assert generator._select_parent(parents) is stronger
+
+    def test_top_k_candidate_selection_preserves_pareto_weights(self):
+        provider = FeedbackProvider(assessor=simple_metric)
+        candidates = [Candidate(dspy.Predict("question -> answer")) for _ in range(6)]
+        from dspy.teleprompt.darwin.evaluation.metrics import Metric
+
+        for index, candidate in enumerate(candidates):
+            candidate.scores = [Metric(0.1 * (index + 1), id="task")]
+        parents = Parents(
+            *candidates,
+            task_wins={candidate: 1 for candidate in candidates},
+        )
+        generator = ReflectivePromptMutation(
+            feedback_provider=provider,
+            candidate_selection_strategy="top_k_pareto",
+        )
+
+        selected = generator._select_parent(parents)
+
+        assert selected in candidates[-5:]
+
     def test_random_module_selection(self):
         """Test that the random module selection strategy works correctly."""
         feedback_provider = FeedbackProvider(assessor=simple_metric)
