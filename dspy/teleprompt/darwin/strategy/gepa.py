@@ -106,6 +106,8 @@ class GEPAStrategy(BaseStrategy[Result]):
                 reason="Compilation failed, no candidate was found."
             )
         result_module = self.best_candidate.module if self.best_candidate is not None else self.student
+        if self.best_candidate is not None:
+            result_module._compiled = True
         self._notify("finish_compilation", result_module)
         return result
 

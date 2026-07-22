@@ -31,6 +31,42 @@ def simple_metric(example, prediction, trace=None):
 class TestIntegration:
     """Test end-to-end GEPA functionality."""
 
+    def test_gepa_lifecycle_completes_within_budget(self):
+        trainset = [
+            dspy.Example(question="What is 2+2?", answer="4").with_inputs("question"),
+        ]
+        devset = [
+            dspy.Example(question="What color is the sky?", answer="blue").with_inputs("question"),
+        ]
+
+        class Observer:
+            def __init__(self):
+                self.events = []
+
+            def start_compilation(self, student, dataset_manager):
+                self.events.append(("start", dataset_manager.num_eval_tasks, dataset_manager.num_dev_examples))
+
+            def finish_compilation(self, result):
+                self.events.append(("finish", result._compiled))
+
+        observer = Observer()
+        dummy_lm = DummyLM([
+            {"answer": "4"},
+            {"answer": "blue"},
+        ])
+
+        with dspy.context(lm=dummy_lm):
+            optimizer = Darwin(
+                GEPAStrategy,
+                DarwinConfig(max_lm_calls=2, observers=(observer,), seed=17),
+            )
+            compiled = optimizer.compile(SimpleQA(), trainset=trainset, devset=devset)
+
+        assert compiled._compiled is True
+        assert observer.events[0] == ("start", 1, 1)
+        assert observer.events[-1] == ("finish", True)
+        assert optimizer.strategy.budget.consumed_calls <= 2
+
     def test_gepa_mute_compilation(self):
         """Test GEPAMute end-to-end compilation."""
         trainset = [
