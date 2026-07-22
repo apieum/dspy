@@ -37,6 +37,8 @@ class DarwinConfig:
     # Official GEPA only attempts a merge when the two branches share enough
     # validation support to make the merge comparison meaningful.
     merge_val_overlap_floor: int = 5
+    # Number of distinct parent pairs inspected during one merge opportunity.
+    merge_pair_attempts: int = 10
     # Optional LM dedicated to reflective prompt proposals. When omitted,
     # reflection uses DSPy's active task LM, preserving the existing default.
     reflection_lm: Optional[Any] = None
@@ -112,3 +114,5 @@ class DarwinConfig:
             raise ValueError("max_merge_invocations must be non-negative")
         if self.merge_val_overlap_floor <= 0:
             raise ValueError("merge_val_overlap_floor must be positive")
+        if self.merge_pair_attempts <= 0:
+            raise ValueError("merge_pair_attempts must be positive")

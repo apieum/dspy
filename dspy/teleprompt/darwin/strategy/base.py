@@ -266,6 +266,8 @@ class BaseStrategy(ABC, Generic[R]):
         try:
             if "val_overlap_floor" in inspect.signature(generator_factory).parameters:
                 kwargs["val_overlap_floor"] = self.config.merge_val_overlap_floor
+            if "max_attempts" in inspect.signature(generator_factory).parameters:
+                kwargs["max_attempts"] = self.config.merge_pair_attempts
             if "reflection_lm" in inspect.signature(generator_factory).parameters:
                 kwargs["reflection_lm"] = self.config.reflection_lm
             if "candidate_selection_strategy" in inspect.signature(generator_factory).parameters:
