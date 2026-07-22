@@ -10,6 +10,7 @@ This test suite validates the official GEPA Algorithm 2 implementation with:
 
 import pytest
 import asyncio
+import random
 from unittest.mock import Mock, AsyncMock
 import dspy
 from dspy.teleprompt.darwin.selection.pareto import ParetoFrontier
@@ -68,6 +69,14 @@ class TestParetoFrontierCore:
         assert self.selector.example_best_scores == {}
         assert self.selector.example_best_candidates == {}
         assert len(self.selector.diversity_archive) == 0
+
+    def test_stochastic_sampling_can_select_without_replacement(self):
+        candidates = [self.create_candidate_with_scores({"task": 1.0}) for _ in range(3)]
+        cohort = Parents(*candidates, task_wins={candidate: index + 1 for index, candidate in enumerate(candidates)})
+
+        selected = cohort.sample_stochastic(2, rng=random.Random(7), replace=False)
+
+        assert len(selected.candidates) == 2
 
     def test_single_candidate_promotion(self):
         """Test promoting a single candidate."""

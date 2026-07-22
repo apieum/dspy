@@ -65,7 +65,9 @@ class SystemAwareMerge(Generator):
                 # Stochastic selection of two parent candidates.  GEPA makes
                 # several attempts because the first pair may have no useful
                 # common ancestor even when another pair can be merged.
-                selected_parents = parents.sample_stochastic(2, rng=self.rng)
+                selected_parents = parents.sample_stochastic(
+                    2, rng=self.rng, replace=False
+                )
                 if selected_parents.size() < 2:
                     return NewBorns()
 

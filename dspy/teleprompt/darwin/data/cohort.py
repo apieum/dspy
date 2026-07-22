@@ -120,7 +120,14 @@ class Cohort:
         new_weights = self._new_weights(candidates)
         return self.__class__(*candidates, iteration=self._iteration, **new_weights)
 
-    def sample_stochastic(self, n: int = 1, exclude: List[Candidate] = [], rng = random, **factors) -> 'Cohort':
+    def sample_stochastic(
+        self,
+        n: int = 1,
+        exclude: List[Candidate] = [],
+        rng=random,
+        replace: bool = True,
+        **factors,
+    ) -> 'Cohort':
         """Stochastic sampling based on task winning frequency (Algorithm 2 line 14).
 
         Implements GEPA Algorithm 2's stochastic selection and more: "Sample Φk from Ĉ with probability ∝ f[Φk]"
@@ -156,7 +163,21 @@ class Cohort:
             final_weights = [1.0] * pool_size
 
         # Sample n candidates based on weights
-        selected = rng.choices(candidates, weights=final_weights, k=n)
+        if replace:
+            selected = rng.choices(candidates, weights=final_weights, k=n)
+        else:
+            # Weighted sampling without replacement is required for crossover
+            # parent pairs: selecting the same candidate twice cannot produce
+            # two independent lineages or a valid merge.
+            available = list(candidates)
+            available_weights = list(final_weights)
+            selected = []
+            for _ in range(min(n, len(available))):
+                choice = rng.choices(available, weights=available_weights, k=1)[0]
+                index = available.index(choice)
+                selected.append(choice)
+                available.pop(index)
+                available_weights.pop(index)
         new_weights = self._new_weights(selected)
         return self.__class__(*selected, iteration=self._iteration, **new_weights)
 
