@@ -206,7 +206,13 @@ class GEPAStrategy(BaseStrategy[Result]):
                     strategy=self.config.candidate_selection_strategy,
                     rng=random.Random(self.config.seed),
                 )
-                if isinstance(selected, Candidate):
+                if (
+                    isinstance(selected, Candidate)
+                    and (
+                        candidate is None
+                        or selected.average_score() >= candidate.average_score()
+                    )
+                ):
                     candidate = selected
             except (RuntimeError, ValueError):
                 pass
@@ -217,7 +223,13 @@ class GEPAStrategy(BaseStrategy[Result]):
         if callable(selector_best):
             try:
                 selected = selector_best()
-                if isinstance(selected, Candidate):
+                if (
+                    isinstance(selected, Candidate)
+                    and (
+                        candidate is None
+                        or selected.average_score() >= candidate.average_score()
+                    )
+                ):
                     candidate = selected
             except (RuntimeError, ValueError):
                 # A selector may have no accumulated scores when compilation
