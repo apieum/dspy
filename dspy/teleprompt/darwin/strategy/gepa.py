@@ -17,7 +17,6 @@ from ..data.candidate import Candidate, example_id
 from ..data.cohort import Cohort, NewBorns, Survivors, Parents
 from ..result import Result, Success, Failure
 from ..state import OptimizationCheckpoint
-from ..generation import SingleMutationSampling, EpochShuffledBatchSampler
 from ..evaluation import EvaluationCache
 from ..evaluation import Metric
 
@@ -95,9 +94,7 @@ class GEPAStrategy(BaseStrategy[Result]):
         self.current_parents = None
         self.algorithm_state = "initialize"
         self.rng = random.Random(self.config.seed)
-        self.batch_sampler = self.config.batch_sampler or EpochShuffledBatchSampler(
-            self.config.mutation_config.minibatch_size,
-        )
+        self.batch_sampler = self.config.batch_sampler
         self._install_signal_handlers()
 
         # Centralize train/dev handling so experiments can inject a different
@@ -617,7 +614,7 @@ class GEPAStrategy(BaseStrategy[Result]):
                 self.current_parents,
                 self.config.proposals_per_generation,
                 self.budget,
-                sampling_strategy=self.config.sampling_strategy or SingleMutationSampling(),
+                sampling_strategy=self.config.sampling_strategy,
                 batch_sampler=self.batch_sampler,
                 rng=self.rng,
             )

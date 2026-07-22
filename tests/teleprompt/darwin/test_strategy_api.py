@@ -16,12 +16,17 @@ from dspy.teleprompt.darwin import (
     Failure,
     FeedbackProvider,
     FullTaskScores,
+    FullEvaluationPolicy,
     GEPAStrategy,
     GEPATwoPhasesEval,
     Generator,
     LMCallsBudget,
     Metric,
     ParetoFrontier,
+    StrictImprovementAcceptance,
+    AllImprovements,
+    SingleMutationSampling,
+    EpochShuffledBatchSampler,
     ReflectivePromptMutation,
     Selector,
     Success,
@@ -105,6 +110,20 @@ def test_darwin_config_is_budget_driven_by_default():
     assert GEPAConfig().use_merge is True
     with pytest.raises(ValueError):
         GEPAConfig(patience=-1)
+
+
+def test_gepa_config_materializes_all_strategy_defaults():
+    config = GEPAConfig()
+
+    assert isinstance(config.acceptance_criterion, StrictImprovementAcceptance)
+    assert isinstance(config.proposal_selection, AllImprovements)
+    assert isinstance(config.validation_policy, FullEvaluationPolicy)
+    assert isinstance(config.sampling_strategy, SingleMutationSampling)
+    assert isinstance(config.batch_sampler, EpochShuffledBatchSampler)
+    assert config.batch_evaluator is not None
+
+    with pytest.raises(ValueError, match="validation_policy must be configured"):
+        GEPAConfig(validation_policy=None)
 
 
 def test_strategy_injects_the_same_config_into_components():

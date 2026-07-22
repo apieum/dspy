@@ -2,6 +2,7 @@
 
 import dspy
 from dspy.teleprompt.darwin import GEPAConfig
+from dspy.teleprompt.darwin.evaluation.cache import EvaluationCache
 
 from dspy.teleprompt.darwin.dataset_manager import (
     DefaultDatasetManager,
@@ -75,6 +76,7 @@ def test_components_receive_the_dataset_manager():
 
     evaluator = GEPATwoPhasesEval(
         config=GEPAConfig(fitness_function=assessor),
+        evaluation_cache=EvaluationCache(),
         assessor=assessor,
     )
     evaluator.start_compilation(student, manager)

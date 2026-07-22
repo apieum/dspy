@@ -10,8 +10,6 @@ from typing import Optional, TYPE_CHECKING
 
 import dspy
 from .generator import Generator
-from .mutation import ReflectivePromptMutation  
-from .system_aware_merge import SystemAwareMerge
 from ..data.cohort import Parents, NewBorns
 
 if TYPE_CHECKING:
@@ -85,7 +83,7 @@ class GEPAAdaptiveGenerator(Generator):
         # Initialize mutation generator if not provided
         if self.mutation_gen is None:
             if self.feedback_provider is not None:
-                self.mutation_gen = ReflectivePromptMutation(
+                self.mutation_gen = self.config.fallback_mutation(
                     feedback_provider=self.feedback_provider,
                     feedback_data=self.feedback_data,
                     config=self.config,
@@ -95,7 +93,7 @@ class GEPAAdaptiveGenerator(Generator):
         
         # Initialize merge generator if not provided  
         if self.merge_gen is None:
-            self.merge_gen = SystemAwareMerge(
+            self.merge_gen = self.config.crossover(
                 assessor=self.assessor,
                 config=self.config,
             )

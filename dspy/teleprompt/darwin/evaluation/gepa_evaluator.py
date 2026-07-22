@@ -12,11 +12,6 @@ from .evaluator import Evaluator
 from .metrics import Assessor
 from ..data.cohort import NewBorns, Survivors
 from ..budget import Budget
-from .acceptance import StrictImprovementAcceptance
-from .cache import EvaluationCache
-from .proposal_selection import AllImprovements
-from .policy import FullEvaluationPolicy
-from .batching import resolve_batch_evaluator
 
 logger = logging.getLogger(__name__)
 
@@ -42,19 +37,11 @@ class ParentFastCompare(Evaluator):
         self.config = config
         self.assessor = config.fitness_function
         self.minibatch_data = minibatch_data or []
-        configured_acceptance = config.acceptance_criterion
-        acceptance_criterion = configured_acceptance
-        self.acceptance_criterion = (
-            acceptance_criterion() if isinstance(acceptance_criterion, type)
-            else acceptance_criterion or StrictImprovementAcceptance()
-        )
-        self.evaluation_cache = evaluation_cache or EvaluationCache()
-        configured_selection = config.proposal_selection
-        proposal_selection = configured_selection
-        self.proposal_selection = (
-            proposal_selection() if isinstance(proposal_selection, type)
-            else proposal_selection or AllImprovements()
-        )
+        self.acceptance_criterion = config.acceptance_criterion
+        if evaluation_cache is None:
+            raise ValueError("evaluation_cache must be provided by the strategy")
+        self.evaluation_cache = evaluation_cache
+        self.proposal_selection = config.proposal_selection
         self.verbose = False
         self.last_proposal_records = []
 
@@ -231,14 +218,11 @@ class FullTaskScores(Evaluator):
         self.config = config
         self.assessor = config.fitness_function
         self.validation_data = validation_data or []
-        self.evaluation_cache = evaluation_cache or EvaluationCache()
-        configured_policy = config.validation_policy
-        self.validation_policy = (
-            configured_policy() if isinstance(configured_policy, type)
-            else configured_policy or FullEvaluationPolicy()
-        )
-        configured_batch_evaluator = config.batch_evaluator
-        self.batch_evaluator = resolve_batch_evaluator(configured_batch_evaluator)
+        if evaluation_cache is None:
+            raise ValueError("evaluation_cache must be provided by the strategy")
+        self.evaluation_cache = evaluation_cache
+        self.validation_policy = config.validation_policy
+        self.batch_evaluator = config.batch_evaluator
         self._iteration = 0
         self.verbose = False
 

@@ -8,7 +8,7 @@ import random
 
 import dspy
 from .generator import Generator
-from .reflection_strategy import ReflectionStrategy, GEPAReflection
+from .reflection_strategy import ReflectionStrategy
 from .evolvable_module import EvolvableModule
 from .prompt_mutator import ReflectivePromptMutator
 from .dspy_utils import get_predictors
@@ -62,7 +62,7 @@ class ReflectivePromptMutation(Generator):
         self.feedback_provider = feedback_provider
         self.feedback_data = feedback_data or []
         self.minibatch_size = mutation_config.minibatch_size
-        self.reflection_strategy = reflection_strategy or GEPAReflection()
+        self.reflection_strategy = reflection_strategy or mutation_config.reflection_strategy
         self.reflection_lm = reflection_lm
         self.reuse_parent_rollouts = (
             config.reuse_parent_rollouts

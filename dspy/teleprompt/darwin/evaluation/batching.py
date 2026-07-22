@@ -39,13 +39,12 @@ class CallbackBatchEvaluator(BatchEvaluator):
         return self.callback(jobs, assessor, channel)
 
 
-def resolve_batch_evaluator(value=None) -> BatchEvaluator:
+def resolve_batch_evaluator(value) -> BatchEvaluator:
     """Normalize configuration once, outside the evaluation hot path."""
     if value is None:
-        return PerCandidateBatchEvaluator()
+        raise ValueError("batch_evaluator must be configured")
     if isinstance(value, BatchEvaluator):
         return value
     if callable(value):
         return CallbackBatchEvaluator(value)
     raise TypeError("batch_evaluator must be a BatchEvaluator or callable callback")
-

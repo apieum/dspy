@@ -14,6 +14,7 @@ from dspy.teleprompt.darwin import (
     StrictImprovementAcceptance,
 )
 from dspy.teleprompt.darwin.budget import LMCallsBudget
+from dspy.teleprompt.darwin.evaluation.cache import EvaluationCache
 from dspy.teleprompt.darwin.data.cohort import Survivors
 
 
@@ -81,6 +82,7 @@ def test_merge_accepts_tie_with_best_parent_but_mutation_does_not():
     example = dspy.Example(question="q", answer="a")
     evaluator = ParentFastCompare(
         config=GEPAConfig(fitness_function=lambda *_: Metric(0.0)),
+        evaluation_cache=EvaluationCache(),
         assessor=lambda *_: Metric(0.0),
         minibatch_data=[example],
     )

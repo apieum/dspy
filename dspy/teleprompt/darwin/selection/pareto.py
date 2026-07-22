@@ -270,14 +270,14 @@ class ParetoFrontier(Selector):
         Args:
             config: Configuration containing observers and settings
         """
-        self.elitist_pruning = getattr(config, 'elitist_pruning', False)
-        self.frontier_type = getattr(config, 'frontier_type', 'instance')
-        if getattr(config, 'preserve_diversity', False):
-            self.diversity_archive = DiversityArchive(getattr(config, 'archive_capacity', 32))
+        self.elitist_pruning = config.elitist_pruning
+        self.frontier_type = config.frontier_type
+        if config.preserve_diversity:
+            self.diversity_archive = DiversityArchive(config.archive_capacity)
         else:
             self.diversity_archive = None
         # Subscribe all selector observers to our events using the Channel pattern
-        for observer in getattr(config, 'selector_observers', []):
+        for observer in config.selector_observers:
             # Use the modern Channel subscription pattern
             for event_name in ['promote', 'update_score', 'update_scores_batch']:
                 if hasattr(observer, event_name):

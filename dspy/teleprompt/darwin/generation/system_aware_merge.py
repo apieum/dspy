@@ -13,7 +13,6 @@ from typing import List, Optional, Tuple, Set, TYPE_CHECKING
 import dspy
 from dspy.teleprompt.utils import get_signature, set_signature
 from .generator import Generator
-from .mutation import ReflectivePromptMutation
 from ..data.candidate import Candidate, example_id
 from ..data.cohort import Parents, NewBorns
 from typing import TYPE_CHECKING
@@ -429,7 +428,7 @@ class SystemAwareMerge(Generator):
                     assessor=self.assessor,
                     failure_score=self.config.failure_score,
                 )
-            self.fallback_generator = ReflectivePromptMutation(
+            self.fallback_generator = self.config.fallback_mutation(
                 feedback_provider=self.feedback_provider,
                 feedback_data=self.devset,
                 config=self.config,

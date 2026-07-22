@@ -6,7 +6,14 @@ from typing import Type, Optional, Tuple, Any
 
 from .budget import Budget, LMCallsBudget
 from .selection import Selector, ParetoFrontier
-from .generation import Generator, SystemAwareMerge, ReflectivePromptMutation
+from .generation import (
+    Generator,
+    SystemAwareMerge,
+    ReflectivePromptMutation,
+    GEPAReflection,
+    EpochShuffledBatchSampler,
+    SingleMutationSampling,
+)
 from .generation import SamplingStrategy, BatchSampler
 from .generation.config import ReflectiveMutationConfig
 from .evaluation import Evaluator, GEPATwoPhasesEval
@@ -15,7 +22,7 @@ from .dataset_manager import DefaultDatasetManagerFactory
 from .evaluation.acceptance import StrictImprovementAcceptance
 from .evaluation.proposal_selection import AllImprovements
 from .evaluation.policy import FullEvaluationPolicy
-from .evaluation.batching import PerCandidateBatchEvaluator
+from .evaluation.batching import PerCandidateBatchEvaluator, resolve_batch_evaluator
 
 
 class DarwinConfig(ABC):
@@ -54,6 +61,7 @@ class GEPAConfig(DarwinConfig):
 
     # Optional strategic choices
     crossover: Optional[Type['Generator']] = SystemAwareMerge  # Optional crossover generator
+    fallback_mutation: Type['Generator'] = ReflectivePromptMutation
     # The complete GEPA strategy enables opportunistic merging by default.
     # Mutation-only optimizers can opt out explicitly.
     use_merge: bool = True
@@ -81,6 +89,8 @@ class GEPAConfig(DarwinConfig):
     proposals_per_generation: int = 1
     sampling_strategy: Optional[SamplingStrategy] = None
     batch_sampler: Optional[BatchSampler] = None
+    elitist_pruning: bool = False
+    selector_observers: Tuple[Any, ...] = ()
     # Optional adapter-level evaluator. It receives a list of
     # (candidate, examples) jobs and returns one metric list per job.
     batch_evaluator: Any = field(default_factory=PerCandidateBatchEvaluator)
@@ -119,12 +129,32 @@ class GEPAConfig(DarwinConfig):
     verbose: bool = False
 
     def __post_init__(self):
+        self.acceptance_criterion = self._materialize_component(
+            self.acceptance_criterion, "acceptance_criterion"
+        )
+        self.proposal_selection = self._materialize_component(
+            self.proposal_selection, "proposal_selection"
+        )
+        self.validation_policy = self._materialize_component(
+            self.validation_policy, "validation_policy"
+        )
+        if self.batch_evaluator is None:
+            raise ValueError("batch_evaluator must be configured")
+        self.batch_evaluator = resolve_batch_evaluator(self.batch_evaluator)
         if not isinstance(self.failure_score, (int, float)):
             raise TypeError("failure_score must be numeric")
         if self.patience is not None and self.patience < 0:
             raise ValueError("patience must be non-negative or None")
         if self.mutation_config is None:
             self.mutation_config = ReflectiveMutationConfig(minibatch_size=self.minibatch_size)
+        if self.mutation_config.reflection_strategy is None:
+            self.mutation_config.reflection_strategy = GEPAReflection()
+        if self.sampling_strategy is None:
+            self.sampling_strategy = SingleMutationSampling()
+        if self.batch_sampler is None:
+            self.batch_sampler = EpochShuffledBatchSampler(
+                self.mutation_config.minibatch_size
+            )
         if self.candidate_selection_strategy not in {
             "pareto", "current_best", "epsilon_greedy", "top_k_pareto"
         }:
@@ -150,3 +180,22 @@ class GEPAConfig(DarwinConfig):
             raise ValueError("merge_val_overlap_floor must be positive")
         if self.merge_pair_attempts <= 0:
             raise ValueError("merge_pair_attempts must be positive")
+
+    @staticmethod
+    def _materialize_component(value: Any, name: str) -> Any:
+        """Materialize a configured no-argument component factory once.
+
+        Defaults and overrides are resolved while constructing the strategy
+        configuration. Runtime components therefore never invent a policy or
+        criterion when one was omitted.
+        """
+        if value is None:
+            raise ValueError(f"{name} must be configured")
+        if isinstance(value, type):
+            try:
+                return value()
+            except TypeError as error:
+                raise TypeError(
+                    f"{name} must be an instance when its class needs arguments"
+                ) from error
+        return value
