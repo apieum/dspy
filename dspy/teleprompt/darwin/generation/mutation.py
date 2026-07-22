@@ -116,7 +116,12 @@ class ReflectivePromptMutation(Generator):
             # reflection consumes one additional LM call. Reserve the whole
             # generation before making any request so max_calls is a hard
             # upper bound on Darwin's expected LM work.
-            generation_cost = len(minibatch) + 1
+            mutation_count = (
+                len(predictors)
+                if self.module_selection == ModuleSelectionStrategy.ALL.value
+                else 1
+            )
+            generation_cost = len(minibatch) + mutation_count
             if (
                 budget is not None
                 and hasattr(budget, "can_spend")
@@ -142,10 +147,14 @@ class ReflectivePromptMutation(Generator):
                     feedback = evolvable.collect_traces_and_evaluate(
                         minibatch, self.feedback_provider, module_idx
                     )
-                    if self.module_selection == ModuleSelectionStrategy.FAILED_ONLY.value:
-                        module_idx = self._select_failed_module(
+                    if self.module_selection == ModuleSelectionStrategy.ALL.value:
+                        target_modules = list(range(len(predictors)))
+                    elif self.module_selection == ModuleSelectionStrategy.FAILED_ONLY.value:
+                        target_modules = [self._select_failed_module(
                             feedback.traces, len(predictors), parent
-                        )
+                        )]
+                    else:
+                        target_modules = [module_idx]
 
                     # Reuse the parent rollout for acceptance when an
                     # evaluation cache is attached by the strategy.  This is
@@ -176,7 +185,14 @@ class ReflectivePromptMutation(Generator):
                         self.reflection_lm,
                         use_abstract_feedback=self.use_abstract_feedback,
                     )
-                    child_module = mutator.mutate(evolvable, feedback, module_idx, verbose=getattr(self, 'verbose', False))
+                    child_module = evolvable
+                    for target_module in target_modules:
+                        child_module = mutator.mutate(
+                            child_module,
+                            feedback,
+                            target_module,
+                            verbose=getattr(self, "verbose", False),
+                        )
 
                     child_candidate = Candidate(
                         module=child_module,
@@ -190,6 +206,7 @@ class ReflectivePromptMutation(Generator):
                         budget.spend_on_generation(child_module, {
                             "type": "reflective_mutation",
                             "module_idx": module_idx,
+                            "module_indices": target_modules,
                             "cost": generation_cost,
                         })
                         attempts_charged += 1
@@ -229,9 +246,7 @@ class ReflectivePromptMutation(Generator):
         elif self.module_selection == ModuleSelectionStrategy.RANDOM.value:
             return self.rng.randint(0, num_modules - 1)
         elif self.module_selection == ModuleSelectionStrategy.ALL.value:
-            module_idx = self.next_module_idx % num_modules
-            self.next_module_idx = (self.next_module_idx + 1)
-            return module_idx
+            return 0
         elif self.module_selection == ModuleSelectionStrategy.WORST_PERFORMING.value:
             return self._select_worst_performing_module(parent, num_modules)
         else:

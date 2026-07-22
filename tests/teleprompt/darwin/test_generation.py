@@ -146,6 +146,28 @@ class TestGeneration:
 
         assert generator._select_failed_module(traces, 2) == 1
 
+    @patch('dspy.teleprompt.darwin.generation.mutation.ReflectivePromptMutator')
+    def test_all_selection_mutates_each_predictor_in_one_child(self, mutator_mock):
+        provider = FeedbackProvider(assessor=simple_metric)
+        generator = ReflectivePromptMutation(
+            feedback_provider=provider,
+            feedback_data=[dspy.Example(question="q", answer="a").with_inputs("question")],
+            module_selection=ModuleSelectionStrategy.ALL.value,
+        )
+        parent = Candidate(dspy.Module())
+        first = dspy.Predict("question -> first")
+        second = dspy.Predict("question -> second")
+        parent.module = dspy.Module()
+        parent.module.first = first
+        parent.module.second = second
+        mutated = parent.module.deepcopy()
+        mutator_mock.return_value.mutate.return_value = mutated
+
+        result = generator.generate(Parents(parent))
+
+        assert not result.is_empty()
+        assert mutator_mock.return_value.mutate.call_count == 2
+
     def test_reflective_mutation_config_restores_advanced_selection(self):
         """Test restored mutation config is accepted by the new generator path."""
         feedback_provider = FeedbackProvider(assessor=simple_metric)
