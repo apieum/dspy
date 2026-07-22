@@ -71,6 +71,7 @@ from .logging import (
 
 # Strategy and configuration
 from .strategy import BaseStrategy, GEPAStrategy
+from .strategy.execution import ExecutionGraph
 from .config import DarwinConfig
 from .compilation_observer import CompilationObserver
 from .dataset_manager import (
@@ -166,6 +167,7 @@ __all__ = [
     # Strategy and configuration
     'BaseStrategy',
     'GEPAStrategy',
+    'ExecutionGraph',
     'DarwinConfig',
     'CompilationObserver',
     'DatasetManager', 'DatasetManagerFactory',

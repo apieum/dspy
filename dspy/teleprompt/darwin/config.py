@@ -62,6 +62,9 @@ class DarwinConfig:
     # Domain model used to materialize role-specific cohorts.  Strategies can
     # replace this without changing selection, evaluation, or restoration.
     cohort_model: CohortModel = None
+    # Optional execution graph or factory receiving the strategy instance.
+    # When omitted, the GEPA phase graph is used.
+    execution_graph: Any = None
 
     # System parameters we actually have
     max_lm_calls: int = 100

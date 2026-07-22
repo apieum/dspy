@@ -19,6 +19,7 @@ from ..state import OptimizationCheckpoint
 from ..generation import SingleMutationSampling, EpochShuffledBatchSampler
 from ..evaluation import EvaluationCache
 from ..evaluation import Metric
+from .execution import ExecutionGraph
 
 if TYPE_CHECKING:
     from ..config import DarwinConfig
@@ -47,6 +48,15 @@ class GEPAStrategy(BaseStrategy[Result]):
     def __init__(self, config: 'DarwinConfig'):
         super().__init__(config)
         self.algorithm_state = "initialize"  # initialize -> evaluate -> select -> generate -> repeat
+        configured_graph = config.execution_graph
+        if configured_graph is None:
+            self.execution_graph = ExecutionGraph.gepa(self)
+        elif callable(configured_graph) and not hasattr(configured_graph, "step"):
+            self.execution_graph = configured_graph(self)
+        else:
+            self.execution_graph = configured_graph
+        if not callable(getattr(self.execution_graph, "step", None)):
+            raise TypeError("execution_graph must provide step(strategy) or be a graph factory")
         self.current_newborns: Optional[NewBorns] = None
         self.current_survivors: Optional[Survivors] = None
         self.current_parents: Optional[Parents] = None
@@ -136,18 +146,7 @@ class GEPAStrategy(BaseStrategy[Result]):
         """Implement the evolutionary algorithm state machine."""
         if self.should_terminate():
             return False
-
-        if self.algorithm_state == "evaluate":
-            self._evaluate_step()
-        elif self.algorithm_state == "select":
-            self._select_step()
-        elif self.algorithm_state == "generate":
-            self._generate_step()
-        else:
-            # Invalid state, terminate
-            return False
-        
-        return True
+        return self.execution_graph.step(self)
 
     def terminate_compilation(self) -> Result:
         """Get the result of the optimization process."""
