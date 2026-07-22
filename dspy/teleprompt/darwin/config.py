@@ -32,6 +32,7 @@ class DarwinConfig:
     enhanced_feedback: Optional[Assessor] = F1Score()  # Optional feedback-generating metric
     acceptance_criterion: Any = StrictImprovementAcceptance
     candidate_selection_strategy: str = "pareto"
+    proposals_per_generation: int = 1
     mutation_config: ReflectiveMutationConfig = None
 
     # System parameters we actually have
@@ -59,3 +60,5 @@ class DarwinConfig:
                 "candidate_selection_strategy must be one of: pareto, "
                 "current_best, epsilon_greedy, top_k_pareto"
             )
+        if self.proposals_per_generation <= 0:
+            raise ValueError("proposals_per_generation must be positive")

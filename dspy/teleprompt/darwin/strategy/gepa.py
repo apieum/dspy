@@ -226,7 +226,11 @@ class GEPAStrategy(BaseStrategy[Result]):
         self._iteration_started = True
 
         # Generate new candidates
-        self.current_newborns = self.generator.generate(self.current_parents, self.budget)
+        self.current_newborns = self.generator.generate_batch(
+            self.current_parents,
+            self.config.proposals_per_generation,
+            self.budget,
+        )
 
         # Cycle back to evaluation
         self.algorithm_state = "evaluate"

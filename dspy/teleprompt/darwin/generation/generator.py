@@ -34,6 +34,23 @@ class Generator(Channel):
         """
         ...
 
+    def generate_batch(self, parents: "Parents", count: int, budget=None) -> "NewBorns":
+        """Generate a batch of independent proposals from the same parents.
+
+        GEPA evaluates proposal batches before promotion. Keeping batching in
+        the shared generator interface lets other Darwin phases, including a
+        future MIPRO phase, feed candidates into the same evaluator and
+        selector pipeline.
+        """
+        if count <= 0:
+            raise ValueError("count must be positive")
+        from ..data.cohort import NewBorns
+
+        proposals = []
+        for _ in range(count):
+            proposals.extend(self.generate(parents, budget).to_list())
+        return NewBorns(*proposals, iteration=parents.iteration)
+
     def start_compilation(
         self,
         student: dspy.Module,
