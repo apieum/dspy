@@ -46,10 +46,12 @@ class TestGeneration:
         assert "Calling module.forward" not in caplog.text
 
     def test_reflection_receives_concrete_feedback_by_default(self):
+        example = dspy.Example(question="7 + 5", answer="12").with_inputs("question")
         feedback = FeedbackResult(
             traces=[[(None, {"question": "7 + 5"}, {"answer": "12"})]],
             diagnostics=["Score: 1.00 | Feedback: correct arithmetic"],
             scores=[1.0],
+            examples=[example],
         )
         mutator = ReflectivePromptMutator()
 
@@ -57,6 +59,9 @@ class TestGeneration:
 
         assert "7 + 5" in formatted
         assert "12" in formatted
+        assert "Inputs:" in formatted
+        assert "Expected Outputs:" in formatted
+        assert "Generated Outputs:" in formatted
 
     def test_mutation_compilation(self):
         """Test mutation generator compilation setup."""

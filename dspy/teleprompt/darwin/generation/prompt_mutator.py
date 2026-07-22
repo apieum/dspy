@@ -120,6 +120,28 @@ class ReflectivePromptMutator(PromptMutator):
         formatted_parts = []
         for i, (score, diagnostic) in enumerate(zip(feedback.scores, feedback.diagnostics)):
             example = feedback.examples[i] if i < len(feedback.examples) else None
+            input_info = "No inputs"
+            expected_info = "No expected output provided"
+            generated_info = "No generated output"
+            if example is not None:
+                try:
+                    example_dict = (
+                        example.toDict()
+                        if callable(getattr(example, "toDict", None))
+                        else dict(getattr(example, "__dict__", {}))
+                    )
+                    input_dict = example.inputs()
+                    input_info = str({key: example_dict.get(key, value) for key, value in input_dict.items()})
+                    input_keys = set(input_dict.keys())
+                    output_fields = {
+                        key: value
+                        for key, value in example_dict.items()
+                        if key not in input_keys and not key.startswith("_")
+                    }
+                    if output_fields:
+                        expected_info = str(output_fields)
+                except Exception:
+                    input_info = str(example)
             # Extract trace information using DSPy's standard trace format
             trace_info = "No trace"
             if (feedback.traces and i < len(feedback.traces) and
@@ -161,12 +183,22 @@ class ReflectivePromptMutator(PromptMutator):
                         output_parts.append(f"{k}: {v}")
 
                     output_str = ", ".join(output_parts)
+                    generated_info = output_str
                     trace_info = f"Input: {input_str} → Output: {output_str}"
 
+            side_info = (
+                feedback.metrics[i].side_info
+                if i < len(feedback.metrics) and hasattr(feedback.metrics[i], "side_info")
+                else None
+            )
+            side_info_text = f"\nSide information: {side_info}" if side_info else ""
             example_text = f"""Example {i+1}:
+Inputs: {input_info}
+Expected Outputs: {expected_info}
+Generated Outputs: {generated_info}
 Score: {score:.2f}
 Feedback: {diagnostic}
-Execution: {trace_info}"""
+Execution: {trace_info}{side_info_text}"""
             formatted_parts.append(example_text)
 
         return "\n\n".join(formatted_parts)
@@ -285,4 +317,3 @@ Execution: {trace_info}"""
 
         print("=" * 80)
         print()
-
