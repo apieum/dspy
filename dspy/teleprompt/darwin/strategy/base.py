@@ -176,6 +176,10 @@ class BaseStrategy(ABC, Generic[R]):
     # Evolutionary decision methods
     def should_terminate(self) -> bool:
         """Decide if optimization should terminate."""
+        for stopper in self.config.stoppers:
+            if stopper(self):
+                return True
+
         # Check budget exhaustion
         if self.budget <= 0:
             if not getattr(self, "_budget_exhaustion_notified", False):

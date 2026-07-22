@@ -79,6 +79,7 @@ from .dataset_manager import (
 )
 from .generation.config import ReflectiveMutationConfig, ModuleSelectionStrategy
 from .state import OptimizationCheckpoint
+from .stopping import Stopper, ScoreThresholdStopper, NoImprovementStopper, FileStopper, AnyStopper
 
 # GEPA convenience optimizers
 from .gepa_optimizers import GEPAMute, GEPAAdaptive
@@ -124,6 +125,11 @@ __all__ = [
     'FullEvaluationPolicy',
     'MinibatchEvaluationPolicy',
     'OptimizationCheckpoint',
+    'Stopper',
+    'ScoreThresholdStopper',
+    'NoImprovementStopper',
+    'FileStopper',
+    'AnyStopper',
     'GEPATwoPhasesEval',
     'EnhancedTraceCollector',
     'FeedbackResult',
