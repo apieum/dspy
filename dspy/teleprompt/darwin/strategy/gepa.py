@@ -14,7 +14,7 @@ from ..data.candidate import Candidate
 from ..data.cohort import NewBorns, Survivors, Parents
 from ..result import Result, Success, Failure
 from ..state import OptimizationCheckpoint
-from ..generation import SingleMutationSampling
+from ..generation import SingleMutationSampling, EpochShuffledBatchSampler
 
 if TYPE_CHECKING:
     from ..config import DarwinConfig
@@ -45,6 +45,7 @@ class GEPAStrategy(BaseStrategy[Result]):
         self.evaluation_cache = EvaluationCache()
         self._budget_exhaustion_notified = False
         self.rng = random.Random(config.seed)
+        self.batch_sampler = None
 
     def start_compilation(
         self, student: dspy.Module, *, trainset: list[dspy.Example], devset: list[dspy.Example] | None = None, teacher: dspy.Module | None = None, **kwargs
@@ -66,6 +67,9 @@ class GEPAStrategy(BaseStrategy[Result]):
         self.generations_without_improvement = 0
         self.history = []
         self.rng = random.Random(self.config.seed)
+        self.batch_sampler = self.config.batch_sampler or EpochShuffledBatchSampler(
+            self.config.mutation_config.minibatch_size,
+        )
 
         # Centralize train/dev handling so experiments can inject a different
         # dataset policy without changing the strategy itself.
@@ -300,6 +304,7 @@ class GEPAStrategy(BaseStrategy[Result]):
             self.config.proposals_per_generation,
             self.budget,
             sampling_strategy=self.config.sampling_strategy or SingleMutationSampling(),
+            batch_sampler=self.batch_sampler,
             rng=self.rng,
         )
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import random
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence, Any
 
 if TYPE_CHECKING:
     from ..data.cohort import Parents
@@ -27,6 +27,58 @@ class SamplingStrategy(ABC):
         rng: random.Random | None = None,
     ) -> list["Parents"]:
         """Return the parent cohort used by each proposal task."""
+
+
+class BatchSampler(ABC):
+    """Select reflection examples for proposal tasks."""
+
+    @abstractmethod
+    def sample(
+        self,
+        data: Sequence[Any],
+        count: int,
+        *,
+        rng: random.Random | None = None,
+    ) -> list[list[Any]]:
+        """Return one minibatch for each proposal task."""
+
+
+class EpochShuffledBatchSampler(BatchSampler):
+    """Yield sequential chunks from a shuffled, repeatedly cycling dataset."""
+
+    def __init__(self, minibatch_size: int):
+        if minibatch_size <= 0:
+            raise ValueError("minibatch_size must be positive")
+        self.minibatch_size = minibatch_size
+        self._order: list[Any] = []
+        self._position = 0
+
+    def sample(self, data, count, *, rng=None):
+        if count <= 0:
+            raise ValueError("count must be positive")
+        if not data:
+            return [[] for _ in range(count)]
+        rng = rng or random.Random()
+        if len(self._order) != len(data) or self._position >= len(self._order):
+            self._order = list(data)
+            rng.shuffle(self._order)
+            self._position = 0
+
+        batches = []
+        for _ in range(count):
+            if self._position + self.minibatch_size > len(self._order):
+                remainder = self._order[self._position:]
+                rng.shuffle(self._order)
+                self._position = 0
+                self._order = self._order
+                needed = self.minibatch_size - len(remainder)
+                batch = remainder + self._order[:needed]
+                self._position = needed
+            else:
+                batch = self._order[self._position:self._position + self.minibatch_size]
+                self._position += self.minibatch_size
+            batches.append(list(batch))
+        return batches
 
 
 class SingleMutationSampling(SamplingStrategy):
@@ -96,6 +148,8 @@ class PxNSampling(SamplingStrategy):
 
 __all__ = [
     "SamplingStrategy",
+    "BatchSampler",
+    "EpochShuffledBatchSampler",
     "SingleMutationSampling",
     "SameParentSampling",
     "IndependentSampling",

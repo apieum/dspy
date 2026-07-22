@@ -41,6 +41,7 @@ class Generator(Channel):
         budget=None,
         *,
         sampling_strategy=None,
+        batch_sampler=None,
         rng=None,
     ) -> "NewBorns":
         """Generate a batch of independent proposals from the same parents.
@@ -59,9 +60,18 @@ class Generator(Channel):
             if sampling_strategy is not None
             else [parents] * count
         )
+        feedback_batches = (
+            batch_sampler.sample(getattr(self, "feedback_data", []), len(parent_tasks), rng=rng)
+            if batch_sampler is not None
+            else [None] * len(parent_tasks)
+        )
         proposals = []
-        for task_parents in parent_tasks:
-            proposals.extend(self.generate(task_parents, budget).to_list())
+        try:
+            for task_parents, feedback_data in zip(parent_tasks, feedback_batches, strict=True):
+                self._active_feedback_data = feedback_data
+                proposals.extend(self.generate(task_parents, budget).to_list())
+        finally:
+            self._active_feedback_data = None
         return NewBorns(*proposals, iteration=parents.iteration)
 
     def start_compilation(

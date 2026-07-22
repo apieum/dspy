@@ -5,6 +5,7 @@ import dspy
 from dspy.teleprompt.darwin import Candidate
 from dspy.teleprompt.darwin.data.cohort import Parents
 from dspy.teleprompt.darwin.generation import (
+    EpochShuffledBatchSampler,
     IndependentSampling,
     PxNSampling,
     SameParentSampling,
@@ -59,3 +60,19 @@ def test_sampling_rejects_non_positive_counts():
             pass
         else:
             raise AssertionError("expected ValueError")
+
+
+def test_epoch_batch_sampler_returns_distinct_chunks_before_wrapping():
+    sampler = EpochShuffledBatchSampler(minibatch_size=2)
+    data = list(range(6))
+    batches = sampler.sample(data, 3, rng=random.Random(4))
+
+    assert sorted(value for batch in batches for value in batch) == data
+    assert all(len(batch) == 2 for batch in batches)
+
+
+def test_epoch_batch_sampler_is_reproducible():
+    data = list(range(8))
+    first = EpochShuffledBatchSampler(2).sample(data, 4, rng=random.Random(9))
+    second = EpochShuffledBatchSampler(2).sample(data, 4, rng=random.Random(9))
+    assert first == second

@@ -180,11 +180,13 @@ class ReflectivePromptMutation(Generator):
 
     def _get_feedback_minibatch(self) -> Dict[int, dspy.Example]:
         """Get the feedback data provided by strategy."""
-        if not self.feedback_data:
+        feedback_data = getattr(self, "_active_feedback_data", None)
+        if feedback_data is None:
+            feedback_data = self.feedback_data
+        if not feedback_data:
             return {}
 
-        # Use all feedback data provided by strategy (strategy already split it appropriately)
-        return {i: example for i, example in enumerate(self.feedback_data)}
+        return {i: example for i, example in enumerate(feedback_data)}
 
     def _ensure_evolvable(self, module: dspy.Module) -> EvolvableModule:
         """Wrap DSPy module as EvolvableModule."""
