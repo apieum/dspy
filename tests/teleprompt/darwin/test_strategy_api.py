@@ -96,6 +96,12 @@ def test_gepa_mute_is_budget_driven_by_default():
     assert optimizer.config.patience is None
 
 
+def test_darwin_config_is_budget_driven_by_default():
+    assert DarwinConfig().patience is None
+    with pytest.raises(ValueError):
+        DarwinConfig(patience=-1)
+
+
 def test_darwin_algorithm_phases(simple_trainset, dummy_lm):
     """The Darwin strategy should execute its optimization phases."""
     with dspy.context(lm=dummy_lm):

@@ -70,7 +70,9 @@ class DarwinConfig:
     perfect_score: Optional[float] = 1.0
     failure_score: float = 0.0
     skip_perfect_score: bool = True
-    patience: int = 3
+    # GEPA is budget-driven by default.  Set an integer explicitly to enable
+    # an optional no-improvement stopping condition.
+    patience: Optional[int] = None
     validation_split: float = 0.2
     minibatch_size: int = 3  # Size of minibatch for quick validation
     seed: int = 1
@@ -89,6 +91,8 @@ class DarwinConfig:
     def __post_init__(self):
         if not isinstance(self.failure_score, (int, float)):
             raise TypeError("failure_score must be numeric")
+        if self.patience is not None and self.patience < 0:
+            raise ValueError("patience must be non-negative or None")
         if self.mutation_config is None:
             self.mutation_config = ReflectiveMutationConfig(minibatch_size=self.minibatch_size)
         if self.candidate_selection_strategy not in {
