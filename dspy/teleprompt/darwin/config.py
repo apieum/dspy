@@ -40,7 +40,7 @@ class DarwinConfig:
     seed: int = 1
 
     # Dataset and lifecycle extension points
-    dataset_manager_factory: Type[Any] = DefaultDatasetManagerFactory
+    dataset_manager_factory: Any = DefaultDatasetManagerFactory
     observers: Tuple[Any, ...] = ()
 
     # Logging

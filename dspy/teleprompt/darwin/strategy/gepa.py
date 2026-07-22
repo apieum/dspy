@@ -46,7 +46,12 @@ class GEPAStrategy(BaseStrategy[Result]):
         # Centralize train/dev handling so experiments can inject a different
         # dataset policy without changing the strategy itself.
         manager_factory = self.config.dataset_manager_factory
-        manager = manager_factory(split_ratio=self.config.validation_split).create(
+        # Accept both the default factory class and an already-configured
+        # factory instance.  The latter is useful when an experiment needs a
+        # custom split policy or a stateful dataset manager.
+        if isinstance(manager_factory, type):
+            manager_factory = manager_factory(split_ratio=self.config.validation_split)
+        manager = manager_factory.create(
             self.trainset,
             self.devset if self.devset else None,
         )

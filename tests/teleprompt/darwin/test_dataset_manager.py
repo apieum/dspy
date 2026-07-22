@@ -38,3 +38,19 @@ def test_factory_preserves_configured_split_ratio():
 
     assert manager.num_eval_tasks == 5
     assert manager.num_dev_examples == 5
+
+
+def test_strategy_accepts_preconfigured_factory_instance():
+    """A factory instance should not be called as if it were a class."""
+    from dspy.teleprompt.darwin import Darwin, DarwinConfig, GEPAStrategy
+    from dspy.utils.dummies import DummyLM
+
+    student = dspy.Predict("question -> answer")
+    factory = DefaultDatasetManagerFactory(split_ratio=0.5)
+
+    with dspy.context(lm=DummyLM([{"answer": "4"}])):
+        optimizer = Darwin(
+            GEPAStrategy,
+            DarwinConfig(max_lm_calls=1, dataset_manager_factory=factory),
+        )
+        optimizer.compile(student, trainset=_examples(4))
