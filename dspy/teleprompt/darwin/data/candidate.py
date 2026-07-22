@@ -22,6 +22,7 @@ class Candidate:
     parents: List['Candidate'] = field(default_factory=list)  # Direct parent references
     generation_number: int = 0  # Which generation this belongs to
     creation_metadata: Dict[str, Any] = field(default_factory=dict)
+    proposal_minibatch: Optional[List[Example]] = None
     scores: List["Metric"] = field(default_factory=list)  # List of fitness scores with full context
 
     def __hash__(self) -> int:

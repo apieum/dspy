@@ -65,14 +65,27 @@ class Generator(Channel):
             if batch_sampler is not None
             else [None] * len(parent_tasks)
         )
+        from .sampling import ProposalTask
+        tasks = [
+            ProposalTask(task_parents, list(feedback_data or []), {"proposal_index": index})
+            for index, (task_parents, feedback_data) in enumerate(
+                zip(parent_tasks, feedback_batches, strict=True)
+            )
+        ]
         proposals = []
-        try:
-            for task_parents, feedback_data in zip(parent_tasks, feedback_batches, strict=True):
-                self._active_feedback_data = feedback_data
-                proposals.extend(self.generate(task_parents, budget).to_list())
-        finally:
-            self._active_feedback_data = None
+        for task in tasks:
+            proposals.extend(self.generate_task(task, budget).to_list())
         return NewBorns(*proposals, iteration=parents.iteration)
+
+    def generate_task(self, task, budget=None) -> "NewBorns":
+        """Generate one explicit proposal task while preserving ``generate``."""
+        try:
+            self._active_proposal_task = task
+            self._active_feedback_data = task.feedback_data
+            return self.generate(task.parents, budget)
+        finally:
+            self._active_proposal_task = None
+            self._active_feedback_data = None
 
     def start_compilation(
         self,

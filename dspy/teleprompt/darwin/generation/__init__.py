@@ -4,6 +4,7 @@ from ..data.cohort import Cohort
 from .generator import Generator
 from .sampling import (
     SamplingStrategy,
+    ProposalTask,
     BatchSampler,
     EpochShuffledBatchSampler,
     SingleMutationSampling,
@@ -35,6 +36,7 @@ __all__ = [
     'Cohort',
     'Generator',
     'SamplingStrategy',
+    'ProposalTask',
     'BatchSampler',
     'EpochShuffledBatchSampler',
     'SingleMutationSampling',

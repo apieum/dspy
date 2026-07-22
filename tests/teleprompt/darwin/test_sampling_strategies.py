@@ -6,11 +6,13 @@ from dspy.teleprompt.darwin import Candidate
 from dspy.teleprompt.darwin.data.cohort import Parents
 from dspy.teleprompt.darwin.generation import (
     EpochShuffledBatchSampler,
+    Generator,
     IndependentSampling,
     PxNSampling,
     SameParentSampling,
     SingleMutationSampling,
 )
+from dspy.teleprompt.darwin.data.cohort import NewBorns
 
 
 def _parents():
@@ -76,3 +78,33 @@ def test_epoch_batch_sampler_is_reproducible():
     first = EpochShuffledBatchSampler(2).sample(data, 4, rng=random.Random(9))
     second = EpochShuffledBatchSampler(2).sample(data, 4, rng=random.Random(9))
     assert first == second
+
+
+class TaskRecordingGenerator(Generator):
+    def __init__(self, feedback_data):
+        super().__init__()
+        self.feedback_data = feedback_data
+        self.tasks = []
+
+    def generate(self, parents, budget=None):
+        self.tasks.append(self._active_proposal_task)
+        return NewBorns(
+            Candidate(dspy.Predict("question -> answer"), parents=list(parents)),
+            iteration=parents.iteration,
+        )
+
+
+def test_generate_batch_exposes_explicit_parent_and_minibatch_tasks():
+    generator = TaskRecordingGenerator(list(range(6)))
+    generator.generate_batch(
+        _parents(),
+        2,
+        sampling_strategy=SameParentSampling(2),
+        batch_sampler=EpochShuffledBatchSampler(2),
+        rng=random.Random(5),
+    )
+
+    assert len(generator.tasks) == 2
+    assert all(task.parents.size() == 1 for task in generator.tasks)
+    assert all(len(task.feedback_data) == 2 for task in generator.tasks)
+    assert generator.tasks[0].feedback_data != generator.tasks[1].feedback_data

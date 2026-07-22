@@ -15,6 +15,7 @@ from .selection import Selector
 from .generation import (
     Generator,
     SamplingStrategy,
+    ProposalTask,
     BatchSampler,
     EpochShuffledBatchSampler,
     SingleMutationSampling,
@@ -93,6 +94,7 @@ __all__ = [
     'Selector',
     'Generator',
     'SamplingStrategy',
+    'ProposalTask',
     'BatchSampler',
     'EpochShuffledBatchSampler',
     'SingleMutationSampling',

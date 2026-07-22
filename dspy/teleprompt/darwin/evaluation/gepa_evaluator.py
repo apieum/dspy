@@ -86,19 +86,20 @@ class ParentFastCompare(Evaluator):
 
     def _validate_on_minibatch(self, child: 'Candidate', budget: Budget) -> tuple[bool, int]:
         """Compares a child and parent on a random minibatch from the development set."""
-        if not self.minibatch_data:
+        minibatch_data = child.proposal_minibatch or self.minibatch_data
+        if not minibatch_data:
             return False, 0, float("-inf")
 
         try:
-            cost = len(self.minibatch_data) * (len(child.parents) + 1)
+            cost = len(minibatch_data) * (len(child.parents) + 1)
             if hasattr(budget, "can_spend") and not budget.can_spend("evaluation", cost):
                 return False, 0, float("-inf")
             # Notify observers about validation start with all relevant info
-            self.publish('validate_on_minibatch', child, len(self.minibatch_data))
-            child_scores = self._evaluate(child, self.minibatch_data, persist_scores=False)
+            self.publish('validate_on_minibatch', child, len(minibatch_data))
+            child_scores = self._evaluate(child, minibatch_data, persist_scores=False)
             parent_scores = []
             for parent in child.parents:
-                scores = self._evaluate(parent, self.minibatch_data, persist_scores=False)
+                scores = self._evaluate(parent, minibatch_data, persist_scores=False)
                 parent_scores.append([float(score.value) for score in scores])
 
             child_values = [float(score.value) for score in child_scores]
@@ -128,7 +129,7 @@ class ParentFastCompare(Evaluator):
         except Exception as e:
             # Keep this as direct logging since it's an error case
             logger.warning(f"Minibatch validation failed: {e}")
-            return False, len(self.minibatch_data) * len(child.parents), float("-inf")
+            return False, len(minibatch_data) * len(child.parents), float("-inf")
 
     def _evaluate(self, candidate, examples, *, persist_scores):
         cached = [self.evaluation_cache.get(candidate, example) for example in examples]

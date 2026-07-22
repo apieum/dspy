@@ -9,10 +9,20 @@ from __future__ import annotations
 
 import random
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Sequence, Any
 
 if TYPE_CHECKING:
     from ..data.cohort import Parents
+
+
+@dataclass
+class ProposalTask:
+    """Explicit work item sent through Darwin's proposal pipeline."""
+
+    parents: "Parents"
+    feedback_data: list[Any] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class SamplingStrategy(ABC):
@@ -147,6 +157,7 @@ class PxNSampling(SamplingStrategy):
 
 
 __all__ = [
+    "ProposalTask",
     "SamplingStrategy",
     "BatchSampler",
     "EpochShuffledBatchSampler",

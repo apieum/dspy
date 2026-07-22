@@ -122,6 +122,7 @@ class ReflectivePromptMutation(Generator):
                         module=child_module,
                         generation_number=parent.generation_number + 1,
                         parents=[parent],
+                        proposal_minibatch=list(minibatch.values()),
                     )
 
                     # Spend budget for the generation (reflection + mutations)
