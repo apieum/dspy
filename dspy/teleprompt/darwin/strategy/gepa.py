@@ -11,7 +11,7 @@ import dspy
 from dspy.teleprompt.utils import get_signature, set_signature
 from .base import BaseStrategy
 from ..data.candidate import Candidate
-from ..data.cohort import NewBorns, Survivors, Parents
+from ..data.cohort import Cohort, NewBorns, Survivors, Parents
 from ..result import Result, Success, Failure
 from ..state import OptimizationCheckpoint
 from ..generation import SingleMutationSampling, EpochShuffledBatchSampler
@@ -318,9 +318,12 @@ class GEPAStrategy(BaseStrategy[Result]):
                 for candidate in [restored[record.get("id")]]
             ]
 
-        self.current_newborns = NewBorns(*cohort("newborns"), iteration=self.current_generation)
-        self.current_survivors = Survivors(*cohort("survivors"), iteration=self.current_generation)
-        self.current_parents = Parents(*cohort("parents"), iteration=self.current_generation)
+        # Restored state is a generic cohort snapshot. The strategy state
+        # machine only requires the Cohort protocol; concrete producer types
+        # are used when creating new results, not when loading persisted data.
+        self.current_newborns = Cohort(*cohort("newborns"), iteration=self.current_generation)
+        self.current_survivors = Cohort(*cohort("survivors"), iteration=self.current_generation)
+        self.current_parents = Cohort(*cohort("parents"), iteration=self.current_generation)
 
         # Rebuild the selector's per-task Pareto state from restored scores.
         self._selector = self.config.selection()

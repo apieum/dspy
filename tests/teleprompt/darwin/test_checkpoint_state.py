@@ -46,3 +46,4 @@ def test_completed_checkpoint_can_be_resumed(tmp_path):
 
     assert compiled._compiled is True
     assert resumed.get_last_result().candidates
+    assert type(resumed.strategy.current_parents).__name__ == "Cohort"
