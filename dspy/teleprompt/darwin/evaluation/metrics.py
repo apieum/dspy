@@ -23,7 +23,8 @@ class Metric:
                  errors: Dict[str, Any] = dict(),
                  suggestions: List[str] = list(),
                  trace: Any = None,
-                 objective_scores: Optional[Dict[str, float]] = None):
+                 objective_scores: Optional[Dict[str, float]] = None,
+                 side_info: Any = None):
         """Initialize metric result.
 
         Args:
@@ -42,6 +43,7 @@ class Metric:
         self.suggestions = suggestions
         self.trace = trace
         self.objective_scores = objective_scores or {}
+        self.side_info = side_info
 
     @property
     def id(self):

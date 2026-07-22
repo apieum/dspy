@@ -139,6 +139,7 @@ class Candidate:
                         suggestions=result.suggestions,
                         trace=result.trace if result.trace is not None else trace,
                         objective_scores=result.objective_scores,
+                        side_info=result.side_info,
                     )
 
                 # Publish evaluation event to observers via channel

@@ -223,6 +223,21 @@ class TestGeneration:
         assert received["pred_name"] == "0"
         assert received["pred_trace"] == trace[0]
 
+    def test_feedback_side_information_is_preserved(self):
+        def metric(example, prediction, trace=None):
+            return dspy.teleprompt.darwin.Metric(
+                0.5, feedback="diagnostic", side_info={"confidence": 0.8}
+            )
+
+        provider = FeedbackProvider(assessor=metric)
+        score, diagnostic, side_info = provider.evaluate_rich(
+            dspy.Example(question="q", answer="a"), Mock(), []
+        )
+
+        assert score == 0.5
+        assert "diagnostic" in diagnostic
+        assert side_info == {"confidence": 0.8}
+
     def test_feedback_provider_accepts_short_mu_f_functions(self):
         provider = FeedbackProvider(
             assessor=lambda example, prediction, trace=None: (0.5, "base"),

@@ -89,7 +89,9 @@ class EvolvableModule(Module):
                     predictors[target_module_idx]
                     if 0 <= target_module_idx < len(predictors) else None
                 )
-                score, diagnostic = feedback_provider.evaluate(
+                evaluate = getattr(feedback_provider, "evaluate_rich", None)
+                evaluator = evaluate or feedback_provider.evaluate
+                evaluation = evaluator(
                     example, prediction, trace, target_module_idx,
                     pred_name=getattr(target_predictor, "name", None),
                     pred_trace=(
@@ -97,6 +99,11 @@ class EvolvableModule(Module):
                         if target_module_idx < len(trace) else None
                     ),
                 )
+                if len(evaluation) == 3:
+                    score, diagnostic, side_info = evaluation
+                else:
+                    score, diagnostic = evaluation
+                    side_info = None
                 
                 scores.append(score)
                 diagnostics.append(diagnostic)
@@ -106,6 +113,7 @@ class EvolvableModule(Module):
                     id=task_id(example),
                     feedback=str(diagnostic or ""),
                     trace=trace,
+                    side_info=side_info,
                 ))
                 
             except Exception as e:

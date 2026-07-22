@@ -54,6 +54,7 @@ def _as_assessor(metric: Callable[[Any, Any, Optional[Any]], float]):
                     suggestions=result.suggestions,
                     trace=result.trace if result.trace is not None else trace,
                     objective_scores=result.objective_scores,
+                    side_info=result.side_info,
                 )
             if isinstance(result, tuple) and len(result) == 2:
                 value, feedback = result

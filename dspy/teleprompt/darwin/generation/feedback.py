@@ -68,6 +68,14 @@ class FeedbackProvider:
     def evaluate(self, example: dspy.Example, prediction, trace: Optional[List] = None,
                 module_idx: Optional[int] = None, pred_name: Optional[str] = None,
                 pred_trace: Optional[Any] = None) -> tuple[float, str]:
+        score, diagnostic, _ = self.evaluate_rich(
+            example, prediction, trace, module_idx, pred_name, pred_trace
+        )
+        return score, diagnostic
+
+    def evaluate_rich(self, example: dspy.Example, prediction, trace: Optional[List] = None,
+                      module_idx: Optional[int] = None, pred_name: Optional[str] = None,
+                      pred_trace: Optional[Any] = None) -> tuple[float, str, Any]:
         """Evaluate example and provide feedback, now capturing rich µf output.
 
         Args:
@@ -143,7 +151,8 @@ class FeedbackProvider:
                 logger.warning(f"Enhanced feedback function failed: {e}")
                 diagnostic += f" | Enhanced feedback failed: {str(e)}"
 
-        return score, diagnostic
+        side_info = getattr(metric_result, "side_info", None)
+        return score, diagnostic, side_info
 
     def _format_rich_feedback(self, feedback_dict: dict, score: float) -> str:
         """Format rich feedback dictionary from enhanced feedback function."""
