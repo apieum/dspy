@@ -102,6 +102,14 @@ def test_darwin_config_is_budget_driven_by_default():
         DarwinConfig(patience=-1)
 
 
+def test_strategy_minibatch_sampling_uses_seeded_rng():
+    first = GEPAStrategy(DarwinConfig(seed=17))
+    second = GEPAStrategy(DarwinConfig(seed=17))
+    data = list(range(10))
+
+    assert first._create_minibatch(data, 4) == second._create_minibatch(data, 4)
+
+
 def test_darwin_algorithm_phases(simple_trainset, dummy_lm):
     """The Darwin strategy should execute its optimization phases."""
     with dspy.context(lm=dummy_lm):

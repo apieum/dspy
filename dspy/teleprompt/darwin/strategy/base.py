@@ -102,7 +102,10 @@ class BaseStrategy(ABC, Generic[R]):
         # Use random sampling to get diverse examples for minibatch
         # This is better than just taking first N examples
         import random
-        return random.sample(data, size)
+        rng = getattr(self, "rng", None)
+        if rng is None:
+            rng = random
+        return rng.sample(data, size)
 
     # Component property accessors (lazy instantiation)
     @property
