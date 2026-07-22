@@ -2,7 +2,6 @@
 
 from .candidate import Candidate
 from .cohort import Cohort, Survivors, Parents, NewBorns
-from .cohort_model import CohortModel
 
 __all__ = [
     'Candidate',
@@ -10,5 +9,4 @@ __all__ = [
     'Survivors',
     'Parents', 
     'NewBorns',
-    'CohortModel',
 ]

@@ -8,7 +8,6 @@ with GEPA as the first "recipe" using the framework.
 from .optimizer import Darwin
 from .data.candidate import Candidate
 from .data.cohort import Cohort, Survivors, Parents, NewBorns
-from .data.cohort_model import CohortModel
 
 # Protocol interfaces
 from .budget import Budget
@@ -94,7 +93,6 @@ __all__ = [
     'Survivors',
     'Parents',
     'NewBorns',
-    'CohortModel',
 
     # Protocol interfaces
     'Budget',

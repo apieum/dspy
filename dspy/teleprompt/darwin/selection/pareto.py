@@ -59,10 +59,7 @@ class ParetoFrontier(Selector):
         self.elitist_pruning = False
         self.diversity_archive = None
         self.frontier_type = "instance"
-        self.cohort_model = None
-
     def configure(self, config: "DarwinConfig") -> None:
-        self.cohort_model = getattr(config, "cohort_model", None)
         self.frontier_type = getattr(config, "frontier_type", self.frontier_type)
 
     def start_compilation(self, student: dspy.Module, verbose: bool=False) -> None:
@@ -115,18 +112,11 @@ class ParetoFrontier(Selector):
             for candidate in pareto_frontier
         }
 
-        if self.cohort_model is not None:
-            result = self.cohort_model.parents(
-                pareto_frontier,
-                iteration=survivors.iteration + 1,
-                task_wins=relevant_task_wins,
-            )
-        else:
-            result = Parents(
-                *pareto_frontier,
-                iteration=survivors.iteration + 1,
-                task_wins=relevant_task_wins
-            )
+        result = Parents(
+            *pareto_frontier,
+            iteration=survivors.iteration + 1,
+            task_wins=relevant_task_wins
+        )
 
         # Observer notification already handled above
 

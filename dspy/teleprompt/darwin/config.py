@@ -14,7 +14,6 @@ from .dataset_manager import DefaultDatasetManagerFactory
 from .evaluation.acceptance import StrictImprovementAcceptance
 from .evaluation.proposal_selection import AllImprovements
 from .evaluation.policy import FullEvaluationPolicy
-from .data.cohort_model import CohortModel
 
 
 @dataclass
@@ -59,9 +58,6 @@ class DarwinConfig:
     sampling_strategy: Optional[SamplingStrategy] = None
     batch_sampler: Optional[BatchSampler] = None
     mutation_config: ReflectiveMutationConfig = None
-    # Domain model used to materialize role-specific cohorts.  Strategies can
-    # replace this without changing selection, evaluation, or restoration.
-    cohort_model: CohortModel = None
 
     # System parameters we actually have
     max_lm_calls: int = 100
@@ -93,11 +89,6 @@ class DarwinConfig:
     verbose: bool = False
 
     def __post_init__(self):
-        if self.cohort_model is None:
-            self.cohort_model = CohortModel()
-        for role in ("cohort", "parents", "newborns", "survivors"):
-            if not callable(getattr(self.cohort_model, role, None)):
-                raise TypeError(f"cohort_model must provide a callable {role}() factory")
         if not isinstance(self.failure_score, (int, float)):
             raise TypeError("failure_score must be numeric")
         if self.patience is not None and self.patience < 0:

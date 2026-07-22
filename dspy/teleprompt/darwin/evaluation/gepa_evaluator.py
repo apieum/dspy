@@ -30,7 +30,7 @@ class ParentFastCompare(Evaluator):
 
     def __init__(self, assessor: Assessor, minibatch_data: List[dspy.Example] = None,
                  acceptance_criterion=None, proposal_selection=None,
-                 evaluation_cache=None, cohort_model=None, **kwargs):
+                 evaluation_cache=None, **kwargs):
         """
         Args:
             assessor: The assessor to evaluate predictions against examples.
@@ -42,7 +42,6 @@ class ParentFastCompare(Evaluator):
         self.acceptance_criterion = acceptance_criterion or StrictImprovementAcceptance()
         self.evaluation_cache = evaluation_cache or EvaluationCache()
         self.proposal_selection = proposal_selection or AllImprovements()
-        self.cohort_model = cohort_model
         self.verbose = False
 
     def start_compilation(self, student: dspy.Module, dataset_manager=None, verbose: bool = False) -> None:
@@ -83,10 +82,6 @@ class ParentFastCompare(Evaluator):
 
         self.publish('parent_fast_compare_summary',
                     {'passed': len(promising_candidates), 'total': len(new_borns.candidates)})
-        if self.cohort_model is not None:
-            return self.cohort_model.survivors(
-                promising_candidates, iteration=new_borns.iteration
-            )
         return Survivors(*promising_candidates, iteration=new_borns.iteration)
 
     def _validate_on_minibatch(self, child: 'Candidate', budget: Budget) -> tuple[bool, int]:
@@ -181,7 +176,7 @@ class FullTaskScores(Evaluator):
     """
 
     def __init__(self, assessor: Assessor, validation_data: List[dspy.Example] = None,
-                 evaluation_cache=None, validation_policy=None, cohort_model=None, **kwargs):
+                 evaluation_cache=None, validation_policy=None, **kwargs):
         """
         Args:
             assessor: The assessor to evaluate predictions against examples.
@@ -192,7 +187,6 @@ class FullTaskScores(Evaluator):
         self.validation_data = validation_data or []
         self.evaluation_cache = evaluation_cache or EvaluationCache()
         self.validation_policy = validation_policy or FullEvaluationPolicy()
-        self.cohort_model = cohort_model
         self._iteration = 0
         self.verbose = False
 
@@ -246,10 +240,6 @@ class FullTaskScores(Evaluator):
                     {'candidates_count': len(new_borns.candidates), 'tasks_count': len(self.validation_data)})
         self._iteration += 1
         # All candidates that get a full evaluation are considered "survivors" of this stage.
-        if self.cohort_model is not None:
-            return self.cohort_model.survivors(
-                evaluated_candidates, iteration=new_borns.iteration
-            )
         return Survivors(*evaluated_candidates, iteration=new_borns.iteration)
 
     def _evaluate(self, candidate, examples):

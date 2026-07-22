@@ -95,7 +95,6 @@ class Evaluator(Channel):
             # This dictionary now contains all arguments, correctly mapped.
             all_provided_args = bound_args.arguments
             all_provided_args.pop('self', None)
-            self.cohort_model = all_provided_args.get('cohort_model')
 
             # Dataset management is now handled via split strategy
             self.evaluators = []
@@ -121,23 +120,13 @@ class Evaluator(Channel):
         def evaluate(self, new_borns: "NewBorns", budget: "Budget") -> "Survivors":
             """Executes the chain of evaluators sequentially."""
             current_cohort = new_borns
-            if self.cohort_model is not None:
-                survivors = self.cohort_model.survivors(
-                    new_borns.to_list(), iteration=new_borns.iteration
-                )
-            else:
-                survivors = Survivors(*new_borns.to_list(), iteration=new_borns.iteration)
+            survivors = Survivors(*new_borns.to_list(), iteration=new_borns.iteration)
             for i, evaluator in enumerate(self.evaluators):
                 survivors = evaluator.evaluate(current_cohort, budget)
 
                 # If not the last step, convert survivors to newborns for the next evaluator
                 if i < len(self.evaluators) - 1:
-                    if self.cohort_model is not None:
-                        current_cohort = self.cohort_model.newborns(
-                            survivors.to_list(), iteration=survivors.iteration
-                        )
-                    else:
-                        current_cohort = NewBorns(*survivors.to_list(), iteration=survivors.iteration)
+                    current_cohort = NewBorns(*survivors.to_list(), iteration=survivors.iteration)
 
             return survivors
 

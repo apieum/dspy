@@ -204,9 +204,7 @@ class GEPAStrategy(BaseStrategy[Result]):
     def _initialize_step(self) -> None:
         """Create the seed cohort for the current compilation."""
         initial_candidate = Candidate(self.student.deepcopy(), generation_number=0)
-        self.current_newborns = self.config.cohort_model.newborns(
-            [initial_candidate], iteration=0
-        )
+        self.current_newborns = NewBorns([initial_candidate], iteration=0)
         self.algorithm_state = "evaluate"
 
     def _install_signal_handlers(self) -> None:
