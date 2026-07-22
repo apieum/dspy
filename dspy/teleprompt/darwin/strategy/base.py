@@ -225,8 +225,12 @@ class BaseStrategy(ABC, Generic[R]):
             if mutation_config and mutation_config.feedback_provider is not None
             else FeedbackProvider(assessor=feedback_assessor, feedback_function=feedback_function)
         )
+        # GEPA reflects on training examples and reserves validation examples
+        # for candidate acceptance/full scoring.  Mixing these sets makes the
+        # proposal step leak validation data and diverges from the reference
+        # algorithm.
         feedback_data = self._create_minibatch(
-            self.validation_data,
+            self.training_data,
             mutation_config.minibatch_size if mutation_config else self.config.minibatch_size,
         )
 
