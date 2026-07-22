@@ -134,6 +134,18 @@ class TestGeneration:
             module_idx = generator._select_target_module(3)
             assert 0 <= module_idx < 3
 
+    def test_failed_only_targets_predictor_with_failed_trace(self):
+        generator = ReflectivePromptMutation(
+            feedback_provider=FeedbackProvider(assessor=simple_metric),
+            module_selection=ModuleSelectionStrategy.FAILED_ONLY.value,
+        )
+        traces = [[
+            (object(), {"x": "ok"}, {"y": "fine"}),
+            (object(), {"x": "ok"}, {"y": "FailedPrediction: tool error"}),
+        ]]
+
+        assert generator._select_failed_module(traces, 2) == 1
+
     def test_reflective_mutation_config_restores_advanced_selection(self):
         """Test restored mutation config is accepted by the new generator path."""
         feedback_provider = FeedbackProvider(assessor=simple_metric)

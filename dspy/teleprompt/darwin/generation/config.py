@@ -12,6 +12,7 @@ class ModuleSelectionStrategy(Enum):
     WORST_PERFORMING = "worst_performing"
     ALL = "all"
     ROUND_ROBIN = "round_robin"
+    FAILED_ONLY = "failed_only"
 
 
 @dataclass

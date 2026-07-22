@@ -142,6 +142,10 @@ class ReflectivePromptMutation(Generator):
                     feedback = evolvable.collect_traces_and_evaluate(
                         minibatch, self.feedback_provider, module_idx
                     )
+                    if self.module_selection == ModuleSelectionStrategy.FAILED_ONLY.value:
+                        module_idx = self._select_failed_module(
+                            feedback.traces, len(predictors), parent
+                        )
 
                     # Reuse the parent rollout for acceptance when an
                     # evaluation cache is attached by the strategy.  This is
@@ -213,6 +217,10 @@ class ReflectivePromptMutation(Generator):
 
     def _select_target_module(self, num_modules: int, parent: Optional[Candidate] = None) -> int:
         """Select module to mutate."""
+        if self.module_selection == ModuleSelectionStrategy.FAILED_ONLY.value:
+            # The trace is needed to identify the failed predictor; generate()
+            # refines this provisional target after the single parent rollout.
+            return 0
         if self.module_selection == ModuleSelectionStrategy.ROUND_ROBIN.value:
             key = id(parent) if parent is not None else None
             module_idx = self._next_module_by_parent.get(key, 0) % num_modules
@@ -228,6 +236,33 @@ class ReflectivePromptMutation(Generator):
             return self._select_worst_performing_module(parent, num_modules)
         else:
             raise ValueError(f"Unknown module selection strategy: {self.module_selection}")
+
+    def _select_failed_module(self, traces, num_modules: int, parent=None) -> int:
+        """Choose the predictor whose execution trace contains a failure."""
+        failures = [0] * num_modules
+        for trace in traces or []:
+            for index, entry in enumerate(trace or []):
+                if index >= num_modules or len(entry) < 3:
+                    continue
+                _, inputs, outputs = entry[:3]
+                values = list((inputs or {}).values()) + list((outputs or {}).values())
+                text = " ".join(str(value) for value in values).lower()
+                if (
+                    "failedprediction" in text
+                    or "error" in text
+                    or "exception" in text
+                    or any("failedprediction" in type(value).__name__.lower() for value in values)
+                ):
+                    failures[index] += 1
+        if any(failures):
+            return max(range(num_modules), key=lambda index: failures[index])
+        return self._select_target_module_without_failed_only(num_modules, parent)
+
+    def _select_target_module_without_failed_only(self, num_modules: int, parent=None) -> int:
+        key = id(parent) if parent is not None else None
+        module_idx = self._next_module_by_parent.get(key, 0) % num_modules
+        self._next_module_by_parent[key] = module_idx + 1
+        return module_idx
 
     def _select_worst_performing_module(self, parent: Candidate, num_modules: int) -> int:
         if parent is None or not parent.scores:
