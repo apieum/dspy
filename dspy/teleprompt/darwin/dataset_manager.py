@@ -57,7 +57,11 @@ class DefaultDatasetManager:
             return
 
         split_size = min(max(1, int(len(training) * split_ratio)), len(training) - 1)
+        # Shuffle before splitting so dataset ordering does not systematically
+        # bias the evaluation partition.  The local RNG keeps experiments
+        # reproducible when a seed is supplied without changing global state.
         items = list(training.items())
+        self._rng.shuffle(items)
         self.eval_data = dict(items[:split_size])
         self.dev_data = dict(items[split_size:])
 

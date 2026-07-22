@@ -48,6 +48,15 @@ def test_seeded_feedback_sampling_is_reproducible():
     assert list(first) == list(second)
 
 
+def test_seeded_automatic_split_is_reproducible_and_shuffled():
+    examples = _examples(10)
+    first = DefaultDatasetManager(examples, split_ratio=0.5, seed=7)
+    second = DefaultDatasetManager(examples, split_ratio=0.5, seed=7)
+
+    assert list(first.get_eval_set()) == list(second.get_eval_set())
+    assert list(first.get_eval_set()) != [0, 1, 2, 3, 4]
+
+
 def test_strategy_accepts_preconfigured_factory_instance():
     """A factory instance should not be called as if it were a class."""
     from dspy.teleprompt.darwin import Darwin, DarwinConfig, GEPAStrategy
