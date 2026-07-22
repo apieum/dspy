@@ -14,6 +14,7 @@ class OptimizationCheckpoint:
     history: list[dict[str, Any]] = field(default_factory=list)
     budget: dict[str, Any] = field(default_factory=dict)
     candidates: list[dict[str, Any]] = field(default_factory=list)
+    strategy_state: dict[str, Any] = field(default_factory=dict)
     rng_state: Any = None
     stop_reason: str | None = None
     completed: bool = False

@@ -286,10 +286,21 @@ class GEPAStrategy(BaseStrategy[Result]):
             history=list(self.history),
             budget=remaining if isinstance(remaining, dict) else {"remaining": remaining},
             candidates=candidates,
+            strategy_state=self._get_checkpoint_strategy_state(),
             rng_state=self.rng.getstate(),
             stop_reason=self._signal_stop_reason,
             completed=completed,
         )
+
+    def _get_checkpoint_strategy_state(self) -> dict:
+        """Return JSON-safe scalar state needed for deterministic resumption."""
+        return {
+            "generations_without_improvement": getattr(self, "generations_without_improvement", 0),
+            "merge_due": getattr(self, "_merge_due", False),
+            "merge_attempts": getattr(self, "_merge_attempts", 0),
+            "iteration_started": getattr(self, "_iteration_started", False),
+            "budget_exhaustion_notified": getattr(self, "_budget_exhaustion_notified", False),
+        }
 
     @staticmethod
     def _serialize_creation_metadata(metadata):
@@ -360,6 +371,16 @@ class GEPAStrategy(BaseStrategy[Result]):
         self.history = list(checkpoint.history)
         self.current_generation = checkpoint.generation
         self.algorithm_state = "terminate" if checkpoint.completed else checkpoint.algorithm_state
+        strategy_state = checkpoint.strategy_state or {}
+        self.generations_without_improvement = int(
+            strategy_state.get("generations_without_improvement", 0)
+        )
+        self._merge_due = bool(strategy_state.get("merge_due", False))
+        self._merge_attempts = int(strategy_state.get("merge_attempts", 0))
+        self._iteration_started = bool(strategy_state.get("iteration_started", False))
+        self._budget_exhaustion_notified = bool(
+            strategy_state.get("budget_exhaustion_notified", False)
+        )
         if checkpoint.rng_state is not None:
             self.rng.setstate(_tuple_tree(checkpoint.rng_state))
 

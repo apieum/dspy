@@ -28,6 +28,7 @@ def test_checkpoint_manifest_is_written_and_json_safe(tmp_path):
     assert "cohort_attributes" in checkpoint.candidates[0]
     assert checkpoint.rng_state is not None
     assert "scores" in checkpoint.candidates[0]
+    assert "merge_attempts" in checkpoint.strategy_state
 
 
 def test_completed_checkpoint_can_be_resumed(tmp_path):
