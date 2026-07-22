@@ -173,7 +173,6 @@ def run_darwin(trainset, valset, lm, budget: int, metric, seed: int) -> dict[str
         metric=metric,
         max_calls=budget,
         minibatch_size=3,
-        patience=2,
         verbose=False,
         seed=seed,
     )
@@ -254,7 +253,11 @@ def main() -> None:
                 {
                     "suite": suite_name,
                     "seed": seed,
-                    **run_darwin(trainset, valset, darwin_lm, args.budget, make_darwin_metric(suite_name), seed),
+                    # Both optimizers receive the exact same metric callable.
+                    # Darwin's richer feedback metric remains available for
+                    # standalone experiments, but must not be used in an
+                    # apples-to-apples comparison.
+                    **run_darwin(trainset, valset, darwin_lm, args.budget, official_metric, seed),
                 },
                 {
                     "suite": suite_name,
