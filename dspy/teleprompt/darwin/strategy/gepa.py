@@ -19,7 +19,6 @@ from ..state import OptimizationCheckpoint
 from ..generation import SingleMutationSampling, EpochShuffledBatchSampler
 from ..evaluation import EvaluationCache
 from ..evaluation import Metric
-from .execution import ExecutionGraph
 
 if TYPE_CHECKING:
     from ..config import DarwinConfig
@@ -48,15 +47,6 @@ class GEPAStrategy(BaseStrategy[Result]):
     def __init__(self, config: 'DarwinConfig'):
         super().__init__(config)
         self.algorithm_state = "initialize"  # initialize -> evaluate -> select -> generate -> repeat
-        configured_graph = config.execution_graph
-        if configured_graph is None:
-            self.execution_graph = ExecutionGraph.gepa(self)
-        elif callable(configured_graph) and not hasattr(configured_graph, "step"):
-            self.execution_graph = configured_graph(self)
-        else:
-            self.execution_graph = configured_graph
-        if not callable(getattr(self.execution_graph, "step", None)):
-            raise TypeError("execution_graph must provide step(strategy) or be a graph factory")
         self.current_newborns: Optional[NewBorns] = None
         self.current_survivors: Optional[Survivors] = None
         self.current_parents: Optional[Parents] = None
@@ -69,6 +59,12 @@ class GEPAStrategy(BaseStrategy[Result]):
         self._previous_signal_handlers = {}
         self._signal_stop_requested = False
         self._signal_stop_reason = None
+        self._phase_actions = {
+            "initialize": self._initialize_step,
+            "evaluate": self._evaluate_step,
+            "select": self._select_step,
+            "generate": self._generate_step,
+        }
 
     def start_compilation(
         self, student: dspy.Module, *, trainset: list[dspy.Example], devset: list[dspy.Example] | None = None, teacher: dspy.Module | None = None, **kwargs
@@ -93,6 +89,10 @@ class GEPAStrategy(BaseStrategy[Result]):
         self.history = []
         self._merge_due = False
         self._merge_attempts = 0
+        self.current_newborns = None
+        self.current_survivors = None
+        self.current_parents = None
+        self.algorithm_state = "initialize"
         self.rng = random.Random(self.config.seed)
         self.batch_sampler = self.config.batch_sampler or EpochShuffledBatchSampler(
             self.config.mutation_config.minibatch_size,
@@ -134,19 +134,20 @@ class GEPAStrategy(BaseStrategy[Result]):
 
         self._write_checkpoint()
 
-        # Initialize the first candidate
-        initial_candidate = Candidate(self.student.deepcopy(), generation_number=0)
-        self.current_newborns = self.config.cohort_model.newborns(
-            [initial_candidate], iteration=0
-        )
-
-        self.algorithm_state = "evaluate"  # Start with evaluation of the initial candidate
+        # The initial cohort is built by the first graph phase.  This keeps
+        # initialization polymorphic for alternate strategies and graphs.
+        self.algorithm_state = "initialize"
 
     def next_step(self) -> bool:
-        """Implement the evolutionary algorithm state machine."""
+        """Execute the action registered for the current GEPA phase."""
         if self.should_terminate():
             return False
-        return self.execution_graph.step(self)
+        try:
+            action = self._phase_actions[self.algorithm_state]
+        except KeyError as exc:
+            raise RuntimeError(f"Unknown GEPA phase: {self.algorithm_state!r}") from exc
+        action()
+        return True
 
     def terminate_compilation(self) -> Result:
         """Get the result of the optimization process."""
@@ -199,6 +200,14 @@ class GEPAStrategy(BaseStrategy[Result]):
         self._write_checkpoint(completed=True)
         self._restore_signal_handlers()
         return result
+
+    def _initialize_step(self) -> None:
+        """Create the seed cohort for the current compilation."""
+        initial_candidate = Candidate(self.student.deepcopy(), generation_number=0)
+        self.current_newborns = self.config.cohort_model.newborns(
+            [initial_candidate], iteration=0
+        )
+        self.algorithm_state = "evaluate"
 
     def _install_signal_handlers(self) -> None:
         if not self.config.handle_signals:
