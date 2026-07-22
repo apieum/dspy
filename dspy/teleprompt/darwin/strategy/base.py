@@ -168,6 +168,7 @@ class BaseStrategy(ABC, Generic[R]):
                     if isinstance(self.config.validation_policy, type)
                     else self.config.validation_policy
                 ),
+                batch_evaluator=self.config.batch_evaluator,
             )
             self._evaluator.start_compilation(
                 getattr(self, "student", None),

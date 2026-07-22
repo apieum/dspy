@@ -57,6 +57,9 @@ class DarwinConfig:
     proposals_per_generation: int = 1
     sampling_strategy: Optional[SamplingStrategy] = None
     batch_sampler: Optional[BatchSampler] = None
+    # Optional adapter-level evaluator. It receives a list of
+    # (candidate, examples) jobs and returns one metric list per job.
+    batch_evaluator: Optional[Any] = None
     mutation_config: ReflectiveMutationConfig = None
 
     # System parameters we actually have

@@ -130,6 +130,32 @@ class TestEvaluator:
         
         assert budget.consumed_calls >= initial_calls  # Budget was tracked
 
+    def test_optional_batch_evaluator_receives_multiple_candidates(self):
+        examples = [dspy.Example(input="test", answer="correct").with_inputs("input")]
+        calls = []
+
+        def batch_evaluator(jobs, assessor, channel):
+            calls.append(jobs)
+            return [[simple_metric(example, mock_prediction("correct")) for example in batch]
+                    for _, batch in jobs]
+
+        evaluator = GEPATwoPhasesEval(
+            assessor=simple_metric,
+            minibatch_data=examples,
+            validation_data=examples,
+            batch_evaluator=batch_evaluator,
+        )
+        evaluator.start_compilation(dspy.Predict("input -> output"), verbose=False)
+        candidates = [
+            Candidate(mock_module_with_history(lambda **kwargs: mock_prediction("correct")))
+            for _ in range(2)
+        ]
+
+        evaluator.evaluate(NewBorns(*candidates, iteration=0), LMCallsBudget(100))
+
+        assert len(calls) == 1
+        assert len(calls[0]) == 2
+
 
 if __name__ == "__main__":
     import pytest

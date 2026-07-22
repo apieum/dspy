@@ -209,7 +209,7 @@ class FullTaskScores(Evaluator):
     """
 
     def __init__(self, assessor: Assessor, validation_data: List[dspy.Example] = None,
-                 evaluation_cache=None, validation_policy=None, **kwargs):
+                 evaluation_cache=None, validation_policy=None, batch_evaluator=None, **kwargs):
         """
         Args:
             assessor: The assessor to evaluate predictions against examples.
@@ -220,6 +220,7 @@ class FullTaskScores(Evaluator):
         self.validation_data = validation_data or []
         self.evaluation_cache = evaluation_cache or EvaluationCache()
         self.validation_policy = validation_policy or FullEvaluationPolicy()
+        self.batch_evaluator = batch_evaluator
         self._iteration = 0
         self.verbose = False
 
@@ -239,6 +240,9 @@ class FullTaskScores(Evaluator):
         # Phase 2: Comprehensive evaluation on full validation set
         self.publish('comprehensive_evaluation_start',
                     {'candidates_count': len(new_borns.candidates), 'tasks_count': len(self.validation_data)})
+
+        if self.batch_evaluator is not None and len(new_borns.candidates) > 1:
+            return self._evaluate_with_batch_evaluator(new_borns, budget)
 
         evaluated_candidates = []
         for candidate in new_borns.candidates:
@@ -273,6 +277,65 @@ class FullTaskScores(Evaluator):
                     {'candidates_count': len(new_borns.candidates), 'tasks_count': len(self.validation_data)})
         self._iteration += 1
         # All candidates that get a full evaluation are considered "survivors" of this stage.
+        return Survivors(*evaluated_candidates, iteration=new_borns.iteration)
+
+    def _evaluate_with_batch_evaluator(self, new_borns: NewBorns, budget: Budget) -> Survivors:
+        """Evaluate several candidates through an optional adapter-level batch hook.
+
+        The hook receives ``[(candidate, missing_examples), ...]`` and must
+        return metric lists in the same order. Cached examples are omitted.
+        The default evaluator never enters this path, preserving DSPy's
+        existing per-candidate execution semantics.
+        """
+        jobs = []
+        cached_by_candidate = {}
+        eval_data_by_candidate = {}
+        for candidate in new_borns.candidates:
+            eval_data = self.validation_policy.get_eval_batch(
+                self.validation_data, iteration=self._iteration, candidate=candidate
+            )
+            if jobs and hasattr(budget, "can_spend") and not budget.can_spend(
+                "evaluation", len(eval_data)
+            ):
+                break
+            eval_data_by_candidate[candidate] = eval_data
+            cached = [self.evaluation_cache.get(candidate, example) for example in eval_data]
+            cached_by_candidate[candidate] = cached
+            missing = [example for example, score in zip(eval_data, cached) if score is None]
+            if missing:
+                jobs.append((candidate, missing))
+
+        if jobs:
+            fresh_by_job = self.batch_evaluator(jobs, self.assessor, self)
+            if len(fresh_by_job) != len(jobs):
+                raise ValueError(
+                    "batch_evaluator must return one metric list per evaluation job"
+                )
+            for (candidate, examples), scores in zip(jobs, fresh_by_job, strict=True):
+                if len(scores) != len(examples):
+                    raise ValueError(
+                        "batch_evaluator returned the wrong number of scores for a job"
+                    )
+                for example, score in zip(examples, scores, strict=True):
+                    self.evaluation_cache.put(candidate, example, score)
+
+        evaluated_candidates = []
+        for candidate, eval_data in eval_data_by_candidate.items():
+            scores = [self.evaluation_cache.get(candidate, example) for example in eval_data]
+            candidate.scores = list(scores)
+            self.publish(
+                'candidate_evaluation_result', candidate,
+                {'average_score': candidate.average_score(), 'scores_count': len(scores)},
+            )
+            budget.spend_on_evaluation(
+                candidate.module,
+                {"phase": "full_evaluation", "examples": len(eval_data)},
+            )
+            evaluated_candidates.append(candidate)
+
+        self.publish('comprehensive_evaluation_complete',
+                     {'candidates_count': len(evaluated_candidates), 'tasks_count': len(self.validation_data)})
+        self._iteration += 1
         return Survivors(*evaluated_candidates, iteration=new_borns.iteration)
 
     def _evaluate(self, candidate, examples):
