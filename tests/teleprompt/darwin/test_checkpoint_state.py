@@ -65,3 +65,24 @@ def test_signal_handler_writes_interrupted_checkpoint(tmp_path):
     payload = json.loads(checkpoint_path.read_text())
     assert payload["completed"] is False
     assert payload["stop_reason"] == "SIGINT"
+
+
+def test_checkpoint_loader_accepts_older_and_forward_compatible_payloads():
+    older = OptimizationCheckpoint.from_dict({"generation": 4})
+    assert older.schema_version == 1
+    assert older.generation == 4
+    assert older.strategy_state == {}
+
+    newer_fields = OptimizationCheckpoint.from_dict(
+        {"schema_version": 1, "future_field": "ignored"}
+    )
+    assert newer_fields.schema_version == 1
+
+
+def test_checkpoint_loader_rejects_unknown_schema_version():
+    try:
+        OptimizationCheckpoint.from_dict({"schema_version": 99})
+    except ValueError as error:
+        assert "unsupported checkpoint schema version" in str(error)
+    else:
+        raise AssertionError("unsupported schema version should be rejected")

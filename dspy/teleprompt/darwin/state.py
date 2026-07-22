@@ -1,6 +1,6 @@
 """Serializable optimization checkpoint state."""
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
 
@@ -24,4 +24,20 @@ class OptimizationCheckpoint:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "OptimizationCheckpoint":
-        return cls(**value)
+        if not isinstance(value, dict):
+            raise TypeError("checkpoint payload must be a dictionary")
+
+        schema_version = int(value.get("schema_version", 1))
+        if schema_version > cls.schema_version:
+            raise ValueError(
+                f"unsupported checkpoint schema version {schema_version}; "
+                f"this runtime supports up to {cls.schema_version}"
+            )
+
+        # Ignore fields added by newer compatible writers.  All fields added
+        # to the current schema have defaults, so older checkpoints remain
+        # loadable without special-case migrations.
+        known_fields = {item.name for item in fields(cls)}
+        payload = {key: item for key, item in value.items() if key in known_fields}
+        payload["schema_version"] = schema_version
+        return cls(**payload)
