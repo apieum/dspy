@@ -4,6 +4,7 @@ import logging
 import inspect
 import random
 import json
+import importlib
 from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
 
@@ -210,6 +211,10 @@ class GEPAStrategy(BaseStrategy[Result]):
                 candidates.append({
                     "id": id(candidate),
                     "roles": [role],
+                    "cohort_type": (
+                        f"{type(cohort).__module__}:{type(cohort).__qualname__}"
+                        if cohort is not None else None
+                    ),
                     "generation": candidate.generation_number,
                     "score": candidate.average_score(),
                     "parents": [id(parent) for parent in candidate.parents],
@@ -312,18 +317,31 @@ class GEPAStrategy(BaseStrategy[Result]):
                     0, budget.generation_max_calls - int(remaining.get("generation_calls", budget.generation_calls))
                 )
 
-        def cohort(role):
-            return [
-                candidate for record in records if role in record.get("roles", [])
-                for candidate in [restored[record.get("id")]]
+        def restore_cohort(role):
+            records_for_role = [
+                record for record in records if role in record.get("roles", [])
             ]
+            cohort_type = next(
+                (record.get("cohort_type") for record in records_for_role
+                 if record.get("cohort_type")),
+                "dspy.teleprompt.darwin.data.cohort:Cohort",
+            )
+            module_name, qualname = cohort_type.split(":", 1)
+            cohort_cls = importlib.import_module(module_name)
+            for part in qualname.split("."):
+                cohort_cls = getattr(cohort_cls, part)
+            candidates_for_role = [
+                restored[record.get("id")]
+                for record in records_for_role
+            ]
+            return cohort_cls(*candidates_for_role, iteration=self.current_generation)
 
         # Restored state is a generic cohort snapshot. The strategy state
-        # machine only requires the Cohort protocol; concrete producer types
-        # are used when creating new results, not when loading persisted data.
-        self.current_newborns = Cohort(*cohort("newborns"), iteration=self.current_generation)
-        self.current_survivors = Cohort(*cohort("survivors"), iteration=self.current_generation)
-        self.current_parents = Cohort(*cohort("parents"), iteration=self.current_generation)
+        # machine receives the serialized concrete type, so custom algorithms
+        # retain their own cohort semantics after resume.
+        self.current_newborns = restore_cohort("newborns")
+        self.current_survivors = restore_cohort("survivors")
+        self.current_parents = restore_cohort("parents")
 
         # Rebuild the selector's per-task Pareto state from restored scores.
         self._selector = self.config.selection()
