@@ -146,6 +146,23 @@ class TestGeneration:
         assert generator.module_selection == "random"
         assert generator.max_retries == 2
 
+    def test_failed_retries_respect_generation_budget(self):
+        feedback_provider = FeedbackProvider(assessor=simple_metric)
+        generator = ReflectivePromptMutation(
+            feedback_provider=feedback_provider,
+            feedback_data=[dspy.Example(question="q", answer="a").with_inputs("question")],
+            max_retries=5,
+        )
+        generator._ensure_evolvable = Mock(side_effect=RuntimeError("boom"))
+        parent = Candidate(dspy.Predict("question -> answer"))
+        budget = LMCallsBudget(4, generation_max_calls=4)
+
+        result = generator.generate(Parents(parent), budget)
+
+        assert result.is_empty()
+        assert budget.consumed_calls == 4
+        assert budget.consumed_calls <= 4
+
     def test_richer_metric_exports(self):
         """Test advanced Darwin assessors remain available from the public package."""
         assert ExactMatch is not None

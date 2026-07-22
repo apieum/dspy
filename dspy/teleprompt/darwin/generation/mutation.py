@@ -125,7 +125,17 @@ class ReflectivePromptMutation(Generator):
                 return NewBorns()
 
             last_error = None
+            attempts_charged = 0
             for _ in range(self.max_retries):
+                # Every failed attempt may already have consumed the parent
+                # rollout and/or reflection call. Reserve a complete attempt
+                # before retrying so retries cannot cross the hard budget.
+                if (
+                    budget is not None
+                    and hasattr(budget, "can_spend")
+                    and not budget.can_spend("generation", generation_cost)
+                ):
+                    break
                 try:
                     module_idx = self._select_target_module(len(predictors), parent=parent)
                     evolvable = self._ensure_evolvable(parent.module)
@@ -178,16 +188,26 @@ class ReflectivePromptMutation(Generator):
                             "module_idx": module_idx,
                             "cost": generation_cost,
                         })
+                        attempts_charged += 1
 
                     return NewBorns(child_candidate, iteration=parents.iteration)
                 except Exception as e:
                     last_error = e
+                    if budget:
+                        budget.spend_on_generation(None, {
+                            "type": "failed_mutation_attempt",
+                            "error": str(e),
+                            "cost": generation_cost,
+                        })
+                        attempts_charged += 1
 
-            raise last_error
+            if last_error is not None:
+                raise last_error
+            return NewBorns()
 
         except Exception as e:
             self.publish('mutation_failure', None, {'reason': f'Reflective prompt mutation failed: {e}'})
-            if budget:
+            if budget and 'attempts_charged' not in locals():
                 budget.spend_on_generation(None, {"type": "failed_mutation", "error": str(e)})
             return NewBorns()
 
