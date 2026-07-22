@@ -4,6 +4,7 @@ from .feedback import FeedbackResult, EvaluationTrace, ModuleFeedback
 from .evaluator import Evaluator
 from .gepa_evaluator import GEPATwoPhasesEval, FullTaskScores, ParentFastCompare
 from .acceptance import StrictImprovementAcceptance, ImprovementOrEqualAcceptance
+from .cache import EvaluationCache
 from .metrics import (
     Assessor,
     Metric,
@@ -27,6 +28,7 @@ __all__ = [
     'ParentFastCompare',
     'StrictImprovementAcceptance',
     'ImprovementOrEqualAcceptance',
+    'EvaluationCache',
     'Assessor',
     'Metric',
     'BaseAssessor',

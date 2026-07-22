@@ -36,6 +36,8 @@ class GEPAStrategy(BaseStrategy[Result]):
         self.current_parents: Optional[Parents] = None
         self._iteration_started = False
         self.history = []
+        from ..evaluation import EvaluationCache
+        self.evaluation_cache = EvaluationCache()
 
     def start_compilation(
         self, student: dspy.Module, *, trainset: list[dspy.Example], devset: list[dspy.Example] | None = None, teacher: dspy.Module | None = None, **kwargs

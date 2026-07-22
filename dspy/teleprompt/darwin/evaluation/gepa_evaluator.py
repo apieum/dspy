@@ -13,6 +13,7 @@ from .metrics import Assessor
 from ..data.cohort import NewBorns, Survivors
 from ..budget import Budget
 from .acceptance import StrictImprovementAcceptance
+from .cache import EvaluationCache
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class ParentFastCompare(Evaluator):
     """
 
     def __init__(self, assessor: Assessor, minibatch_data: List[dspy.Example] = None,
-                 acceptance_criterion=None, **kwargs):
+                 acceptance_criterion=None, evaluation_cache=None, **kwargs):
         """
         Args:
             assessor: The assessor to evaluate predictions against examples.
@@ -36,6 +37,7 @@ class ParentFastCompare(Evaluator):
         self.assessor = assessor
         self.minibatch_data = minibatch_data or []
         self.acceptance_criterion = acceptance_criterion or StrictImprovementAcceptance()
+        self.evaluation_cache = evaluation_cache or EvaluationCache()
         self.verbose = False
 
     def start_compilation(self, student: dspy.Module, dataset_manager=None, verbose: bool = False) -> None:
@@ -79,14 +81,10 @@ class ParentFastCompare(Evaluator):
         try:
             # Notify observers about validation start with all relevant info
             self.publish('validate_on_minibatch', child, len(self.minibatch_data))
-            child_scores = child.evaluate_on_batch(
-                self.minibatch_data, assessor=self.assessor, channel=self, persist_scores=False
-            )
+            child_scores = self._evaluate(child, self.minibatch_data, persist_scores=False)
             parent_scores = []
             for parent in child.parents:
-                scores = parent.evaluate_on_batch(
-                    self.minibatch_data, assessor=self.assessor, channel=self, persist_scores=False
-                )
+                scores = self._evaluate(parent, self.minibatch_data, persist_scores=False)
                 parent_scores.append([float(score.value) for score in scores])
 
             child_values = [float(score.value) for score in child_scores]
@@ -114,6 +112,18 @@ class ParentFastCompare(Evaluator):
             logger.warning(f"Minibatch validation failed: {e}")
             return False, len(self.minibatch_data) * len(child.parents)
 
+    def _evaluate(self, candidate, examples, *, persist_scores):
+        cached = [self.evaluation_cache.get(candidate, example) for example in examples]
+        missing = [example for example, score in zip(examples, cached) if score is None]
+        if missing:
+            fresh = candidate.evaluate_on_batch(
+                missing, assessor=self.assessor, channel=self,
+                persist_scores=persist_scores,
+            )
+            for example, score in zip(missing, fresh):
+                self.evaluation_cache.put(candidate, example, score)
+        return [self.evaluation_cache.get(candidate, example) for example in examples]
+
 class FullTaskScores(Evaluator):
     """
     An evaluator that computes scores for all candidates on the full, stable
@@ -123,7 +133,8 @@ class FullTaskScores(Evaluator):
     that the candidates it receives have already been validated as promising.
     """
 
-    def __init__(self, assessor: Assessor, validation_data: List[dspy.Example] = None, **kwargs):
+    def __init__(self, assessor: Assessor, validation_data: List[dspy.Example] = None,
+                 evaluation_cache=None, **kwargs):
         """
         Args:
             assessor: The assessor to evaluate predictions against examples.
@@ -132,6 +143,7 @@ class FullTaskScores(Evaluator):
         super().__init__()
         self.assessor = assessor
         self.validation_data = validation_data or []
+        self.evaluation_cache = evaluation_cache or EvaluationCache()
         self.verbose = False
 
     def start_compilation(self, student: dspy.Module, dataset_manager=None, verbose: bool=False) -> None:
@@ -153,7 +165,7 @@ class FullTaskScores(Evaluator):
 
         for candidate in new_borns.candidates:
             # Comprehensive evaluation on complete validation set - now returns List[Metric] directly
-            scores = candidate.evaluate_on_batch(self.validation_data, assessor=self.assessor, channel=self)
+            scores = self._evaluate(candidate, self.validation_data)
 
             # Report final candidate performance
             avg_score = candidate.average_score()
@@ -170,5 +182,20 @@ class FullTaskScores(Evaluator):
                     {'candidates_count': len(new_borns.candidates), 'tasks_count': len(self.validation_data)})
         # All candidates that get a full evaluation are considered "survivors" of this stage.
         return Survivors(*new_borns.to_list(), iteration=new_borns.iteration)
+
+    def _evaluate(self, candidate, examples):
+        cached = [self.evaluation_cache.get(candidate, example) for example in examples]
+        missing = [example for example, score in zip(examples, cached) if score is None]
+        if missing:
+            fresh = candidate.evaluate_on_batch(
+                missing, assessor=self.assessor, channel=self, persist_scores=True
+            )
+            for example, score in zip(missing, fresh):
+                self.evaluation_cache.put(candidate, example, score)
+        scores = [self.evaluation_cache.get(candidate, example) for example in examples]
+        # Keep Candidate.scores synchronized for Pareto selection when every
+        # score is already cached.
+        candidate.scores = list(scores)
+        return scores
 
 GEPATwoPhasesEval = Evaluator.create_chain("GEPATwoPhasesEval", [ParentFastCompare, FullTaskScores])

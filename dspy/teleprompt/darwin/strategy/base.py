@@ -141,6 +141,7 @@ class BaseStrategy(ABC, Generic[R]):
                     if isinstance(self.config.acceptance_criterion, type)
                     else self.config.acceptance_criterion
                 ),
+                evaluation_cache=self.evaluation_cache,
             )
             self._evaluator.start_compilation(
                 getattr(self, "student", None),
