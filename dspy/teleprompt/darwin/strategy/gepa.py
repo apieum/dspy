@@ -3,6 +3,8 @@
 import logging
 import inspect
 import random
+import json
+from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
 
 import dspy
@@ -10,6 +12,7 @@ from .base import BaseStrategy
 from ..data.candidate import Candidate
 from ..data.cohort import NewBorns, Survivors, Parents
 from ..result import Result, Success, Failure
+from ..state import OptimizationCheckpoint
 
 if TYPE_CHECKING:
     from ..config import DarwinConfig
@@ -79,6 +82,7 @@ class GEPAStrategy(BaseStrategy[Result]):
             logger.info(f"Data split: {len(self.training_data)} train, {len(self.validation_data)} validation, {len(self.devset)} test")
 
         self._notify("start_compilation", self.student, self.dataset_manager)
+        self._write_checkpoint()
 
         # Initialize the first candidate
         initial_candidate = Candidate(self.student.deepcopy(), generation_number=0)
@@ -120,7 +124,45 @@ class GEPAStrategy(BaseStrategy[Result]):
         if self.best_candidate is not None:
             result_module._compiled = True
         self._notify("finish_compilation", result_module)
+        self._write_checkpoint(completed=True)
         return result
+
+    def get_checkpoint(self, completed: bool = False) -> OptimizationCheckpoint:
+        """Return a JSON-safe snapshot of the current optimization state."""
+        candidates = []
+        tracked = set()
+        for cohort in (self.current_newborns, self.current_survivors, self.current_parents):
+            if cohort is None:
+                continue
+            for candidate in cohort:
+                if id(candidate) in tracked:
+                    continue
+                tracked.add(id(candidate))
+                candidates.append({
+                    "id": id(candidate),
+                    "generation": candidate.generation_number,
+                    "score": candidate.average_score(),
+                    "parents": [id(parent) for parent in candidate.parents],
+                })
+        remaining = self.budget.get_remaining()
+        return OptimizationCheckpoint(
+            generation=self.current_generation,
+            algorithm_state=self.algorithm_state,
+            history=list(self.history),
+            budget=remaining if isinstance(remaining, dict) else {"remaining": remaining},
+            candidates=candidates,
+            completed=completed,
+        )
+
+    def _write_checkpoint(self, completed: bool = False) -> None:
+        if not self.config.checkpoint_path:
+            return
+        path = Path(self.config.checkpoint_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(self.get_checkpoint(completed=completed).to_dict(), indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
 
     def _select_final_candidate(self) -> Optional[Candidate]:
         """Select the final candidate from the accumulated Pareto state.
@@ -195,6 +237,7 @@ class GEPAStrategy(BaseStrategy[Result]):
             "surviving_candidates": len(self.current_survivors),
             "best_score": generation_best_score,
         })
+        self._write_checkpoint()
 
         self.algorithm_state = "select"
 
@@ -214,6 +257,7 @@ class GEPAStrategy(BaseStrategy[Result]):
             self._notify("finish_iteration", self.current_generation, self.current_parents, self.budget)
             self._iteration_started = False
         self.algorithm_state = "generate"
+        self._write_checkpoint()
 
     def _generate_step(self):
         """Generate new candidates."""
@@ -242,3 +286,4 @@ class GEPAStrategy(BaseStrategy[Result]):
 
         # Cycle back to evaluation
         self.algorithm_state = "evaluate"
+        self._write_checkpoint()

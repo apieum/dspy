@@ -52,6 +52,7 @@ class DarwinConfig:
     # Dataset and lifecycle extension points
     dataset_manager_factory: Any = DefaultDatasetManagerFactory
     observers: Tuple[Any, ...] = ()
+    checkpoint_path: Optional[str] = None
 
     # Logging
     verbose: bool = False

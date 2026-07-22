@@ -67,6 +67,7 @@ from .dataset_manager import (
     DefaultDatasetManagerFactory,
 )
 from .generation.config import ReflectiveMutationConfig, ModuleSelectionStrategy
+from .state import OptimizationCheckpoint
 
 # GEPA convenience optimizers
 from .gepa_optimizers import GEPAMute, GEPAAdaptive
@@ -102,6 +103,7 @@ __all__ = [
     'EvaluationPolicy',
     'FullEvaluationPolicy',
     'MinibatchEvaluationPolicy',
+    'OptimizationCheckpoint',
     'GEPATwoPhasesEval',
     'EnhancedTraceCollector',
     'FeedbackResult',
