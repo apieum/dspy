@@ -122,6 +122,18 @@ def test_darwin_factory_configuration_creates_optimizer():
     assert hasattr(optimizer.strategy, "evaluator")
 
 
+def test_optimizer_can_be_reused_without_stale_compilation_state(simple_trainset, dummy_lm):
+    reusable_lm = DummyLM([{"answer": "4"}] * 100)
+    with dspy.context(lm=reusable_lm):
+        optimizer = Darwin(GEPAStrategy, DarwinConfig(max_lm_calls=2, max_iterations=1))
+        first = optimizer.compile(SimpleQA(), trainset=simple_trainset[:1], devset=simple_trainset[1:])
+        second = optimizer.compile(SimpleQA(), trainset=simple_trainset[:1], devset=simple_trainset[1:])
+
+    assert first._compiled is True
+    assert second._compiled is True
+    assert optimizer.strategy.current_generation <= 1
+
+
 def test_gepa_result_uses_selector_final_candidate():
     """The final result should use accumulated Pareto state when available."""
     strategy = GEPAStrategy(DarwinConfig(max_lm_calls=1))

@@ -52,6 +52,13 @@ class GEPAStrategy(BaseStrategy[Result]):
         self.trainset = trainset
         self.devset = devset if devset is not None else []
         self.teacher = teacher
+        # Components own compilation-scoped state. Recreate them for every
+        # run so budgets, caches, selectors, and evaluators cannot leak across
+        # repeated compilations of the same optimizer instance.
+        self._budget = None
+        self._selector = None
+        self._generator = None
+        self._evaluator = None
         self.current_generation = 0
         self.best_candidate = None
         self.generations_without_improvement = 0

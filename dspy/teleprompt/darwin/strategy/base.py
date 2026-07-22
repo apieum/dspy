@@ -177,6 +177,11 @@ class BaseStrategy(ABC, Generic[R]):
         if self.generations_without_improvement >= self.config.patience:
             return True
 
+        # Generation zero is the seed evaluation. Stop before creating a new
+        # generation once the configured number of mutation rounds is done.
+        if getattr(self, "algorithm_state", None) == "generate" and self.current_generation >= self.config.max_iterations:
+            return True
+
         return False
 
     def _instantiate_budget(self) -> 'Budget':
