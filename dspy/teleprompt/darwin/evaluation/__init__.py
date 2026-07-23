@@ -6,6 +6,9 @@ from .acceptance import StrictImprovementAcceptance, ImprovementOrEqualAcceptanc
 from .cache import EvaluationCache
 from .proposal_selection import AllImprovements, BestImprovement, TopKImprovements
 from .policy import EvaluationPolicy, FullEvaluationPolicy, MinibatchEvaluationPolicy
+from .baseline_comparison import BaselineComparison
+from .comprehensive import ComprehensiveEvaluator
+from .feedback import FeedbackProvider
 from .metrics import (
     Assessor,
     Metric,
@@ -25,6 +28,9 @@ __all__ = [
     'BatchEvaluator',
     'PerCandidateBatchEvaluator',
     'CallbackBatchEvaluator',
+    'BaselineComparison',
+    'ComprehensiveEvaluator',
+    'FeedbackProvider',
     'StrictImprovementAcceptance',
     'ImprovementOrEqualAcceptance',
     'EvaluationCache',

@@ -18,7 +18,7 @@ from .budget import (
     IterationBudget,
     AdaptiveBudget,
 )
-from .selection import Selector
+from .selection import Selector, DiversityArchive, ParetoMixin, remove_dominated, remove_dominated_with_method
 from .generation import (
     Generator,
     SamplingStrategy,
@@ -35,6 +35,9 @@ from .evaluation import (
     BatchEvaluator,
     PerCandidateBatchEvaluator,
     CallbackBatchEvaluator,
+    BaselineComparison,
+    ComprehensiveEvaluator,
+    FeedbackProvider,
     StrictImprovementAcceptance,
     ImprovementOrEqualAcceptance,
     EvaluationCache,
@@ -90,10 +93,13 @@ from .stopping import Stopper, ScoreThresholdStopper, NoImprovementStopper, File
 __all__ = [
     "Darwin", "DarwinConfig", "Candidate", "Cohort", "Survivors", "Parents", "NewBorns",
     "Budget", "BudgetStrategy", "BudgetEvent", "BudgetExhaustedError",
-    "LMCallsBudget", "IterationBudget", "AdaptiveBudget", "Selector", "Generator",
+    "LMCallsBudget", "IterationBudget", "AdaptiveBudget",
+    "Selector", "DiversityArchive", "ParetoMixin", "remove_dominated", "remove_dominated_with_method",
+    "Generator",
     "SamplingStrategy", "ProposalTask", "BatchSampler", "EpochShuffledBatchSampler",
     "SingleMutationSampling", "SameParentSampling", "IndependentSampling", "PxNSampling",
     "Evaluator", "BatchEvaluator", "PerCandidateBatchEvaluator", "CallbackBatchEvaluator",
+    "BaselineComparison", "ComprehensiveEvaluator", "FeedbackProvider",
     "StrictImprovementAcceptance", "ImprovementOrEqualAcceptance", "EvaluationCache",
     "AllImprovements", "BestImprovement", "TopKImprovements", "EvaluationPolicy",
     "FullEvaluationPolicy", "MinibatchEvaluationPolicy", "Metric", "BaseAssessor",
