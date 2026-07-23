@@ -2,7 +2,7 @@
 
 import dspy
 from dspy.teleprompt.darwin import Bleu, Contains, ExactMatch, F1Score, RougeL
-from dspy.teleprompt.darwin.algorithms.gepa.mutation_config import (
+from dspy.teleprompt.darwin.algorithms.gepa.generation.mutation_config import (
     ModuleSelectionStrategy,
     ReflectiveMutationConfig,
 )

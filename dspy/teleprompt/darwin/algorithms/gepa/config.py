@@ -12,7 +12,7 @@ from ...generation import (
     SingleMutationSampling,
 )
 from ...generation import SamplingStrategy, BatchSampler
-from .mutation_config import ReflectiveMutationConfig
+from .generation.mutation_config import ReflectiveMutationConfig
 from ...evaluation import Evaluator
 from ...evaluation.metrics import Assessor, F1Score
 from ...data.dataset_manager import DefaultDatasetManagerFactory

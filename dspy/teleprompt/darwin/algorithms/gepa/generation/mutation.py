@@ -12,7 +12,7 @@ from .reflection_strategy import ReflectionStrategy
 from .evolvable_module import EvolvableModule
 from .prompt_mutator import ReflectivePromptMutator
 from .dspy_utils import get_predictors
-from ..mutation_config import ReflectiveMutationConfig, ModuleSelectionStrategy
+from .mutation_config import ReflectiveMutationConfig, ModuleSelectionStrategy
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:

@@ -8,7 +8,7 @@ from .evaluation import FullTaskScores, ParentFastCompare, GEPATwoPhasesEval
 from .generation.feedback import FeedbackProvider
 from .generation.mutation import ReflectivePromptMutation
 from .generation.system_aware_merge import SystemAwareMerge
-from .mutation_config import ReflectiveMutationConfig, ModuleSelectionStrategy
+from .generation.mutation_config import ReflectiveMutationConfig, ModuleSelectionStrategy
 from .selection import ParetoFrontier
 
 __all__ = [

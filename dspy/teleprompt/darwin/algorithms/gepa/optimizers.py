@@ -10,7 +10,7 @@ from ...optimizer import Darwin
 from .candidate import example_id
 from .generation.mutation import ReflectivePromptMutation
 from .generation.adaptive import GEPAAdaptiveGenerator
-from .mutation_config import ReflectiveMutationConfig
+from .generation.mutation_config import ReflectiveMutationConfig
 from ...evaluation.metrics import Metric
 from .config import GEPAConfig
 from .strategy import GEPAStrategy
