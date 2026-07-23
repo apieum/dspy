@@ -9,12 +9,14 @@ import logging
 from typing import Optional, TYPE_CHECKING
 
 import dspy
-from ...generation.generator import Generator
-from ...data.cohort import Parents, NewBorns
+from ....data.cohort import Parents, NewBorns
+from ....generation.generator import Generator
+from .mutation import ReflectivePromptMutation
+from .system_aware_merge import SystemAwareMerge
 
 if TYPE_CHECKING:
-    from ...budget import Budget
-    from ...config import DarwinConfig
+    from ....budget import Budget
+    from ....config import DarwinConfig
 
 logger = logging.getLogger(__name__)
 
