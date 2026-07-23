@@ -8,15 +8,15 @@ These can be chained together to create a multi-phase evaluation pipeline.
 import logging
 from typing import List, TYPE_CHECKING
 import dspy
-from .evaluator import Evaluator
-from .metrics import Assessor
-from ..data.cohort import NewBorns, Survivors
-from ..budget import Budget, BudgetEvent, BudgetExhaustedError
+from ....evaluation.evaluator import Evaluator
+from ....evaluation.metrics import Assessor
+from ....data.cohort import NewBorns, Survivors
+from ....budget import Budget, BudgetEvent, BudgetExhaustedError
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ..config import DarwinConfig
+    from ....config import DarwinConfig
 
 
 class ParentFastCompare(Evaluator):

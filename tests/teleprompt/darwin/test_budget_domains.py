@@ -4,10 +4,9 @@ from dspy.teleprompt.darwin import (
     BudgetEvent,
     BudgetExhaustedError,
     Checkpointable,
-    GEPAConfig,
-    GEPAStrategy,
     LMCallsBudget,
 )
+from dspy.teleprompt.darwin.algorithms.gepa import GEPAConfig, GEPAStrategy
 
 
 def test_lm_budget_tracks_evaluation_and_generation_domains():

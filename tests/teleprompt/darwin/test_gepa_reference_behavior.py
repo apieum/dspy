@@ -5,13 +5,12 @@ import random
 import dspy
 
 from dspy.teleprompt.darwin import (
-    Candidate,
     ImprovementOrEqualAcceptance,
-    ParentFastCompare,
     Metric,
-    ParetoFrontier,
-    GEPAConfig,
     StrictImprovementAcceptance,
+)
+from dspy.teleprompt.darwin.algorithms.gepa import (
+    GEPACandidate as Candidate, ParentFastCompare, ParetoFrontier, GEPAConfig,
 )
 from dspy.teleprompt.darwin.budget import LMCallsBudget
 from dspy.teleprompt.darwin.evaluation.cache import EvaluationCache

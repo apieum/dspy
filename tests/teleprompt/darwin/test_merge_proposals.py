@@ -1,6 +1,7 @@
 import dspy
 
-from dspy.teleprompt.darwin import Candidate, GEPAConfig, SystemAwareMerge
+from dspy.teleprompt.darwin.algorithms.gepa import GEPACandidate as Candidate
+from dspy.teleprompt.darwin.algorithms.gepa import GEPAConfig, SystemAwareMerge
 from dspy.teleprompt.darwin.data.cohort import Parents
 from dspy.teleprompt.utils import get_signature, set_signature
 from dspy.teleprompt.darwin.evaluation import Metric

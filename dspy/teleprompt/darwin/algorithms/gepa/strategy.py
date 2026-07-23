@@ -9,16 +9,17 @@ from typing import List, Optional, TYPE_CHECKING
 
 import dspy
 from dspy.teleprompt.utils import get_signature, set_signature
-from .base import BaseStrategy
-from ..data.candidate import Candidate, example_id
-from ..data.cohort import Cohort, NewBorns, Survivors, Parents
-from ..result import Result, Success, Failure, OptimizationFailureError
-from ..state import OptimizationCheckpoint
-from ..evaluation import EvaluationCache
-from ..evaluation import Metric
+from ...strategy.base import BaseStrategy
+from .candidate import GEPACandidate as Candidate, example_id
+from ...data.cohort import Cohort, NewBorns, Survivors, Parents
+from ...result import Result, OptimizationFailureError
+from .result import Success, Failure
+from ...state import OptimizationCheckpoint
+from ...evaluation import EvaluationCache
+from ...evaluation import Metric
 
 if TYPE_CHECKING:
-    from ..config import GEPAConfig
+    from .config import GEPAConfig
 
 def _tuple_tree(value):
     """Convert JSON-loaded RNG state lists back to nested tuples."""
@@ -138,7 +139,7 @@ class GEPAStrategy(BaseStrategy[Result]):
         return False
 
     def _instantiate_generator(self, generator_factory):
-        from ..generation.feedback import FeedbackProvider
+        from .generation.feedback import FeedbackProvider
 
         mutation_config = self.config.mutation_config
         feedback_assessor = (

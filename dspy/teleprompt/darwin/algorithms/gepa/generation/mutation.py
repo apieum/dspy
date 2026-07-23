@@ -7,19 +7,19 @@ from typing import Any, List, Optional, Dict
 import random
 
 import dspy
-from .generator import Generator
+from ....generation.generator import Generator
 from .reflection_strategy import ReflectionStrategy
 from .evolvable_module import EvolvableModule
 from .prompt_mutator import ReflectivePromptMutator
 from .dspy_utils import get_predictors
-from .config import ReflectiveMutationConfig, ModuleSelectionStrategy
+from ..mutation_config import ReflectiveMutationConfig, ModuleSelectionStrategy
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..config import DarwinConfig
-from ..data.candidate import Candidate
-from ..data.cohort import Parents, NewBorns
-from ..budget import BudgetEvent, BudgetExhaustedError
+    from ....config import DarwinConfig
+from ..candidate import GEPACandidate as Candidate
+from ....data.cohort import Parents, NewBorns
+from ....budget import BudgetEvent, BudgetExhaustedError
 
 logger = logging.getLogger(__name__)
 

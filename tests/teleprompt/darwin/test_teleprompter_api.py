@@ -1,7 +1,8 @@
 import dspy
 import pytest
 
-from dspy.teleprompt.darwin import Darwin, GEPAConfig, GEPAStrategy
+from dspy.teleprompt.darwin import Darwin
+from dspy.teleprompt.darwin.algorithms.gepa import GEPAConfig, GEPAStrategy
 from dspy.utils.dummies import DummyLM
 
 

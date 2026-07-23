@@ -2,11 +2,12 @@
 
 import dspy
 import pytest
-from dspy.teleprompt.darwin import (
-    Darwin, GEPAConfig, GEPAStrategy,
-    LMCallsBudget, ParetoFrontier, ReflectivePromptMutation,
-    FeedbackProvider, GEPATwoPhasesEval, ChannelContext, Success, Failure
+from dspy.teleprompt.darwin import Darwin, LMCallsBudget, ChannelContext
+from dspy.teleprompt.darwin.algorithms.gepa import (
+    GEPAConfig, GEPAStrategy, ParetoFrontier, ReflectivePromptMutation,
+    FeedbackProvider, GEPATwoPhasesEval,
 )
+from dspy.teleprompt.darwin.algorithms.gepa.result import Success, Failure
 from dspy.utils.dummies import DummyLM
 
 

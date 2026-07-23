@@ -1,6 +1,8 @@
 import dspy
 
-from dspy.teleprompt.darwin import Candidate, CompositeMetric, GEPAConfig, Metric, ParetoFrontier
+from dspy.teleprompt.darwin.algorithms.gepa import GEPACandidate as Candidate
+from dspy.teleprompt.darwin import CompositeMetric, Metric
+from dspy.teleprompt.darwin.algorithms.gepa import GEPAConfig, ParetoFrontier
 from dspy.teleprompt.darwin.data.cohort import Survivors
 
 

@@ -3,7 +3,7 @@
 import logging
 import inspect
 from typing import Any, Callable, List, Optional
-from ..evaluation import Assessor
+from ....evaluation import Assessor
 import dspy
 
 logger = logging.getLogger(__name__)

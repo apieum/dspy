@@ -2,7 +2,8 @@ import json
 
 import dspy
 
-from dspy.teleprompt.darwin import Darwin, GEPAConfig, GEPAStrategy, OptimizationCheckpoint
+from dspy.teleprompt.darwin import Darwin, OptimizationCheckpoint
+from dspy.teleprompt.darwin.algorithms.gepa import GEPAConfig, GEPAStrategy
 from dspy.utils.dummies import DummyLM
 
 

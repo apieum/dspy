@@ -1,8 +1,6 @@
-"""Evaluation step of GEPA optimization."""
+"""Generic evaluation contracts and utilities."""
 
-from .feedback import FeedbackResult, EvaluationTrace, ModuleFeedback
 from .evaluator import Evaluator
-from .gepa_evaluator import GEPATwoPhasesEval, FullTaskScores, ParentFastCompare
 from .batching import BatchEvaluator, PerCandidateBatchEvaluator, CallbackBatchEvaluator
 from .acceptance import StrictImprovementAcceptance, ImprovementOrEqualAcceptance
 from .cache import EvaluationCache
@@ -23,13 +21,7 @@ from .metrics import (
 from .confidence import ConfidenceAssessor, LinearConfidenceScoring, ThresholdConfidenceScoring, extract_logprob
 
 __all__ = [
-    'FeedbackResult',
-    'EvaluationTrace',
-    'ModuleFeedback',
     'Evaluator',
-    'GEPATwoPhasesEval',
-    'FullTaskScores',
-    'ParentFastCompare',
     'BatchEvaluator',
     'PerCandidateBatchEvaluator',
     'CallbackBatchEvaluator',

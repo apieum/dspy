@@ -1,6 +1,5 @@
-"""DSPy Darwin strategies."""
+"""Generic Darwin strategy contracts."""
 
 from .base import BaseStrategy
-from .gepa import GEPAStrategy
 
-__all__ = ["BaseStrategy", "GEPAStrategy"]
+__all__ = ["BaseStrategy"]

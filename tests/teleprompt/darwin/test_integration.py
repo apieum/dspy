@@ -1,12 +1,12 @@
 """Integration tests for Darwin GEPA optimization."""
 
 import dspy
-from dspy.teleprompt.darwin import (
-    Darwin, GEPAConfig, GEPAStrategy,
-    LMCallsBudget, ParetoFrontier, ReflectivePromptMutation,
-    FeedbackProvider, GEPATwoPhasesEval, SystemAwareMerge, ChannelContext, Success,
-    GEPAMute, GEPAAdaptive
+from dspy.teleprompt.darwin import Darwin, LMCallsBudget, ChannelContext
+from dspy.teleprompt.darwin.algorithms.gepa import (
+    GEPAConfig, GEPAStrategy, ParetoFrontier, ReflectivePromptMutation,
+    FeedbackProvider, GEPATwoPhasesEval, SystemAwareMerge, GEPAMute, GEPAAdaptive,
 )
+from dspy.teleprompt.darwin.algorithms.gepa.result import Success
 from dspy.utils.dummies import DummyLM
 
 

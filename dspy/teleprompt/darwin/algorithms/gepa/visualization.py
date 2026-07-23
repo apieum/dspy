@@ -11,8 +11,8 @@ from collections import defaultdict
 from typing import Dict, List, Set, Any, Optional, Tuple
 from dataclasses import dataclass
 
-from ..data.candidate import Candidate
-from ..observers import SelectorObserver, GeneratorObserver, EvaluatorObserver
+from .candidate import GEPACandidate as Candidate
+from ...observers import SelectorObserver, GeneratorObserver, EvaluatorObserver
 
 logger = logging.getLogger(__name__)
 

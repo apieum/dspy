@@ -1,18 +1,18 @@
 """Functional tests to ensure Darwin GEPA works in real scenarios."""
 
 import dspy
-from dspy.teleprompt.darwin import Darwin, GEPAConfig, ChannelContext
-from dspy.teleprompt.darwin.strategy import GEPAStrategy
+from dspy.teleprompt.darwin import Darwin, ChannelContext
+from dspy.teleprompt.darwin.algorithms.gepa import GEPAConfig, GEPAStrategy
 from dspy.teleprompt.darwin.budget import LMCallsBudget
-from dspy.teleprompt.darwin.selection import ParetoFrontier
-from dspy.teleprompt.darwin.generation import ReflectivePromptMutation
-from dspy.teleprompt.darwin.generation.feedback import FeedbackProvider
+from dspy.teleprompt.darwin.algorithms.gepa import ParetoFrontier, ReflectivePromptMutation
+from dspy.teleprompt.darwin.algorithms.gepa.generation.feedback import FeedbackProvider
 from dspy.teleprompt.darwin.generation import Generator
-from dspy.teleprompt.darwin.data import Candidate, NewBorns
-from dspy.teleprompt.darwin.data.candidate import example_id
-from dspy.teleprompt.darwin.evaluation import GEPATwoPhasesEval
+from dspy.teleprompt.darwin.algorithms.gepa import GEPACandidate as Candidate
+from dspy.teleprompt.darwin.data import NewBorns
+from dspy.teleprompt.darwin.algorithms.gepa.candidate import example_id
+from dspy.teleprompt.darwin.algorithms.gepa.evaluation import GEPATwoPhasesEval
 from dspy.teleprompt.darwin.evaluation import Metric
-from dspy.teleprompt.darwin.result import Success
+from dspy.teleprompt.darwin.algorithms.gepa.result import Success
 from dspy.utils.dummies import DummyLM
 
 

@@ -2,13 +2,13 @@
 
 import dspy
 from unittest.mock import Mock
-from dspy.teleprompt.darwin.evaluation.gepa_evaluator import GEPATwoPhasesEval
+from dspy.teleprompt.darwin.algorithms.gepa.evaluation import GEPATwoPhasesEval
 from dspy.teleprompt.darwin.evaluation.metrics import Metric
-from dspy.teleprompt.darwin.data.candidate import Candidate
+from dspy.teleprompt.darwin.algorithms.gepa import GEPACandidate as Candidate
 from dspy.teleprompt.darwin.data.cohort import NewBorns
 from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
 from dspy.teleprompt.darwin.data.split_strategy import DefaultSplitStrategy
-from dspy.teleprompt.darwin import GEPAConfig
+from dspy.teleprompt.darwin.algorithms.gepa import GEPAConfig
 from dspy.teleprompt.darwin.evaluation.cache import EvaluationCache
 
 

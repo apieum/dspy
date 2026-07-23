@@ -12,29 +12,31 @@ from dspy.teleprompt.darwin import (
     Channel,
     Cohort,
     Darwin,
-    GEPAConfig,
     Evaluator,
-    Failure,
-    FeedbackProvider,
-    FullTaskScores,
     FullEvaluationPolicy,
-    GEPAStrategy,
-    GEPATwoPhasesEval,
     Generator,
     LMCallsBudget,
     Metric,
-    ParetoFrontier,
     StrictImprovementAcceptance,
     AllImprovements,
     SingleMutationSampling,
     EpochShuffledBatchSampler,
-    ReflectivePromptMutation,
     Selector,
-    Success,
 )
+from dspy.teleprompt.darwin.algorithms.gepa import (
+    GEPACandidate as Candidate,
+    GEPAConfig,
+    GEPAStrategy,
+    GEPATwoPhasesEval,
+    FullTaskScores,
+    FeedbackProvider,
+    ParetoFrontier,
+    ReflectivePromptMutation,
+)
+from dspy.teleprompt.darwin.algorithms.gepa.result import Success, Failure
 from dspy.utils.dummies import DummyLM
 from dspy.teleprompt.darwin.result import Result
-from dspy.teleprompt.darwin.gepa_optimizers import GEPAMute
+from dspy.teleprompt.darwin.algorithms.gepa.optimizers import GEPAMute
 
 
 class SimpleQA(Module):

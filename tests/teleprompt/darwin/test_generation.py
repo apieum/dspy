@@ -1,20 +1,23 @@
 """Test Darwin generation components (mutation, reflection, merging)."""
 
 import dspy
-from dspy.teleprompt.darwin import Bleu, Contains, ExactMatch, F1Score, ReflectiveMutationConfig, RougeL
-from dspy.teleprompt.darwin.generation.config import ModuleSelectionStrategy
-from dspy.teleprompt.darwin.generation.mutation import ReflectivePromptMutation
-from dspy.teleprompt.darwin.generation.feedback import FeedbackProvider
-from dspy.teleprompt.darwin.generation.system_aware_merge import SystemAwareMerge
-from dspy.teleprompt.darwin.generation.evolvable_module import EvolvableModule
-from dspy.teleprompt.darwin.generation.prompt_mutator import ReflectivePromptMutator
-from dspy.teleprompt.darwin.evaluation.feedback import FeedbackResult
+from dspy.teleprompt.darwin import Bleu, Contains, ExactMatch, F1Score, RougeL
+from dspy.teleprompt.darwin.algorithms.gepa.mutation_config import (
+    ModuleSelectionStrategy,
+    ReflectiveMutationConfig,
+)
+from dspy.teleprompt.darwin.algorithms.gepa.generation.mutation import ReflectivePromptMutation
+from dspy.teleprompt.darwin.algorithms.gepa.generation.feedback import FeedbackProvider
+from dspy.teleprompt.darwin.algorithms.gepa.generation.system_aware_merge import SystemAwareMerge
+from dspy.teleprompt.darwin.algorithms.gepa.generation.evolvable_module import EvolvableModule
+from dspy.teleprompt.darwin.algorithms.gepa.generation.prompt_mutator import ReflectivePromptMutator
+from dspy.teleprompt.darwin.algorithms.gepa.evaluation.feedback import FeedbackResult
 from dspy.teleprompt.darwin.data.cohort import Parents
-from dspy.teleprompt.darwin.data.candidate import Candidate
+from dspy.teleprompt.darwin.algorithms.gepa import GEPACandidate as Candidate
 from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
 from dspy.teleprompt.darwin.data.split_strategy import DefaultSplitStrategy
-from dspy.teleprompt.darwin.config import GEPAConfig
-from dspy.teleprompt.darwin.strategy.gepa import GEPAStrategy
+from dspy.teleprompt.darwin.algorithms.gepa.config import GEPAConfig
+from dspy.teleprompt.darwin.algorithms.gepa.strategy import GEPAStrategy
 from unittest.mock import Mock, patch
 
 
@@ -114,7 +117,7 @@ class TestGeneration:
         result = generator.generate(empty_parents, budget)
         assert result.is_empty()
 
-    @patch('dspy.teleprompt.darwin.generation.mutation.ReflectivePromptMutator')
+    @patch('dspy.teleprompt.darwin.algorithms.gepa.generation.mutation.ReflectivePromptMutator')
     def test_successful_mutation(self, mutator_mock):
         """Test that a successful mutation returns a new candidate."""
         # Arrange
@@ -216,7 +219,7 @@ class TestGeneration:
 
         assert generator._select_failed_module(traces, 2) == 1
 
-    @patch('dspy.teleprompt.darwin.generation.mutation.ReflectivePromptMutator')
+    @patch('dspy.teleprompt.darwin.algorithms.gepa.generation.mutation.ReflectivePromptMutator')
     def test_all_selection_mutates_each_predictor_in_one_child(self, mutator_mock):
         provider = FeedbackProvider(assessor=simple_metric)
         generator = ReflectivePromptMutation(
@@ -373,7 +376,7 @@ class TestGeneration:
         assert feedback[0].diagnostics == ["Score: 0.50 (FAILURE) | Feedback: feedback for first"]
         assert feedback[1].diagnostics == ["Score: 0.50 (FAILURE) | Feedback: feedback for second"]
 
-    @patch("dspy.teleprompt.darwin.generation.mutation.ReflectivePromptMutator")
+    @patch("dspy.teleprompt.darwin.algorithms.gepa.generation.mutation.ReflectivePromptMutator")
     def test_all_selection_passes_predictor_specific_feedback(self, mutator_mock):
         calls = []
 

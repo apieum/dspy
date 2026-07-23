@@ -1,6 +1,4 @@
-"""Selection step of GEPA optimization."""
+"""Generic selection contracts."""
 
 from .selector import Selector
-from .pareto import ParetoFrontier
-from .archive import DiversityArchive
-__all__ = ['Selector', 'ParetoFrontier', 'DiversityArchive']
+__all__ = ['Selector']

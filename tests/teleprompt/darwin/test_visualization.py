@@ -1,7 +1,7 @@
 import dspy
 
-from dspy.teleprompt.darwin.data.candidate import Candidate
-from dspy.teleprompt.darwin.visualization import CandidateTreeVisualizer
+from dspy.teleprompt.darwin.algorithms.gepa import GEPACandidate as Candidate
+from dspy.teleprompt.darwin.algorithms.gepa.visualization import CandidateTreeVisualizer
 
 
 def test_candidate_tree_renders_graphviz_dot():

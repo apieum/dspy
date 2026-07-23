@@ -11,7 +11,7 @@ import logging
 from typing import Optional
 
 import dspy
-from ..evaluation.metrics import BaseAssessor, Metric
+from ....evaluation.metrics import BaseAssessor, Metric
 
 logger = logging.getLogger(__name__)
 

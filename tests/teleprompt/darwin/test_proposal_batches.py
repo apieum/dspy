@@ -1,6 +1,7 @@
 import dspy
 
-from dspy.teleprompt.darwin import Candidate, Generator
+from dspy.teleprompt.darwin.algorithms.gepa import GEPACandidate as Candidate
+from dspy.teleprompt.darwin import Generator
 from dspy.teleprompt.darwin.data.cohort import NewBorns, Parents
 
 

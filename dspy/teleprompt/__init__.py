@@ -13,7 +13,8 @@ from dspy.teleprompt.simba import SIMBA
 from dspy.teleprompt.teleprompt import Teleprompter
 from dspy.teleprompt.teleprompt_optuna import BootstrapFewShotWithOptuna
 from dspy.teleprompt.vanilla import LabeledFewShot
-from dspy.teleprompt.darwin import Darwin, GEPAMute, GEPAAdaptive
+from dspy.teleprompt.darwin import Darwin
+from dspy.teleprompt.darwin.algorithms.gepa import GEPAMute, GEPAAdaptive
 
 from .gepa.gepa import GEPA
 

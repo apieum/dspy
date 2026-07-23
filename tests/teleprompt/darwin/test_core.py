@@ -2,7 +2,8 @@
 
 import dspy
 import pytest
-from dspy.teleprompt.darwin.data.candidate import Candidate
+from dspy.teleprompt.darwin.algorithms.gepa import GEPACandidate as Candidate
+from dspy.teleprompt.darwin.data.candidate import Candidate as GenericCandidate
 from dspy.teleprompt.darwin.data.cohort import NewBorns, Survivors, Parents
 from dspy.teleprompt.darwin.budget import (
     BudgetEvent,
@@ -65,6 +66,22 @@ class TestCandidate:
 
         assert candidate_a.dominate(candidate_b)
         assert not candidate_b.dominate(candidate_a)
+
+    def test_generic_candidate_delegates_algorithm_decisions(self):
+        class Operations:
+            def evaluate(self, candidate, context):
+                return (candidate.value, context)
+
+            def compare(self, left, right):
+                return (left.value > right.value) - (left.value < right.value)
+
+        first = GenericCandidate(2, operations=Operations())
+        second = GenericCandidate(1, operations=first.operations)
+
+        assert first.evaluate("context") == (2, "context")
+        assert first.compare(second) == 1
+        assert not hasattr(first, "module")
+        assert not hasattr(first, "scores")
 
 
 class TestCohort:

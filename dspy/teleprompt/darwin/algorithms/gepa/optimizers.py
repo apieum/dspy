@@ -6,12 +6,12 @@ as described in the GEPA paper.
 
 import inspect
 from typing import Optional, Callable, Any
-from .optimizer import Darwin
-from .data.candidate import example_id
+from ...optimizer import Darwin
+from .candidate import example_id
 from .generation.mutation import ReflectivePromptMutation
-from .generation.adaptive_generator import GEPAAdaptiveGenerator
-from .generation.config import ReflectiveMutationConfig
-from .evaluation.metrics import Metric
+from .adaptive_generator import GEPAAdaptiveGenerator
+from .mutation_config import ReflectiveMutationConfig
+from ...evaluation.metrics import Metric
 from .config import GEPAConfig
 from .strategy import GEPAStrategy
 

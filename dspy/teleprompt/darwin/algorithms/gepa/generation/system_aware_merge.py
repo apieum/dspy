@@ -12,13 +12,13 @@ from typing import List, Optional, Tuple, Set, TYPE_CHECKING
 
 import dspy
 from dspy.teleprompt.utils import get_signature, set_signature
-from .generator import Generator
-from ..data.candidate import Candidate, example_id
-from ..data.cohort import Parents, NewBorns
+from ....generation.generator import Generator
+from ..candidate import GEPACandidate as Candidate, example_id
+from ....data.cohort import Parents, NewBorns
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..config import DarwinConfig
+    from ....config import DarwinConfig
 
 
 logger = logging.getLogger(__name__)

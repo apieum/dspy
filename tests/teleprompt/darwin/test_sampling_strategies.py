@@ -2,7 +2,7 @@ import random
 
 import dspy
 
-from dspy.teleprompt.darwin import Candidate
+from dspy.teleprompt.darwin.algorithms.gepa import GEPACandidate as Candidate
 from dspy.teleprompt.darwin.data.cohort import Parents
 from dspy.teleprompt.darwin.generation import (
     EpochShuffledBatchSampler,

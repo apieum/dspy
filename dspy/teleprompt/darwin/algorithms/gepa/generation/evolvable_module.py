@@ -9,8 +9,8 @@ from dspy import Module
 from .prompt_mutator import PromptMutator, ReflectivePromptMutator
 from .reflection_strategy import GEPAReflection
 from ..evaluation.feedback import FeedbackResult
-from ..evaluation.metrics import Metric
-from ..data.candidate import example_id as task_id
+from ....evaluation.metrics import Metric
+from ..candidate import example_id as task_id
 
 logger = logging.getLogger(__name__)
 

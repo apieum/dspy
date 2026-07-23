@@ -1,7 +1,7 @@
 """Tests for Darwin's centralized dataset management."""
 
 import dspy
-from dspy.teleprompt.darwin import GEPAConfig
+from dspy.teleprompt.darwin.algorithms.gepa import GEPAConfig
 from dspy.teleprompt.darwin.evaluation.cache import EvaluationCache
 
 from dspy.teleprompt.darwin.dataset_manager import (
@@ -60,9 +60,9 @@ def test_seeded_automatic_split_is_reproducible_and_shuffled():
 
 
 def test_components_receive_the_dataset_manager():
-    from dspy.teleprompt.darwin.evaluation import GEPATwoPhasesEval
-    from dspy.teleprompt.darwin.generation import ReflectivePromptMutation
-    from dspy.teleprompt.darwin.generation.feedback import FeedbackProvider
+    from dspy.teleprompt.darwin.algorithms.gepa.evaluation import GEPATwoPhasesEval
+    from dspy.teleprompt.darwin.algorithms.gepa.generation import ReflectivePromptMutation
+    from dspy.teleprompt.darwin.algorithms.gepa.generation.feedback import FeedbackProvider
 
     manager = DefaultDatasetManager(_examples(6), seed=3)
     student = dspy.Predict("question -> answer")
@@ -88,7 +88,7 @@ def test_components_receive_the_dataset_manager():
 
 def test_strategy_exposes_full_training_pool_for_reflection_sampling():
     """GEPA must sample fresh reflection batches from all training examples."""
-    from dspy.teleprompt.darwin import GEPAConfig, GEPAStrategy
+    from dspy.teleprompt.darwin.algorithms.gepa import GEPAConfig, GEPAStrategy
 
     student = dspy.Predict("question -> answer")
     examples = _examples(8)
@@ -103,7 +103,8 @@ def test_strategy_exposes_full_training_pool_for_reflection_sampling():
 
 def test_strategy_accepts_preconfigured_factory_instance():
     """A factory instance should not be called as if it were a class."""
-    from dspy.teleprompt.darwin import Darwin, GEPAConfig, GEPAStrategy
+    from dspy.teleprompt.darwin import Darwin
+    from dspy.teleprompt.darwin.algorithms.gepa import GEPAConfig, GEPAStrategy
     from dspy.utils.dummies import DummyLM
 
     student = dspy.Predict("question -> answer")
