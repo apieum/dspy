@@ -69,6 +69,10 @@ class ParetoFrontier(Selector):
         if self.diversity_archive is not None:
             self.diversity_archive = DiversityArchive(self.diversity_archive.capacity)
 
+    def size(self) -> int:
+        """Return the number of candidates currently winning a task."""
+        return len(self.task_wins)
+
 
     def promote(self, survivors: Survivors, budget: Optional[Budget] = None) -> Parents:
         """

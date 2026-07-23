@@ -1,40 +1,33 @@
-"""Selection protocol for GEPA optimization."""
+"""Generic selection protocol for Darwin algorithms."""
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 from typing_extensions import Optional
 from ..observers import Channel
-import dspy
 
 if TYPE_CHECKING:
-    from ..data import Candidate, Survivors, Parents
+    from ..data import Candidate, Cohort
     from ..budget import Budget
     from ..config import DarwinConfig
 
 
 class Selector(Channel):
-    """Protocol for filtering candidates based on performance data.
-
-    This component uses scores and candidate data to decide which
-    candidates should continue to the next generation.
-    """
-    def size(self) -> int:
-        """Return the size of the selector.
-
-        Returns:
-            The size of the selector.
-        """
-        return len(self.task_wins)
+    """Protocol for promoting and selecting candidate cohorts."""
 
     @abstractmethod
-    def promote(self, survivors: "Survivors", budget: Optional['Budget'] = None) -> "Parents":
-        """Promote candidates strategy, called directly in GEPA core.
+    def size(self) -> int:
+        """Return the number of candidates tracked by this selector."""
+        ...
+
+    @abstractmethod
+    def promote(self, survivors: "Cohort", budget: Optional['Budget'] = None) -> "Cohort":
+        """Promote candidates into the next algorithm-defined cohort.
 
         Args:
-            survivors: Survivors cohort to promote to parents
+            survivors: Cohort accepted by the preceding phase
 
         Returns:
-            Parents cohort ready for reproduction
+            Cohort ready for the next phase
         """
         ...
     @abstractmethod

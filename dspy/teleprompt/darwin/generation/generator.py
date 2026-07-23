@@ -1,4 +1,4 @@
-"""Generator protocol for GEPA optimization."""
+"""Generic generation protocol for Darwin algorithms."""
 
 from abc import abstractmethod
 from typing import TYPE_CHECKING, List, Optional
@@ -6,7 +6,7 @@ import dspy
 from ..observers import Channel
 
 if TYPE_CHECKING:
-    from ..data.cohort import Parents, NewBorns
+    from ..data.cohort import Cohort
     from ..config import DarwinConfig
 
 
@@ -22,39 +22,36 @@ class Generator(Channel):
         super().__init__()
 
     @abstractmethod
-    def generate(self, parents: "Parents", budget=None) -> "NewBorns":
+    def generate(self, parents: "Cohort", budget=None) -> "Cohort":
         """Generate new candidates from parent candidates.
 
         Args:
-            parents: Parents cohort of parent candidates for generation
+            parents: Input cohort for generation
             budget: Optional budget parameter for tracking generation costs
 
         Returns:
-            NewBorns cohort containing newly generated candidates
+            A cohort containing generated candidates
         """
         ...
 
     def generate_batch(
         self,
-        parents: "Parents",
+        parents: "Cohort",
         count: int,
         budget=None,
         *,
         sampling_strategy=None,
         batch_sampler=None,
         rng=None,
-    ) -> "NewBorns":
+    ) -> "Cohort":
         """Generate a batch of independent proposals from the same parents.
 
-        GEPA evaluates proposal batches before promotion. Keeping batching in
-        the shared generator interface lets other Darwin phases, including a
-        future MIPRO phase, feed candidates into the same evaluator and
-        selector pipeline.
+        The concrete ``generate`` implementation chooses the output cohort
+        type. The shared method only combines those outputs and never assumes
+        a lifecycle role such as ``NewBorns``.
         """
         if count <= 0:
             raise ValueError("count must be positive")
-        from ..data.cohort import NewBorns
-
         parent_tasks = (
             sampling_strategy.sample(parents, count, rng=rng)
             if sampling_strategy is not None
@@ -80,12 +77,18 @@ class Generator(Channel):
                 zip(parent_tasks, feedback_batches, strict=True)
             )
         ]
-        proposals = []
+        generated_cohorts = []
         for task in tasks:
-            proposals.extend(self.generate_task(task, budget).to_list())
-        return NewBorns(*proposals, iteration=parents.iteration)
+            generated_cohorts.append(self.generate_task(task, budget))
+        output_type = type(generated_cohorts[0]) if generated_cohorts else type(parents)
+        proposals = [
+            candidate
+            for generated in generated_cohorts
+            for candidate in generated
+        ]
+        return output_type(*proposals, iteration=parents.iteration)
 
-    def generate_task(self, task, budget=None) -> "NewBorns":
+    def generate_task(self, task, budget=None) -> "Cohort":
         """Generate one explicit proposal task while preserving ``generate``."""
         try:
             self._active_proposal_task = task

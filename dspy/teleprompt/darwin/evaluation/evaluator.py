@@ -1,10 +1,10 @@
-"""Evaluator protocol for GEPA optimization."""
+"""Generic evaluation protocol for Darwin algorithms."""
 
 from abc import abstractmethod
 from typing import List, Type, TYPE_CHECKING
 import dspy
 from dspy import Module
-from ..data.cohort import Survivors, NewBorns, Cohort
+from ..data.cohort import Cohort
 from ..budget import Budget
 from ..observers import Channel
 
@@ -13,11 +13,12 @@ if TYPE_CHECKING:
 
 
 class Evaluator(Channel):
-    """Protocol for evaluating and filtering new candidates.
+    """Protocol for evaluating and filtering candidate cohorts.
 
     This component owns a metric and decides which newly generated
-    candidates should be promoted (kept) vs discarded. It encapsulates
-    the two-phase evaluation logic from the GEPA paper.
+    candidates should be promoted (kept) or discarded. Concrete algorithms
+    decide how many evaluation phases they need and which cohort type they
+    return.
     """
 
     def __init__(self):
@@ -31,19 +32,16 @@ class Evaluator(Channel):
         self.verbose = verbose
 
     @abstractmethod
-    def evaluate(self, new_borns: "NewBorns", budget: "Budget") -> "Survivors":
+    def evaluate(self, cohort: "Cohort", budget: "Budget") -> "Cohort":
         """
-        Evaluates new candidates. If a candidate has parents, it undergoes
-        two-phase validation. If it has no parents (the initial candidate),
-        it is automatically promoted to full evaluation.
+        Evaluate a cohort and return the cohort accepted by this phase.
 
         Args:
             new_borns: The cohort of newly generated candidates to evaluate.
             budget: The budget manager to track evaluation costs.
 
         Returns:
-            A Survivors cohort containing only the candidates that were
-            successfully promoted after passing evaluation.
+            A cohort containing candidates accepted by the phase.
         """
         ...
 
@@ -84,18 +82,12 @@ class Evaluator(Channel):
                     return getattr(evaluator, name)
             return default
 
-        def evaluate(self, new_borns: "NewBorns", budget: "Budget") -> "Survivors":
+        def evaluate(self, cohort: "Cohort", budget: "Budget") -> "Cohort":
             """Executes the chain of evaluators sequentially."""
-            current_cohort = new_borns
-            survivors = Survivors(*new_borns.to_list(), iteration=new_borns.iteration)
-            for i, evaluator in enumerate(self.evaluators):
-                survivors = evaluator.evaluate(current_cohort, budget)
-
-                # If not the last step, convert survivors to newborns for the next evaluator
-                if i < len(self.evaluators) - 1:
-                    current_cohort = NewBorns(*survivors.to_list(), iteration=survivors.iteration)
-
-            return survivors
+            current_cohort = cohort
+            for evaluator in self.evaluators:
+                current_cohort = evaluator.evaluate(current_cohort, budget)
+            return current_cohort
 
         def start_compilation(self, student: dspy.Module, dataset_manager=None, verbose: bool=False) -> None:
             self.dataset_manager = dataset_manager
