@@ -65,7 +65,7 @@ class Budget(Checkpointable, ABC):
 
     def __float__(self) -> float:
         """Convert budget to float (remaining budget value)."""
-        remaining = self.get_remaining()
+        remaining = self._get_remaining()
         if isinstance(remaining, dict):
             # Get the primary budget value (first key)
             primary_key = next(iter(remaining.keys()))
@@ -74,7 +74,7 @@ class Budget(Checkpointable, ABC):
 
     def __int__(self) -> int:
         """Convert budget to int (remaining budget value)."""
-        remaining = self.get_remaining()
+        remaining = self._get_remaining()
         if isinstance(remaining, dict):
             # Get the primary budget value (first key)
             primary_key = next(iter(remaining.keys()))
@@ -143,6 +143,6 @@ class Budget(Checkpointable, ABC):
         """
         pass  # Override in child classes if needed
 
-    def get_remaining(self) -> dict:
-        """Return a human-readable remaining budget breakdown."""
+    def _get_remaining(self) -> dict:
+        """Return internal accounting details for diagnostics and checkpoints."""
         raise NotImplementedError

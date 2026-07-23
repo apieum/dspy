@@ -21,7 +21,7 @@ class IterationBudget(Budget):
         self.current_iteration = 0
         
         
-    def get_remaining(self) -> dict:
+    def _get_remaining(self) -> dict:
         remaining_iterations = max(0, self.max_iterations - self.current_iteration)
         return {
             "iterations": remaining_iterations,
@@ -37,7 +37,7 @@ class IterationBudget(Budget):
 
     def serialize_state(self) -> dict[str, Any]:
         return {
-            **self.get_remaining(),
+            **self._get_remaining(),
             "current_iteration": self.current_iteration,
         }
 

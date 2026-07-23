@@ -18,7 +18,7 @@ def test_lm_budget_tracks_evaluation_and_generation_domains():
     budget.spend_on_generation(None)
     budget.spend_on_generation(None)
 
-    remaining = budget.get_remaining()
+    remaining = budget._get_remaining()
     assert budget.evaluation_calls == 5
     assert budget.generation_calls == 2
     assert remaining["evaluation_calls"] == 1
@@ -59,7 +59,7 @@ def test_budget_state_can_be_restored_without_strategy_access_to_counters():
     )
     restored.restore_state(budget.serialize_state())
 
-    assert restored.get_remaining() == budget.get_remaining()
+    assert restored._get_remaining() == budget._get_remaining()
     assert isinstance(restored, Checkpointable)
 
 

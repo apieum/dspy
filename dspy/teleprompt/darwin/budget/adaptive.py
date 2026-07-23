@@ -39,7 +39,7 @@ class AdaptiveBudget(Budget):
             base_cost = int(base_cost * self.adaptation_factor)
         self.consumed_budget = min(self.total_budget, self.consumed_budget + base_cost)
         
-    def get_remaining(self) -> dict:
+    def _get_remaining(self) -> dict:
         remaining_budget = max(0, self.total_budget - self.consumed_budget)
         return {
             "budget": remaining_budget,
@@ -57,7 +57,7 @@ class AdaptiveBudget(Budget):
 
     def serialize_state(self) -> dict[str, Any]:
         return {
-            **self.get_remaining(),
+            **self._get_remaining(),
             "consumed_budget": self.consumed_budget,
         }
 

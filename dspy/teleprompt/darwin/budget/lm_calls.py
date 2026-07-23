@@ -85,7 +85,7 @@ class LMCallsBudget(Budget):
         self._spend(generation_cost, "generation")
         logger.debug(f"Generation cost: {generation_cost} calls - {metadata}")
 
-    def get_remaining(self) -> dict:
+    def _get_remaining(self) -> dict:
         remaining_calls = max(0, self.max_calls - self.consumed_calls)
         return {
             "calls": remaining_calls,
@@ -103,7 +103,7 @@ class LMCallsBudget(Budget):
 
     def serialize_state(self) -> dict[str, Any]:
         return {
-            **self.get_remaining(),
+            **self._get_remaining(),
             "consumed_calls": self.consumed_calls,
             "evaluation_calls_consumed": self.evaluation_calls,
             "generation_calls_consumed": self.generation_calls,
