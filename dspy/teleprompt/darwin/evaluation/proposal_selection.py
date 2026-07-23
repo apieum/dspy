@@ -1,4 +1,4 @@
-"""Selection policies for accepted GEPA proposal batches."""
+"""Selection policies for accepted proposal batches."""
 
 
 class AllImprovements:

@@ -1,4 +1,4 @@
-"""Acceptance criteria for GEPA candidate proposals."""
+"""Generic acceptance criteria for candidate proposals."""
 
 from typing import Iterable
 

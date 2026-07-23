@@ -28,7 +28,7 @@ class PerCandidateBatchEvaluator(BatchEvaluator):
 
 
 class CallbackBatchEvaluator(BatchEvaluator):
-    """Adapter for an external evaluator such as GEPA's adapter batch hook."""
+    """Adapter for an external batch-evaluation callback."""
 
     def __init__(self, callback):
         if not callable(callback):

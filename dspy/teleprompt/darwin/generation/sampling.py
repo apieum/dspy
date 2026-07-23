@@ -1,8 +1,8 @@
-"""Proposal sampling strategies for Darwin generation steps.
+"""Sampling strategies for Darwin generation steps.
 
-The default strategy preserves the original GEPA behavior: one proposal from
-the currently selected parent cohort.  The other strategies are useful when a
-generation should explore several mutations before promotion.
+The default strategy creates one proposal task from the current input
+cohort. Other strategies can explore several generation tasks before
+promotion.
 """
 
 from __future__ import annotations
@@ -14,30 +14,30 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Sequence, Any
 
 if TYPE_CHECKING:
-    from ..data.cohort import Parents
+    from ..data.cohort import Cohort
 
 
 @dataclass
 class ProposalTask:
     """Explicit work item sent through Darwin's proposal pipeline."""
 
-    parents: "Parents"
+    parents: "Cohort"
     feedback_data: list[Any] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class SamplingStrategy(ABC):
-    """Select parent cohorts for one generation's proposal tasks."""
+    """Select input cohorts for one generation's proposal tasks."""
 
     @abstractmethod
     def sample(
         self,
-        parents: "Parents",
+        parents: "Cohort",
         count: int = 1,
         *,
         rng: random.Random | None = None,
-    ) -> list["Parents"]:
-        """Return the parent cohort used by each proposal task."""
+    ) -> list["Cohort"]:
+        """Return the input cohort used by each proposal task."""
 
 
 class BatchSampler(ABC):
@@ -109,7 +109,7 @@ class EpochShuffledBatchSampler(BatchSampler):
 
 
 class SingleMutationSampling(SamplingStrategy):
-    """One proposal, matching classic GEPA behavior.
+    """One generation task per requested proposal.
 
     ``count`` is honored for compatibility with Darwin's existing
     ``proposals_per_generation`` setting.  With its default value of one this
@@ -123,7 +123,7 @@ class SingleMutationSampling(SamplingStrategy):
 
 
 class SameParentSampling(SamplingStrategy):
-    """Generate N proposals from one parent, using separate mutations."""
+    """Generate N proposals from one selected input cohort."""
 
     def __init__(self, n: int):
         if n <= 0:
@@ -139,7 +139,7 @@ class SameParentSampling(SamplingStrategy):
 
 
 class IndependentSampling(SamplingStrategy):
-    """Generate N proposals, independently selecting a parent each time."""
+    """Generate N proposals, independently selecting an input cohort each time."""
 
     def __init__(self, n: int):
         if n <= 0:
@@ -154,7 +154,7 @@ class IndependentSampling(SamplingStrategy):
 
 
 class PxNSampling(SamplingStrategy):
-    """Select P parents and generate N proposals from each: P × N tasks."""
+    """Select P input cohorts and generate N tasks from each: P × N."""
 
     def __init__(self, p: int, n: int):
         if p <= 0 or n <= 0:
