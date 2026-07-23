@@ -80,7 +80,7 @@ from .dataset_manager import (
     DefaultDatasetManagerFactory,
 )
 from .generation.config import ReflectiveMutationConfig, ModuleSelectionStrategy
-from .state import OptimizationCheckpoint
+from .state import Checkpointable, OptimizationCheckpoint
 from .stopping import Stopper, ScoreThresholdStopper, NoImprovementStopper, FileStopper, AnyStopper
 
 # GEPA convenience optimizers
@@ -134,6 +134,7 @@ __all__ = [
     'FullEvaluationPolicy',
     'MinibatchEvaluationPolicy',
     'OptimizationCheckpoint',
+    'Checkpointable',
     'Stopper',
     'ScoreThresholdStopper',
     'NoImprovementStopper',

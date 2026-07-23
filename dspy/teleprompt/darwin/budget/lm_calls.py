@@ -1,7 +1,7 @@
 """LM calls budget implementation."""
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Mapping, Optional
 import dspy
 from .budget import Budget
 
@@ -109,7 +109,7 @@ class LMCallsBudget(Budget):
             "generation_calls_consumed": self.generation_calls,
         }
 
-    def restore_state(self, state: dict[str, Any]) -> None:
+    def restore_state(self, state: Mapping[str, Any]) -> None:
         if not state:
             return
         consumed = state.get("consumed_calls")

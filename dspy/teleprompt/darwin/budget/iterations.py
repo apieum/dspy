@@ -1,6 +1,6 @@
 """Iterations budget implementation."""
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Mapping, Optional
 import dspy
 from .budget import Budget
 
@@ -41,7 +41,7 @@ class IterationBudget(Budget):
             "current_iteration": self.current_iteration,
         }
 
-    def restore_state(self, state: dict[str, Any]) -> None:
+    def restore_state(self, state: Mapping[str, Any]) -> None:
         if state:
             self.current_iteration = min(
                 self.max_iterations,

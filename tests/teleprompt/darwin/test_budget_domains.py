@@ -1,6 +1,11 @@
 import pytest
 
-from dspy.teleprompt.darwin import GEPAConfig, GEPAStrategy, LMCallsBudget
+from dspy.teleprompt.darwin import (
+    Checkpointable,
+    GEPAConfig,
+    GEPAStrategy,
+    LMCallsBudget,
+)
 
 
 def test_lm_budget_tracks_evaluation_and_generation_domains():
@@ -55,6 +60,7 @@ def test_budget_state_can_be_restored_without_strategy_access_to_counters():
     restored.restore_state(budget.serialize_state())
 
     assert restored.get_remaining() == budget.get_remaining()
+    assert isinstance(restored, Checkpointable)
 
 
 def test_strategy_stops_when_the_active_budget_domain_is_exhausted():

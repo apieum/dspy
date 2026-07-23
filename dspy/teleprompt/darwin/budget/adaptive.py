@@ -1,6 +1,6 @@
 """Adaptive budget implementation."""
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Mapping, Optional
 import dspy
 from .budget import Budget
 
@@ -61,7 +61,7 @@ class AdaptiveBudget(Budget):
             "consumed_budget": self.consumed_budget,
         }
 
-    def restore_state(self, state: dict[str, Any]) -> None:
+    def restore_state(self, state: Mapping[str, Any]) -> None:
         if state:
             self.consumed_budget = min(
                 self.total_budget,
