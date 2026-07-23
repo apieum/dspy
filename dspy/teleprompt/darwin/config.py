@@ -1,8 +1,8 @@
 """Configuration classes for Darwin optimization framework."""
 
-from dataclasses import dataclass, field
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import Type, Optional, Tuple, Any
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from .budget import Budget, LMCallsBudget
 from .selection import Selector, ParetoFrontier
@@ -11,6 +11,8 @@ from .generation import (
     SystemAwareMerge,
     ReflectivePromptMutation,
     GEPAReflection,
+    ReflectionStrategy,
+    FeedbackProvider,
     EpochShuffledBatchSampler,
     SingleMutationSampling,
 )
@@ -37,27 +39,26 @@ class DarwinConfig(ABC):
     def __getattr__(self, name: str) -> Any:
         raise AttributeError(name)
 
-    @property
-    @abstractmethod
-    def seed(self) -> int:
-        """Seed shared by deterministic Darwin components."""
-        ...
-
-
-@dataclass
-class GEPAConfig(DarwinConfig):
+class GEPAConfig(BaseModel, DarwinConfig):
     """Configuration for the GEPA strategy implemented by Darwin.
 
     Strategy owns all tactical decisions and instantiates components with appropriate data.
     The concrete configuration specifies which classes to use and key
     strategic choices such as metrics.
     """
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        validate_assignment=True,
+        validate_default=True,
+        extra="forbid",
+    )
+
     # Strategic components for strategy to instantiate (required)
     budget: Type['Budget'] = LMCallsBudget
     selection: Type['Selector'] = ParetoFrontier
     evaluation: Type['Evaluator'] = GEPATwoPhasesEval
     mutation: Type['Generator'] = ReflectivePromptMutation
-    fitness_function: Assessor = F1Score()
+    fitness_function: Any = Field(default_factory=F1Score)
 
     # Optional strategic choices
     crossover: Optional[Type['Generator']] = SystemAwareMerge  # Optional crossover generator
@@ -78,7 +79,7 @@ class GEPAConfig(DarwinConfig):
     # This is cheaper and deterministic; disabling it matches implementations
     # that independently rerun the parent during validation.
     reuse_parent_rollouts: bool = True
-    enhanced_feedback: Optional[Assessor] = F1Score()  # Optional feedback-generating metric
+    enhanced_feedback: Any = Field(default_factory=F1Score)  # Optional feedback-generating metric
     acceptance_criterion: Any = StrictImprovementAcceptance
     proposal_selection: Any = AllImprovements
     validation_policy: Any = FullEvaluationPolicy
@@ -93,8 +94,8 @@ class GEPAConfig(DarwinConfig):
     selector_observers: Tuple[Any, ...] = ()
     # Optional adapter-level evaluator. It receives a list of
     # (candidate, examples) jobs and returns one metric list per job.
-    batch_evaluator: Any = field(default_factory=PerCandidateBatchEvaluator)
-    mutation_config: ReflectiveMutationConfig = None
+    batch_evaluator: Any = Field(default_factory=PerCandidateBatchEvaluator)
+    mutation_config: Optional[ReflectiveMutationConfig] = None
 
     # System parameters we actually have
     max_lm_calls: int = 100
@@ -128,23 +129,35 @@ class GEPAConfig(DarwinConfig):
     # Logging
     verbose: bool = False
 
-    def __post_init__(self):
-        self.acceptance_criterion = self._materialize_component(
-            self.acceptance_criterion, "acceptance_criterion"
-        )
-        self.proposal_selection = self._materialize_component(
-            self.proposal_selection, "proposal_selection"
-        )
-        self.validation_policy = self._materialize_component(
-            self.validation_policy, "validation_policy"
-        )
-        if self.batch_evaluator is None:
+    @field_validator(
+        "acceptance_criterion",
+        "proposal_selection",
+        "validation_policy",
+        mode="before",
+    )
+    @classmethod
+    def materialize_policy(cls, value: Any, info: ValidationInfo) -> Any:
+        if value is None:
+            raise ValueError(f"{info.field_name} must be configured")
+        if isinstance(value, type):
+            try:
+                return value()
+            except TypeError as error:
+                raise TypeError(
+                    "configured policy classes must have a no-argument constructor; "
+                    "provide an instance otherwise"
+                ) from error
+        return value
+
+    @field_validator("batch_evaluator", mode="before")
+    @classmethod
+    def materialize_batch_evaluator(cls, value: Any) -> Any:
+        if value is None:
             raise ValueError("batch_evaluator must be configured")
-        self.batch_evaluator = resolve_batch_evaluator(self.batch_evaluator)
-        if not isinstance(self.failure_score, (int, float)):
-            raise TypeError("failure_score must be numeric")
-        if self.patience is not None and self.patience < 0:
-            raise ValueError("patience must be non-negative or None")
+        return resolve_batch_evaluator(value)
+
+    @model_validator(mode="after")
+    def validate_config(self) -> "GEPAConfig":
         if self.mutation_config is None:
             self.mutation_config = ReflectiveMutationConfig(minibatch_size=self.minibatch_size)
         if self.mutation_config.reflection_strategy is None:
@@ -155,6 +168,10 @@ class GEPAConfig(DarwinConfig):
             self.batch_sampler = EpochShuffledBatchSampler(
                 self.mutation_config.minibatch_size
             )
+        if not isinstance(self.failure_score, (int, float)):
+            raise TypeError("failure_score must be numeric")
+        if self.patience is not None and self.patience < 0:
+            raise ValueError("patience must be non-negative or None")
         if self.candidate_selection_strategy not in {
             "pareto", "current_best", "epsilon_greedy", "top_k_pareto"
         }:
@@ -180,22 +197,7 @@ class GEPAConfig(DarwinConfig):
             raise ValueError("merge_val_overlap_floor must be positive")
         if self.merge_pair_attempts <= 0:
             raise ValueError("merge_pair_attempts must be positive")
+        return self
 
-    @staticmethod
-    def _materialize_component(value: Any, name: str) -> Any:
-        """Materialize a configured no-argument component factory once.
 
-        Defaults and overrides are resolved while constructing the strategy
-        configuration. Runtime components therefore never invent a policy or
-        criterion when one was omitted.
-        """
-        if value is None:
-            raise ValueError(f"{name} must be configured")
-        if isinstance(value, type):
-            try:
-                return value()
-            except TypeError as error:
-                raise TypeError(
-                    f"{name} must be an instance when its class needs arguments"
-                ) from error
-        return value
+GEPAConfig.model_rebuild()
