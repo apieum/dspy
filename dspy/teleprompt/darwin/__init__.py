@@ -78,7 +78,7 @@ from .logging import (
 )
 from .strategy import BaseStrategy
 from .compilation_observer import CompilationObserver, LoggingCompilationObserver
-from .dataset_manager import (
+from .data.dataset_manager import (
     DatasetManager,
     DatasetManagerFactory,
     DefaultDatasetManager,

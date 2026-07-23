@@ -4,7 +4,7 @@ import dspy
 from dspy.teleprompt.darwin.algorithms.gepa import GEPAConfig
 from dspy.teleprompt.darwin.evaluation.cache import EvaluationCache
 
-from dspy.teleprompt.darwin.dataset_manager import (
+from dspy.teleprompt.darwin.data.dataset_manager import (
     DefaultDatasetManager,
     DefaultDatasetManagerFactory,
 )

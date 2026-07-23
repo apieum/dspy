@@ -10,7 +10,7 @@ import dspy
 if TYPE_CHECKING:
     from .budget import Budget
     from .data.cohort import Cohort
-    from .dataset_manager import DatasetManager
+    from .data.dataset_manager import DatasetManager
     from .result import Result
 
 

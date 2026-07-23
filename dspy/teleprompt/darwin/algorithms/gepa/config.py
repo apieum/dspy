@@ -15,7 +15,7 @@ from ...generation import SamplingStrategy, BatchSampler
 from .mutation_config import ReflectiveMutationConfig
 from ...evaluation import Evaluator
 from ...evaluation.metrics import Assessor, F1Score
-from ...dataset_manager import DefaultDatasetManagerFactory
+from ...data.dataset_manager import DefaultDatasetManagerFactory
 from ...evaluation.acceptance import StrictImprovementAcceptance
 from ...evaluation.proposal_selection import AllImprovements
 from ...evaluation.policy import FullEvaluationPolicy

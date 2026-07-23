@@ -2,6 +2,12 @@
 
 from .candidate import Candidate, CandidateOperations
 from .cohort import Cohort, Survivors, Parents, NewBorns
+from .dataset_manager import (
+    DatasetManager,
+    DatasetManagerFactory,
+    DefaultDatasetManager,
+    DefaultDatasetManagerFactory,
+)
 
 __all__ = [
     'Candidate',
@@ -10,4 +16,8 @@ __all__ = [
     'Survivors',
     'Parents', 
     'NewBorns',
+    'DatasetManager',
+    'DatasetManagerFactory',
+    'DefaultDatasetManager',
+    'DefaultDatasetManagerFactory',
 ]
