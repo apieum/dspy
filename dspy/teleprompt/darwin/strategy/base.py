@@ -8,7 +8,7 @@ from typing import Any, Generic, TypeVar
 import dspy
 
 from ..compilation_observer import CompilationObserver, LoggingCompilationObserver
-from ..result import Failure, OptimizationFailureError, Result
+from ..result import OptimizationFailureError, Result
 from dspy.teleprompt.teleprompt import Teleprompter
 
 R = TypeVar("R", bound=Result)
@@ -57,17 +57,7 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
                 pass
             result = self.finish_compilation()
             self.latest_result = result
-            if isinstance(result, Failure):
-                raise OptimizationFailureError(
-                    f"Optimization failed: {result.reason}"
-                )
-            best_candidate = result.get_best_generalist()
-            if best_candidate and best_candidate.module:
-                best_candidate.module._compiled = True
-                return best_candidate.module
-            raise OptimizationFailureError(
-                "Optimization failed: no compiled module was produced"
-            )
+            return self._compile_result(result)
         except OptimizationFailureError:
             raise
         except Exception as error:
@@ -122,12 +112,10 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
         """Return the active dataset manager without knowing strategy state."""
         return getattr(self, "dataset_manager", None)
 
-    def _result_module_for_notification(self, result: Result):
-        candidate = getattr(result, "best_candidate", None)
-        module = getattr(candidate, "module", None)
-        if module is not None:
-            return module
-        return getattr(self, "student", None)
+    @abstractmethod
+    def _result_module_for_notification(self, result: R) -> dspy.Module | None:
+        """Provide the module sent with the generic finish notification."""
+        raise NotImplementedError
 
     @abstractmethod
     def _start_compilation(
@@ -150,4 +138,9 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
     @abstractmethod
     def _finish_compilation(self) -> R:
         """Implement concrete strategy finalization."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def _compile_result(self, result: R) -> dspy.Module:
+        """Convert an algorithm result into the compiled module it returns."""
         raise NotImplementedError

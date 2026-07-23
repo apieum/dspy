@@ -111,6 +111,31 @@ def test_strategy_is_a_delegating_workflow_adapter():
     assert calls == ["next"]
 
 
+def test_base_strategy_does_not_assume_gepa_result_shape():
+    class GenericResult(Result):
+        pass
+
+    class GenericStrategy(BaseStrategy[GenericResult]):
+        def _start_compilation(self, student, *, trainset, devset=None, teacher=None, **kwargs):
+            self.student = student
+
+        def _next_step(self):
+            return False
+
+        def _finish_compilation(self):
+            return GenericResult()
+
+        def _compile_result(self, result):
+            return self.student
+
+        def _result_module_for_notification(self, result):
+            return self.student
+
+    student = SimpleQA()
+    strategy = GenericStrategy(GEPAConfig(max_lm_calls=1))
+    assert strategy.compile(student, trainset=[]) is student
+
+
 def test_gepa_mute_is_budget_driven_by_default():
     optimizer = GEPAMute(metric=simple_metric, max_calls=8)
     assert optimizer.config.patience is None

@@ -15,7 +15,7 @@ from .base import BaseStrategy
 from ..workflow import Workflow
 from ..data.candidate import Candidate, example_id
 from ..data.cohort import Cohort, NewBorns, Survivors, Parents
-from ..result import Result, Success, Failure
+from ..result import Result, Success, Failure, OptimizationFailureError
 from ..state import OptimizationCheckpoint
 from ..evaluation import EvaluationCache
 from ..evaluation import Metric
@@ -844,3 +844,20 @@ class GEPAStrategy(BaseStrategy[Result]):
     def _finish_compilation(self) -> Result:
         """Delegate finalization to the workflow."""
         return self.workflow.finish_compilation()
+
+    def _compile_result(self, result: Result) -> dspy.Module:
+        """Materialize GEPA's best candidate as the compiled module."""
+        if isinstance(result, Failure):
+            raise OptimizationFailureError(f"Optimization failed: {result.reason}")
+        best_candidate = result.get_best_generalist()
+        if best_candidate and best_candidate.module:
+            best_candidate.module._compiled = True
+            return best_candidate.module
+        raise OptimizationFailureError(
+            "Optimization failed: no compiled module was produced"
+        )
+
+    def _result_module_for_notification(self, result: Result) -> dspy.Module | None:
+        """Provide GEPA's resulting module to the generic lifecycle observer."""
+        candidate = getattr(result, "best_candidate", None)
+        return getattr(candidate, "module", None) or self.workflow.student
