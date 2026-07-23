@@ -13,4 +13,4 @@ def test_max_iterations_is_enforced():
         )
         optimizer.compile(dspy.Predict("question -> answer"), trainset=data)
 
-    assert optimizer.strategy.current_generation == 0
+    assert optimizer.strategy.workflow.current_generation == 0

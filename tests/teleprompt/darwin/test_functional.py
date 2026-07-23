@@ -325,8 +325,8 @@ class TestFunctional:
             assert isinstance(result, Success)
             assert compiled_module._compiled is True
             # Verify strategy correctly separates data
-            assert optimizer.strategy.devset == devset
-            assert len(optimizer.strategy.validation_data) > 0
+            assert optimizer.strategy.workflow.devset == devset
+            assert len(optimizer.strategy.workflow.validation_data) > 0
 
 
 if __name__ == "__main__":

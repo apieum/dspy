@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
+import logging
 
 import dspy
 
@@ -26,3 +27,22 @@ class CompilationObserver(Protocol):
     def candidate_evaluated(self, candidate, accepted: bool) -> None: ...
 
     def budget_exhausted(self, budget: "Budget") -> None: ...
+
+    def log(self, level: str, message: str, *args, **kwargs) -> None: ...
+
+
+class LoggingCompilationObserver:
+    """Translate workflow log events into the application's logging system."""
+
+    def __init__(self, *, verbose: bool = False) -> None:
+        self.verbose = verbose
+        self.logger = logging.getLogger("dspy.teleprompt.darwin")
+
+    def log(self, level: str, message: str, *args, **kwargs) -> None:
+        if level == "info" and not self.verbose:
+            return
+        if level == "exception":
+            self.logger.exception(message, *args, **kwargs)
+            return
+        log_method = getattr(self.logger, level, self.logger.info)
+        log_method(message, *args, **kwargs)

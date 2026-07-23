@@ -309,14 +309,14 @@ class TestGeneration:
         marker = object()
         strategy = GEPAStrategy(GEPAConfig(reflection_lm=marker))
 
-        generator = strategy._instantiate_generator(ReflectivePromptMutation)
+        generator = strategy.workflow._instantiate_generator(ReflectivePromptMutation)
 
         assert generator.reflection_lm is marker
 
     def test_parent_rollout_reuse_is_configurable(self):
         strategy = GEPAStrategy(GEPAConfig(reuse_parent_rollouts=False))
 
-        generator = strategy._instantiate_generator(ReflectivePromptMutation)
+        generator = strategy.workflow._instantiate_generator(ReflectivePromptMutation)
 
         assert generator.reuse_parent_rollouts is False
 

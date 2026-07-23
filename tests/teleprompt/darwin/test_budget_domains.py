@@ -40,18 +40,18 @@ def test_non_billable_generation_failure_does_not_consume_budget():
 
 def test_strategy_stops_when_the_active_budget_domain_is_exhausted():
     strategy = GEPAStrategy(GEPAConfig(max_lm_calls=10))
-    strategy._budget = LMCallsBudget(
+    strategy.workflow._budget = LMCallsBudget(
         max_calls=10, evaluation_max_calls=2, generation_max_calls=8
     )
-    strategy.algorithm_state = "generate"
-    strategy._budget.evaluation_calls = 2
+    strategy.workflow.algorithm_state = "generate"
+    strategy.workflow._budget.evaluation_calls = 2
 
-    assert strategy.should_terminate()
+    assert strategy.workflow.should_terminate()
 
-    strategy._budget = LMCallsBudget(
+    strategy.workflow._budget = LMCallsBudget(
         max_calls=10, evaluation_max_calls=8, generation_max_calls=2
     )
-    strategy.algorithm_state = "generate"
-    strategy._budget.generation_calls = 2
+    strategy.workflow.algorithm_state = "generate"
+    strategy.workflow._budget.generation_calls = 2
 
-    assert strategy.should_terminate()
+    assert strategy.workflow.should_terminate()

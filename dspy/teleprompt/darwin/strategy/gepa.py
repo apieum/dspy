@@ -1,6 +1,5 @@
 """GEPA - Default evolutionary optimization strategy."""
 
-import logging
 import inspect
 import random
 import json
@@ -13,6 +12,7 @@ from typing import List, Optional, TYPE_CHECKING
 import dspy
 from dspy.teleprompt.utils import get_signature, set_signature
 from .base import BaseStrategy
+from ..workflow import Workflow
 from ..data.candidate import Candidate, example_id
 from ..data.cohort import Cohort, NewBorns, Survivors, Parents
 from ..result import Result, Success, Failure
@@ -23,9 +23,6 @@ from ..evaluation import Metric
 if TYPE_CHECKING:
     from ..config import GEPAConfig
 
-logger = logging.getLogger(__name__)
-
-
 def _tuple_tree(value):
     """Convert JSON-loaded RNG state lists back to nested tuples."""
     if isinstance(value, list):
@@ -33,8 +30,8 @@ def _tuple_tree(value):
     return value
 
 
-class GEPAStrategy(BaseStrategy[Result]):
-    """Default implementation of evolutionary optimization strategy.
+class GEPAWorkflow(Workflow[Result]):
+    """GEPA's concrete workflow and its algorithm-specific runtime state.
 
     Implements a simple evolutionary algorithm with the following steps:
     1. Initialize population with single candidate
@@ -44,8 +41,29 @@ class GEPAStrategy(BaseStrategy[Result]):
     5. Repeat until termination criteria met
     """
 
-    def __init__(self, config: 'GEPAConfig'):
-        super().__init__(config)
+    def __init__(self, config: 'GEPAConfig', *, notify=None):
+        super().__init__(config, notify=notify)
+        # Compilation-scoped runtime fields live in the workflow.  Keeping
+        # them initialized here also makes the component facade usable before
+        # ``start_compilation`` (for inspection and unit-test composition).
+        self.current_generation = 0
+        self.best_candidate = None
+        self.generations_without_improvement = 0
+        self.trainset = []
+        self.devset = []
+        self.training_data = []
+        self.validation_data = []
+        self.dataset_manager = None
+        self.student = None
+        self.teacher = None
+        self._budget = None
+        self._selector = None
+        self._generator = None
+        self._crossover = None
+        self._evaluator = None
+        self._merge_due = False
+        self._merge_attempts = 0
+        self._budget_exhaustion_notified = False
         self.algorithm_state = "initialize"  # initialize -> evaluate -> select -> generate -> repeat
         self.current_newborns: Optional[NewBorns] = None
         self.current_survivors: Optional[Survivors] = None
@@ -65,6 +83,143 @@ class GEPAStrategy(BaseStrategy[Result]):
             "select": self.select,
             "generate": self.generate,
         }
+
+    def _create_minibatch(self, data: List[dspy.Example], size: int) -> List[dspy.Example]:
+        """Sample a deterministic minibatch for the current GEPA run."""
+        if not data:
+            return []
+        if len(data) <= size:
+            return data.copy()
+        return self.rng.sample(data, size)
+
+    @property
+    def budget(self):
+        if not hasattr(self, "_budget") or self._budget is None:
+            self._budget = self.config.budget(config=self.config)
+        return self._budget
+
+    @property
+    def selector(self):
+        if not hasattr(self, "_selector") or self._selector is None:
+            self._selector = self.config.selection(config=self.config)
+        return self._selector
+
+    @property
+    def generator(self):
+        if not hasattr(self, "_generator") or self._generator is None:
+            self._generator = self._instantiate_generator(self.config.mutation)
+        return self._generator
+
+    @property
+    def crossover_generator(self):
+        if not hasattr(self, "_crossover") or self._crossover is None:
+            if self.config.crossover is None:
+                raise RuntimeError("No crossover generator is configured")
+            self._crossover = self._instantiate_generator(self.config.crossover)
+        return self._crossover
+
+    @property
+    def evaluator(self):
+        if not hasattr(self, "_evaluator") or self._evaluator is None:
+            minibatch_data = self._create_minibatch(
+                self.validation_data, self.config.minibatch_size
+            )
+            self._evaluator = self.config.evaluation(
+                config=self.config,
+                minibatch_data=minibatch_data,
+                validation_data=self.validation_data,
+                evaluation_cache=self.evaluation_cache,
+            )
+            self._evaluator.start_compilation(
+                getattr(self, "student", None),
+                dataset_manager=self.dataset_manager,
+                verbose=self.config.verbose,
+            )
+        return self._evaluator
+
+    def should_terminate(self) -> bool:
+        """Apply GEPA's stopping policy before dispatching the next phase."""
+        if getattr(self, "_signal_stop_requested", False):
+            return True
+        for stopper in self.config.stoppers:
+            if stopper(self):
+                return True
+        if self.budget <= 0:
+            if not getattr(self, "_budget_exhaustion_notified", False):
+                self.notify("budget_exhausted", self.budget)
+                self._budget_exhaustion_notified = True
+            return True
+
+        remaining = self.budget.get_remaining()
+        if isinstance(remaining, dict):
+            if (
+                self.algorithm_state == "generate"
+                and "generation_calls" in remaining
+                and remaining["generation_calls"] <= 0
+            ):
+                return True
+            if (
+                self.algorithm_state in {"select", "generate"}
+                and "evaluation_calls" in remaining
+                and remaining["evaluation_calls"] <= 0
+            ):
+                return True
+        if (
+            self.config.patience is not None
+            and self.generations_without_improvement >= self.config.patience
+        ):
+            return True
+        if (
+            self.algorithm_state == "generate"
+            and self.config.max_iterations is not None
+            and self.current_generation >= self.config.max_iterations
+        ):
+            return True
+        return False
+
+    def _instantiate_generator(self, generator_factory):
+        from ..generation.feedback import FeedbackProvider
+
+        mutation_config = self.config.mutation_config
+        feedback_assessor = (
+            mutation_config.feedback_provider.assessor
+            if mutation_config and mutation_config.feedback_provider is not None
+            else self.config.enhanced_feedback or self.config.fitness_function
+        )
+        feedback_function = mutation_config.enhanced_feedback_function if mutation_config else None
+        feedback_provider = (
+            mutation_config.feedback_provider
+            if mutation_config and mutation_config.feedback_provider is not None
+            else FeedbackProvider(
+                assessor=feedback_assessor,
+                feedback_function=feedback_function,
+                failure_score=self.config.failure_score,
+            )
+        )
+        feedback_data = self._create_minibatch(
+            self.training_data,
+            mutation_config.minibatch_size
+            if mutation_config
+            else self.config.minibatch_size,
+        )
+        generator = generator_factory(
+            feedback_provider=feedback_provider,
+            feedback_data=feedback_data,
+            assessor=feedback_assessor,
+            config=self.config,
+            rng=self.rng,
+        )
+        generator.feedback_pool = list(self.training_data)
+        generator.evaluation_cache = self.evaluation_cache
+        student = getattr(self, "student", None)
+        if student is not None:
+            generator.start_compilation(
+                student,
+                dataset_manager=self.dataset_manager,
+                feedback_data=feedback_data,
+                verbose=self.config.verbose,
+            )
+        return generator
 
     def start_compilation(
         self, student: dspy.Module, *, trainset: list[dspy.Example], devset: list[dspy.Example] | None = None, teacher: dspy.Module | None = None, **kwargs
@@ -121,9 +276,14 @@ class GEPAStrategy(BaseStrategy[Result]):
         )
 
         if self.config.verbose:
-            logger.info(f"Data split: {len(self.training_data)} train, {len(self.validation_data)} validation, {len(self.devset)} test")
+            self.notify(
+                "log",
+                "info",
+                f"Data split: {len(self.training_data)} train, "
+                f"{len(self.validation_data)} validation, {len(self.devset)} test",
+            )
 
-        self._notify("start_compilation", self.student, self.dataset_manager)
+        self.notify("start_compilation", self.student, self.dataset_manager)
 
         if self.config.resume_from:
             if self._restore_checkpoint(self.config.resume_from, student):
@@ -194,7 +354,7 @@ class GEPAStrategy(BaseStrategy[Result]):
         result_module = self.best_candidate.module if self.best_candidate is not None else self.student
         if self.best_candidate is not None:
             result_module._compiled = True
-        self._notify("finish_compilation", result_module)
+        self.notify("finish_compilation", result_module)
         self._write_checkpoint(completed=True)
         self._restore_signal_handlers()
         return result
@@ -231,7 +391,13 @@ class GEPAStrategy(BaseStrategy[Result]):
         try:
             self._write_checkpoint(completed=False)
         except Exception:
-            logger.exception("Unable to write Darwin checkpoint after %s", self._signal_stop_reason)
+            self.notify(
+                "log",
+                "exception",
+                "Unable to write Darwin checkpoint after %s",
+                self._signal_stop_reason,
+                exc_info=True,
+            )
 
     def get_checkpoint(self, completed: bool = False) -> OptimizationCheckpoint:
         """Return a JSON-safe snapshot of the current optimization state."""
@@ -499,7 +665,10 @@ class GEPAStrategy(BaseStrategy[Result]):
     def evaluate(self):
         """Evaluate current candidates."""
         if self.config.verbose:
-            logger.info(f"Evaluating candidates in generation {self.current_generation}")
+            self.notify(
+                "log", "info",
+                f"Evaluating candidates in generation {self.current_generation}",
+            )
 
         if self.current_newborns is None or self.current_newborns.is_empty():
             # No candidates to evaluate, move to selection
@@ -514,7 +683,7 @@ class GEPAStrategy(BaseStrategy[Result]):
 
         survivors = set(self.current_survivors.candidates)
         for candidate in self.current_newborns:
-            self._notify("candidate_evaluated", candidate, candidate in survivors)
+            self.notify("candidate_evaluated", candidate, candidate in survivors)
 
         generation_best_score = None
 
@@ -557,7 +726,10 @@ class GEPAStrategy(BaseStrategy[Result]):
     def select(self):
         """Select candidates for next generation."""
         if self.config.verbose:
-            logger.info(f"Selecting candidates for generation {self.current_generation + 1}")
+            self.notify(
+                "log", "info",
+                f"Selecting candidates for generation {self.current_generation + 1}",
+            )
 
         if self.current_survivors is None or self.current_survivors.is_empty():
             # No survivors to select from, move to generate
@@ -577,7 +749,7 @@ class GEPAStrategy(BaseStrategy[Result]):
         # Promote survivors to parents for next generation
         self.current_parents = self.selector.promote(self.current_survivors)
         if self._iteration_started:
-            self._notify("finish_iteration", self.current_generation, self.current_parents, self.budget)
+            self.notify("finish_iteration", self.current_generation, self.current_parents, self.budget)
             self._iteration_started = False
         self.algorithm_state = "generate"
         self._write_checkpoint()
@@ -587,14 +759,17 @@ class GEPAStrategy(BaseStrategy[Result]):
         self.current_generation += 1
 
         if self.config.verbose:
-            logger.info(f"Generating candidates for generation {self.current_generation}")
+            self.notify(
+                "log", "info",
+                f"Generating candidates for generation {self.current_generation}",
+            )
 
         if self.current_parents is None or self.current_parents.is_empty():
             # No parents available, terminate by setting state that leads to exit
             self.algorithm_state = "terminate"
             return
 
-        self._notify("start_iteration", self.current_generation, self.current_parents, self.budget)
+        self.notify("start_iteration", self.current_generation, self.current_parents, self.budget)
         self._iteration_started = True
 
         # Official GEPA gives a merge one opportunity after a successful
@@ -620,8 +795,46 @@ class GEPAStrategy(BaseStrategy[Result]):
             )
 
         if self.current_newborns.is_empty() and self.budget <= 0:
-            self._notify("budget_exhausted", self.budget)
+            self.notify("budget_exhausted", self.budget)
 
         # Cycle back to evaluation
         self.algorithm_state = "evaluate"
         self._write_checkpoint()
+
+
+class GEPAStrategy(BaseStrategy[Result]):
+    """Strategy adapter that assembles and delegates to ``GEPAWorkflow``."""
+
+    def __init__(self, config: "GEPAConfig") -> None:
+        super().__init__(config)
+        object.__setattr__(
+            self,
+            "workflow",
+            GEPAWorkflow(config, notify=self._notify),
+        )
+
+    def start_compilation(
+        self,
+        student: dspy.Module,
+        *,
+        trainset: list[dspy.Example],
+        devset: list[dspy.Example] | None = None,
+        teacher: dspy.Module | None = None,
+        **kwargs,
+    ) -> None:
+        """Delegate compilation setup to the configured workflow."""
+        self.workflow.start_compilation(
+            student,
+            trainset=trainset,
+            devset=devset,
+            teacher=teacher,
+            **kwargs,
+        )
+
+    def next_step(self) -> bool:
+        """Delegate one execution step to the workflow."""
+        return self.workflow.next_step()
+
+    def terminate_compilation(self) -> Result:
+        """Delegate finalization to the workflow."""
+        return self.workflow.terminate_compilation()

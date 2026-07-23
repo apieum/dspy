@@ -70,9 +70,10 @@ from .logging import (
 )
 
 # Strategy and configuration
-from .strategy import BaseStrategy, GEPAStrategy
+from .strategy import BaseStrategy, GEPAStrategy, GEPAWorkflow
+from .workflow import Workflow
 from .config import DarwinConfig, GEPAConfig
-from .compilation_observer import CompilationObserver
+from .compilation_observer import CompilationObserver, LoggingCompilationObserver
 from .dataset_manager import (
     DatasetManager,
     DatasetManagerFactory,
@@ -168,9 +169,12 @@ __all__ = [
     # Strategy and configuration
     'BaseStrategy',
     'GEPAStrategy',
+    'GEPAWorkflow',
+    'Workflow',
     'GEPAConfig',
     'DarwinConfig',
     'CompilationObserver',
+    'LoggingCompilationObserver',
     'DatasetManager', 'DatasetManagerFactory',
     'DefaultDatasetManager', 'DefaultDatasetManagerFactory',
     'ReflectiveMutationConfig',

@@ -12,7 +12,7 @@ def test_darwin_accepts_standard_teleprompter_valset_keyword():
         optimizer = Darwin(GEPAStrategy, GEPAConfig(max_lm_calls=2))
         optimizer.compile(dspy.Predict("question -> answer"), trainset=trainset, valset=valset)
 
-    assert optimizer.strategy.devset == valset
+    assert optimizer.strategy.workflow.devset == valset
 
 
 def test_darwin_rejects_ambiguous_validation_aliases():

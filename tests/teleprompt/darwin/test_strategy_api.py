@@ -18,6 +18,7 @@ from dspy.teleprompt.darwin import (
     FullTaskScores,
     FullEvaluationPolicy,
     GEPAStrategy,
+    GEPAWorkflow,
     GEPATwoPhasesEval,
     Generator,
     LMCallsBudget,
@@ -90,10 +91,20 @@ def test_refactored_darwin_returns_compiled_program(simple_trainset, dummy_lm):
 def test_refactored_darwin_exposes_strategy_components():
     optimizer = Darwin(GEPAStrategy, GEPAConfig(max_lm_calls=2))
     assert isinstance(optimizer, Darwin)
-    assert hasattr(optimizer.strategy, "budget")
-    assert hasattr(optimizer.strategy, "selector")
-    assert hasattr(optimizer.strategy, "generator")
-    assert hasattr(optimizer.strategy, "evaluator")
+    assert hasattr(optimizer.strategy.workflow, "budget")
+    assert hasattr(optimizer.strategy.workflow, "selector")
+    assert hasattr(optimizer.strategy.workflow, "generator")
+    assert hasattr(optimizer.strategy.workflow, "evaluator")
+
+
+def test_strategy_is_a_delegating_workflow_adapter():
+    strategy = GEPAStrategy(GEPAConfig(max_lm_calls=2))
+    assert isinstance(strategy.workflow, GEPAWorkflow)
+
+    calls = []
+    strategy.workflow.next_step = lambda: calls.append("next") or False
+    assert strategy.next_step() is False
+    assert calls == ["next"]
 
 
 def test_gepa_mute_is_budget_driven_by_default():
@@ -138,16 +149,17 @@ def test_strategy_injects_the_same_config_into_components():
     )
     strategy = GEPAStrategy(config)
 
-    assert strategy.budget.config is config
-    assert strategy.selector.frontier_type == "hybrid"
-    assert strategy.generator.config is config
-    assert strategy.generator.reflection_lm == "configured-reflection-lm"
-    assert strategy.generator.reuse_parent_rollouts is False
-    assert strategy.generator.perfect_score == 0.9
-    assert strategy.generator.skip_perfect_score is False
-    assert strategy.crossover_generator.config is config
-    assert strategy.crossover_generator.val_overlap_floor == config.merge_val_overlap_floor
-    assert strategy.crossover_generator.max_attempts == config.merge_pair_attempts
+    workflow = strategy.workflow
+    assert workflow.budget.config is config
+    assert workflow.selector.frontier_type == "hybrid"
+    assert workflow.generator.config is config
+    assert workflow.generator.reflection_lm == "configured-reflection-lm"
+    assert workflow.generator.reuse_parent_rollouts is False
+    assert workflow.generator.perfect_score == 0.9
+    assert workflow.generator.skip_perfect_score is False
+    assert workflow.crossover_generator.config is config
+    assert workflow.crossover_generator.val_overlap_floor == config.merge_val_overlap_floor
+    assert workflow.crossover_generator.max_attempts == config.merge_pair_attempts
 
 
 def test_strategy_minibatch_sampling_uses_seeded_rng():
@@ -155,7 +167,7 @@ def test_strategy_minibatch_sampling_uses_seeded_rng():
     second = GEPAStrategy(GEPAConfig(seed=17))
     data = list(range(10))
 
-    assert first._create_minibatch(data, 4) == second._create_minibatch(data, 4)
+    assert first.workflow._create_minibatch(data, 4) == second.workflow._create_minibatch(data, 4)
 
 
 def test_darwin_algorithm_phases(simple_trainset, dummy_lm):
@@ -173,7 +185,7 @@ def test_darwin_algorithm_phases(simple_trainset, dummy_lm):
     assert isinstance(result, Success)
     assert compiled_module is not None
     assert compiled_module._compiled is True
-    assert optimizer.strategy.current_generation >= 0
+    assert optimizer.strategy.workflow.current_generation >= 0
 
 
 def test_darwin_factory_configuration_creates_optimizer():
@@ -185,10 +197,10 @@ def test_darwin_factory_configuration_creates_optimizer():
 
     assert isinstance(optimizer, Darwin)
     assert hasattr(optimizer, "strategy")
-    assert hasattr(optimizer.strategy, "budget")
-    assert hasattr(optimizer.strategy, "selector")
-    assert hasattr(optimizer.strategy, "generator")
-    assert hasattr(optimizer.strategy, "evaluator")
+    assert hasattr(optimizer.strategy.workflow, "budget")
+    assert hasattr(optimizer.strategy.workflow, "selector")
+    assert hasattr(optimizer.strategy.workflow, "generator")
+    assert hasattr(optimizer.strategy.workflow, "evaluator")
 
 
 def test_optimizer_can_be_reused_without_stale_compilation_state(simple_trainset, dummy_lm):
@@ -200,22 +212,22 @@ def test_optimizer_can_be_reused_without_stale_compilation_state(simple_trainset
 
     assert first._compiled is True
     assert second._compiled is True
-    assert optimizer.strategy.current_generation <= 1
+    assert optimizer.strategy.workflow.current_generation <= 1
 
 
 def test_gepa_result_uses_selector_final_candidate():
     """The final result should use accumulated Pareto state when available."""
     strategy = GEPAStrategy(GEPAConfig(max_lm_calls=1))
-    strategy.student = SimpleQA()
-    generation_candidate = Candidate(strategy.student.deepcopy())
-    selector_candidate = Candidate(strategy.student.deepcopy())
-    strategy.best_candidate = generation_candidate
+    strategy.workflow.student = SimpleQA()
+    generation_candidate = Candidate(strategy.workflow.student.deepcopy())
+    selector_candidate = Candidate(strategy.workflow.student.deepcopy())
+    strategy.workflow.best_candidate = generation_candidate
 
     class SelectorWithFinalCandidate:
         def best_candidate(self):
             return selector_candidate
 
-    strategy._selector = SelectorWithFinalCandidate()
+    strategy.workflow._selector = SelectorWithFinalCandidate()
     result = strategy.terminate_compilation()
 
     assert isinstance(result, Result)
@@ -224,12 +236,12 @@ def test_gepa_result_uses_selector_final_candidate():
 
 def test_gepa_result_retains_pareto_candidates_and_lineage():
     strategy = GEPAStrategy(GEPAConfig(max_lm_calls=1))
-    strategy.student = SimpleQA()
-    parent = Candidate(strategy.student.deepcopy())
-    child = Candidate(strategy.student.deepcopy(), parents=[parent], generation_number=1)
+    strategy.workflow.student = SimpleQA()
+    parent = Candidate(strategy.workflow.student.deepcopy())
+    child = Candidate(strategy.workflow.student.deepcopy(), parents=[parent], generation_number=1)
     parent.scores = [Metric(0.5, id="task")]
     child.scores = [Metric(1.0, id="task")]
-    strategy.best_candidate = parent
+    strategy.workflow.best_candidate = parent
 
     class SelectorWithPopulation:
         task_wins = {parent: 0, child: 1}
@@ -238,7 +250,7 @@ def test_gepa_result_retains_pareto_candidates_and_lineage():
         def best_candidate(self):
             return child
 
-    strategy._selector = SelectorWithPopulation()
+    strategy.workflow._selector = SelectorWithPopulation()
     result = strategy.terminate_compilation()
 
     assert result.candidates == [child, parent]
