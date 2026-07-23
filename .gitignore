@@ -66,3 +66,6 @@ docs/docs/**/*.json*
 
 test_before_pypi/
 .github/.internal_dspyai/dist/
+
+# Experimental Darwin workflow prototype (keep locally, do not track yet)
+/dspy/teleprompt/darwin/new_optimizers.py
