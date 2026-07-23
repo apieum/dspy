@@ -142,7 +142,6 @@ class ReflectivePromptMutation(Generator):
             generation_cost = len(minibatch) + mutation_count
             if (
                 budget is not None
-                and hasattr(budget, "can_spend")
                 and not budget.can_spend("generation", generation_cost)
             ):
                 return NewBorns()
@@ -155,7 +154,6 @@ class ReflectivePromptMutation(Generator):
                 # before retrying so retries cannot cross the hard budget.
                 if (
                     budget is not None
-                    and hasattr(budget, "can_spend")
                     and not budget.can_spend("generation", generation_cost)
                 ):
                     break

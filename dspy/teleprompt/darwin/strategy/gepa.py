@@ -50,14 +50,12 @@ class GEPAStrategy(BaseStrategy[Result]):
         self.dataset_manager = None
         self.student = None
         self.teacher = None
-        self._budget = None
         self._selector = None
         self._generator = None
         self._crossover = None
         self._evaluator = None
         self._merge_due = False
         self._merge_attempts = 0
-        self._budget_exhaustion_notified = False
         self.algorithm_state = "initialize"  # initialize -> evaluate -> select -> generate -> repeat
         self.current_newborns: Optional[NewBorns] = None
         self.current_survivors: Optional[Survivors] = None
@@ -65,12 +63,8 @@ class GEPAStrategy(BaseStrategy[Result]):
         self._iteration_started = False
         self.history = []
         self.evaluation_cache = EvaluationCache()
-        self._budget_exhaustion_notified = False
         self.rng = random.Random(self.config.seed)
         self.batch_sampler = None
-        self._previous_signal_handlers = {}
-        self._signal_stop_requested = False
-        self._signal_stop_reason = None
         self._phase_actions = {
             "initialize": self._initialize_step,
             "evaluate": self.evaluate,
@@ -85,12 +79,6 @@ class GEPAStrategy(BaseStrategy[Result]):
         if len(data) <= size:
             return data.copy()
         return self.rng.sample(data, size)
-
-    @property
-    def budget(self):
-        if not hasattr(self, "_budget") or self._budget is None:
-            self._budget = self.config.budget(config=self.config)
-        return self._budget
 
     @property
     def selector(self):
@@ -133,30 +121,8 @@ class GEPAStrategy(BaseStrategy[Result]):
 
     def should_terminate(self) -> bool:
         """Apply GEPA's stopping policy before dispatching the next phase."""
-        if getattr(self, "_signal_stop_requested", False):
-            return True
         for stopper in self.config.stoppers:
             if stopper(self):
-                return True
-        if self.budget <= 0:
-            if not getattr(self, "_budget_exhaustion_notified", False):
-                self._notify("budget_exhausted", self.budget)
-                self._budget_exhaustion_notified = True
-            return True
-
-        remaining = self.budget.get_remaining()
-        if isinstance(remaining, dict):
-            if (
-                self.algorithm_state == "generate"
-                and "generation_calls" in remaining
-                and remaining["generation_calls"] <= 0
-            ):
-                return True
-            if (
-                self.algorithm_state in {"select", "generate"}
-                and "evaluation_calls" in remaining
-                and remaining["evaluation_calls"] <= 0
-            ):
                 return True
         if (
             self.config.patience is not None
@@ -226,7 +192,6 @@ class GEPAStrategy(BaseStrategy[Result]):
         # Components own compilation-scoped state. Recreate them for every
         # run so budgets, caches, selectors, and evaluators cannot leak across
         # repeated compilations of the same optimizer instance.
-        self._budget = None
         self._selector = None
         self._generator = None
         self._crossover = None
@@ -242,7 +207,6 @@ class GEPAStrategy(BaseStrategy[Result]):
         self.current_survivors = None
         self.current_parents = None
         self.algorithm_state = "initialize"
-        self.rng = random.Random(self.config.seed)
         self.batch_sampler = self.config.batch_sampler
         self._install_signal_handlers()
 
@@ -408,8 +372,10 @@ class GEPAStrategy(BaseStrategy[Result]):
             "merge_due": self._merge_due,
             "merge_attempts": self._merge_attempts,
             "iteration_started": self._iteration_started,
-            "budget_exhaustion_notified": self._budget_exhaustion_notified,
         }
+
+    def _checkpoint_rng_state(self):
+        return self.rng.getstate()
 
     @staticmethod
     def _serialize_creation_metadata(metadata):
@@ -489,25 +455,8 @@ class GEPAStrategy(BaseStrategy[Result]):
         self._merge_due = bool(strategy_state.get("merge_due", False))
         self._merge_attempts = int(strategy_state.get("merge_attempts", 0))
         self._iteration_started = bool(strategy_state.get("iteration_started", False))
-        self._budget_exhaustion_notified = bool(
-            strategy_state.get("budget_exhaustion_notified", False)
-        )
         if checkpoint.rng_state is not None:
             self.rng.setstate(_tuple_tree(checkpoint.rng_state))
-
-        self._budget = None
-        budget = self.budget
-        remaining = checkpoint.budget
-        if hasattr(budget, "max_calls") and "calls" in remaining:
-            budget.consumed_calls = max(0, budget.max_calls - int(remaining["calls"]))
-            if hasattr(budget, "evaluation_max_calls"):
-                budget.evaluation_calls = max(
-                    0, budget.evaluation_max_calls - int(remaining.get("evaluation_calls", budget.evaluation_calls))
-                )
-            if hasattr(budget, "generation_max_calls"):
-                budget.generation_calls = max(
-                    0, budget.generation_max_calls - int(remaining.get("generation_calls", budget.generation_calls))
-                )
 
         cohorts = {}
         for record in records:
@@ -670,7 +619,7 @@ class GEPAStrategy(BaseStrategy[Result]):
         # Promote survivors to parents for next generation
         self.current_parents = self.selector.promote(self.current_survivors)
         if self._iteration_started:
-            self._notify("finish_iteration", self.current_generation, self.current_parents, self.budget)
+            self.finish_iteration(self.current_generation, self.current_parents)
             self._iteration_started = False
         self.algorithm_state = "generate"
         self._write_checkpoint()
@@ -690,7 +639,7 @@ class GEPAStrategy(BaseStrategy[Result]):
             self.algorithm_state = "terminate"
             return
 
-        self._notify("start_iteration", self.current_generation, self.current_parents, self.budget)
+        self.start_iteration(self.current_generation, self.current_parents)
         self._iteration_started = True
 
         # Official GEPA gives a merge one opportunity after a successful
@@ -714,9 +663,6 @@ class GEPAStrategy(BaseStrategy[Result]):
                 batch_sampler=self.batch_sampler,
                 rng=self.rng,
             )
-
-        if self.current_newborns.is_empty() and self.budget <= 0:
-            self._notify("budget_exhausted", self.budget)
 
         # Cycle back to evaluation
         self.algorithm_state = "evaluate"

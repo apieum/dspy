@@ -19,7 +19,7 @@ class LMCallsBudget(Budget):
             evaluation_max_calls = config.max_evaluation_calls
             generation_max_calls = config.max_generation_calls
         if max_calls is None:
-            raise TypeError("LMCallsBudget requires GEPAConfig or max_calls")
+            raise TypeError("LMCallsBudget requires a configuration or max_calls")
         self.max_calls = max_calls
         self.evaluation_max_calls = evaluation_max_calls if evaluation_max_calls is not None else max_calls
         self.generation_max_calls = generation_max_calls if generation_max_calls is not None else max_calls
@@ -28,6 +28,13 @@ class LMCallsBudget(Budget):
         self.generation_calls = 0
         self.iteration_costs = []
         self.tracked_modules = {}  # module_id -> last_known_history_size
+
+    def reset(self) -> None:
+        self.consumed_calls = 0
+        self.evaluation_calls = 0
+        self.generation_calls = 0
+        self.iteration_costs.clear()
+        self.tracked_modules.clear()
 
     def _spend(self, calls: int, phase: str) -> None:
         """Record budget consumption without exceeding the configured maximum."""
@@ -86,6 +93,42 @@ class LMCallsBudget(Budget):
             "generation_calls": max(0, self.generation_max_calls - self.generation_calls),
             "percentage": (remaining_calls / self.max_calls) * 100 if self.max_calls > 0 else 0
         }
+
+    def is_exhausted(self) -> bool:
+        return (
+            self.consumed_calls >= self.max_calls
+            or self.evaluation_calls >= self.evaluation_max_calls
+            or self.generation_calls >= self.generation_max_calls
+        )
+
+    def serialize_state(self) -> dict[str, Any]:
+        return {
+            **self.get_remaining(),
+            "consumed_calls": self.consumed_calls,
+            "evaluation_calls_consumed": self.evaluation_calls,
+            "generation_calls_consumed": self.generation_calls,
+        }
+
+    def restore_state(self, state: dict[str, Any]) -> None:
+        if not state:
+            return
+        consumed = state.get("consumed_calls")
+        if consumed is None and "calls" in state:
+            consumed = self.max_calls - int(state["calls"])
+        evaluation = state.get("evaluation_calls_consumed")
+        if evaluation is None and "evaluation_calls" in state:
+            evaluation = self.evaluation_max_calls - int(state["evaluation_calls"])
+        generation = state.get("generation_calls_consumed")
+        if generation is None and "generation_calls" in state:
+            generation = self.generation_max_calls - int(state["generation_calls"])
+        self.consumed_calls = min(self.max_calls, max(0, int(consumed or 0)))
+        self.evaluation_calls = min(
+            self.evaluation_max_calls, max(0, int(evaluation or 0))
+        )
+        self.generation_calls = min(
+            self.generation_max_calls, max(0, int(generation or 0))
+        )
+        self.tracked_modules.clear()
 
     def can_spend(self, phase: str, calls: int = 1) -> bool:
         """Return whether a phase has room for the requested cost."""

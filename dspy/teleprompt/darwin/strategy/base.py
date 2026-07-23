@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import signal
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -30,6 +29,12 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
             *tuple(config.observers),
             LoggingCompilationObserver(verbose=config.verbose),
         )
+        self.budget = config.budget(config=config)
+        self._stop_requested = False
+        self._stop_reason = None
+        self._previous_signal_handlers = {}
+        self._signal_stop_requested = False
+        self._signal_stop_reason = None
         self.initialize()
 
     def initialize(self) -> None:
@@ -77,6 +82,15 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
             if callback is not None:
                 callback(*args, **kwargs)
 
+    def request_stop(self, reason: str) -> None:
+        """Accept a stop request from a budget or another lifecycle peer."""
+        if self._stop_requested:
+            return
+        self._stop_requested = True
+        self._stop_reason = reason
+        if reason == "budget_exhausted":
+            self._notify("budget_exhausted", self.budget)
+
     def start_compilation(
         self,
         student: dspy.Module,
@@ -86,6 +100,11 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
         teacher: dspy.Module | None = None,
         **kwargs: Any,
     ) -> None:
+        self.budget.reset()
+        self._stop_requested = False
+        self._stop_reason = None
+        self._signal_stop_requested = False
+        self._signal_stop_reason = None
         self._start_compilation(
             student,
             trainset=trainset,
@@ -100,9 +119,22 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
         )
 
     def next_step(self) -> bool:
-        continuing = self._next_step()
+        self.budget.reconcile(self)
+        continuing = not (
+            self._stop_requested or self._signal_stop_requested
+        )
+        if continuing:
+            continuing = self._next_step()
         self._notify("next_step", self, continuing)
         return continuing
+
+    def start_iteration(self, iteration: int, cohort) -> None:
+        self.budget.start_iteration(iteration, cohort)
+        self._notify("start_iteration", iteration, cohort, self.budget)
+
+    def finish_iteration(self, iteration: int, cohort) -> None:
+        self.budget.finish_iteration(iteration, cohort)
+        self._notify("finish_iteration", iteration, cohort, self.budget)
 
     def finish_compilation(self) -> R:
         result = self._finish_compilation()
@@ -139,25 +171,17 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
     # Generic checkpoint envelope and signal handling.  Algorithms provide
     # only their serializable domain state through the hooks below.
     def get_checkpoint(self, completed: bool = False) -> OptimizationCheckpoint:
-        remaining = self._checkpoint_budget()
         return OptimizationCheckpoint(
             generation=getattr(self, "current_generation", 0),
             algorithm_state=getattr(self, "algorithm_state", "initialize"),
             history=list(getattr(self, "history", [])),
-            budget=remaining,
+            budget=self.budget.serialize_state(),
             candidates=self._checkpoint_candidates(),
             strategy_state=self._get_checkpoint_strategy_state(),
             rng_state=self._checkpoint_rng_state(),
-            stop_reason=getattr(self, "_signal_stop_reason", None),
+            stop_reason=self._stop_reason or self._signal_stop_reason,
             completed=completed,
         )
-
-    def _checkpoint_budget(self) -> dict:
-        budget = getattr(self, "budget", None)
-        if budget is None:
-            return {}
-        remaining = budget.get_remaining()
-        return remaining if isinstance(remaining, dict) else {"remaining": remaining}
 
     def _checkpoint_candidates(self) -> list[dict]:
         return []
@@ -166,8 +190,7 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
         return {}
 
     def _checkpoint_rng_state(self):
-        rng = getattr(self, "rng", None)
-        return rng.getstate() if rng is not None else None
+        return None
 
     def _restore_checkpoint(self, path: str, student: dspy.Module) -> bool:
         checkpoint_path = Path(path)
@@ -176,6 +199,7 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
         checkpoint = OptimizationCheckpoint.from_dict(
             json.loads(checkpoint_path.read_text(encoding="utf-8"))
         )
+        self.budget.restore_state(checkpoint.budget)
         return self._restore_checkpoint_state(checkpoint, student)
 
     def _restore_checkpoint_state(

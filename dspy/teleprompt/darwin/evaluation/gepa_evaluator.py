@@ -125,7 +125,7 @@ class ParentFastCompare(Evaluator):
                 if len(comparison_parents) == len(child.parents):
                     comparison_parents = comparison_parents[:2]
                 cost = len(minibatch_data) * (len(comparison_parents) + 1)
-            if hasattr(budget, "can_spend") and not budget.can_spend("evaluation", cost):
+            if not budget.can_spend("evaluation", cost):
                 self._last_validation_details = {"reason": "budget_exhausted", "cost": cost}
                 return False, 0, float("-inf")
             # Notify observers about validation start with all relevant info
@@ -254,9 +254,7 @@ class FullTaskScores(Evaluator):
             # valid result. Subsequent proposals must fit the evaluation
             # domain budget before they are evaluated.
             if evaluated_candidates or candidate.parents:
-                budget_exhausted = hasattr(budget, "can_spend") and not budget.can_spend(
-                "evaluation", len(eval_data)
-                )
+                budget_exhausted = not budget.can_spend("evaluation", len(eval_data))
                 if budget_exhausted:
                     break
             # Comprehensive evaluation on complete validation set - now returns List[Metric] directly
@@ -294,9 +292,7 @@ class FullTaskScores(Evaluator):
             eval_data = self.validation_policy.get_eval_batch(
                 self.validation_data, iteration=self._iteration, candidate=candidate
             )
-            if jobs and hasattr(budget, "can_spend") and not budget.can_spend(
-                "evaluation", len(eval_data)
-            ):
+            if jobs and not budget.can_spend("evaluation", len(eval_data)):
                 break
             eval_data_by_candidate[candidate] = eval_data
             cached = [self.evaluation_cache.get(candidate, example) for example in eval_data]

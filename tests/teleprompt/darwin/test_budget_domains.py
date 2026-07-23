@@ -38,20 +38,40 @@ def test_non_billable_generation_failure_does_not_consume_budget():
     assert budget.generation_calls == 0
 
 
+def test_budget_state_can_be_restored_without_strategy_access_to_counters():
+    budget = LMCallsBudget(
+        max_calls=10,
+        evaluation_max_calls=6,
+        generation_max_calls=4,
+    )
+    budget.spend_on_evaluation(None, {"phase": "full_evaluation", "examples": 3})
+    budget.spend_on_generation(None, {"cost": 2})
+
+    restored = LMCallsBudget(
+        max_calls=10,
+        evaluation_max_calls=6,
+        generation_max_calls=4,
+    )
+    restored.restore_state(budget.serialize_state())
+
+    assert restored.get_remaining() == budget.get_remaining()
+
+
 def test_strategy_stops_when_the_active_budget_domain_is_exhausted():
     strategy = GEPAStrategy(GEPAConfig(max_lm_calls=10))
-    strategy._budget = LMCallsBudget(
+    strategy.budget = LMCallsBudget(
         max_calls=10, evaluation_max_calls=2, generation_max_calls=8
     )
     strategy.algorithm_state = "generate"
-    strategy._budget.evaluation_calls = 2
+    strategy.budget.evaluation_calls = 2
 
-    assert strategy.should_terminate()
+    assert strategy.next_step() is False
 
-    strategy._budget = LMCallsBudget(
+    strategy = GEPAStrategy(GEPAConfig(max_lm_calls=10))
+    strategy.budget = LMCallsBudget(
         max_calls=10, evaluation_max_calls=8, generation_max_calls=2
     )
     strategy.algorithm_state = "generate"
-    strategy._budget.generation_calls = 2
+    strategy.budget.generation_calls = 2
 
-    assert strategy.should_terminate()
+    assert strategy.next_step() is False

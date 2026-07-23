@@ -12,9 +12,12 @@ class IterationBudget(Budget):
         if config is not None:
             max_iterations = config.max_iterations
         if max_iterations is None:
-            raise TypeError("IterationBudget requires GEPAConfig or max_iterations")
+            raise TypeError("IterationBudget requires a configuration or max_iterations")
         self.config = config
         self.max_iterations = max_iterations
+        self.current_iteration = 0
+
+    def reset(self) -> None:
         self.current_iteration = 0
         
         
@@ -24,8 +27,29 @@ class IterationBudget(Budget):
             "iterations": remaining_iterations,
             "percentage": (remaining_iterations / self.max_iterations) * 100 if self.max_iterations > 0 else 0
         }
+
+    def is_exhausted(self) -> bool:
+        return self.current_iteration >= self.max_iterations
+
+    def can_spend(self, phase: str, units: int = 1) -> bool:
+        del phase, units
+        return not self.is_exhausted()
+
+    def serialize_state(self) -> dict[str, Any]:
+        return {
+            **self.get_remaining(),
+            "current_iteration": self.current_iteration,
+        }
+
+    def restore_state(self, state: dict[str, Any]) -> None:
+        if state:
+            self.current_iteration = min(
+                self.max_iterations,
+                max(0, int(state.get("current_iteration", 0))),
+            )
     
     
-    def start_iteration(self, iteration: int, cohort, budget) -> None:
-        """Track iteration start - increment iteration counter."""
+    def finish_iteration(self, iteration: int, cohort=None) -> None:
+        """Count completed iterations rather than individual phases."""
+        del cohort
         self.current_iteration = iteration

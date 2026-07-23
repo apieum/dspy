@@ -34,7 +34,18 @@ class DarwinConfig(ABC):
     particular strategy's concrete settings type. Concrete strategies provide
     the fields their components need; ``GEPAConfig`` is the first such
     implementation.
+
+    ``BaseStrategy`` requires the lifecycle fields below for every strategy.
+    They are declared here so alternative configuration models can satisfy the
+    strategy contract without inheriting GEPA-specific settings.
     """
+
+    budget: Type['Budget']
+    observers: Tuple[Any, ...]
+    verbose: bool
+    checkpoint_path: Optional[str]
+    resume_from: Optional[str]
+    handle_signals: bool
 
     def __getattr__(self, name: str) -> Any:
         raise AttributeError(name)
