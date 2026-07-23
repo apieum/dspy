@@ -270,10 +270,10 @@ class ReflectivePromptMutation(Generator):
                 iteration=parents.iteration,
                 **parents._new_weights(top_candidates),
             )
-            return top_cohort.sample_stochastic(1, rng=self.rng).first()
+            return top_cohort.sample_weighted(1, rng=self.rng).first()
 
         if selector == "pareto":
-            return parents.sample_stochastic(1, rng=self.rng).first()
+            return parents.sample_weighted(1, rng=self.rng).first()
 
         raise ValueError(
             "candidate_selection_strategy must be one of: pareto, current_best, "

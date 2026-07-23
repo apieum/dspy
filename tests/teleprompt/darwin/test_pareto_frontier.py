@@ -74,7 +74,7 @@ class TestParetoFrontierCore:
         candidates = [self.create_candidate_with_scores({"task": 1.0}) for _ in range(3)]
         cohort = Parents(*candidates, task_wins={candidate: index + 1 for index, candidate in enumerate(candidates)})
 
-        selected = cohort.sample_stochastic(2, rng=random.Random(7), replace=False)
+        selected = cohort.sample_weighted(2, rng=random.Random(7), replace=False)
 
         assert len(selected.candidates) == 2
 

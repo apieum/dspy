@@ -134,7 +134,7 @@ class SameParentSampling(SamplingStrategy):
         if parents.is_empty():
             return []
         rng = rng or random.Random()
-        selected = parents.sample_stochastic(1, rng=rng)
+        selected = parents.sample_weighted(1, rng=rng)
         return [selected] * self.n
 
 
@@ -150,7 +150,7 @@ class IndependentSampling(SamplingStrategy):
         if parents.is_empty():
             return []
         rng = rng or random.Random()
-        return [parents.sample_stochastic(1, rng=rng) for _ in range(self.n)]
+        return [parents.sample_weighted(1, rng=rng) for _ in range(self.n)]
 
 
 class PxNSampling(SamplingStrategy):
@@ -168,7 +168,7 @@ class PxNSampling(SamplingStrategy):
         rng = rng or random.Random()
         tasks = []
         for _ in range(self.p):
-            selected = parents.sample_stochastic(1, rng=rng)
+            selected = parents.sample_weighted(1, rng=rng)
             tasks.extend([selected] * self.n)
         return tasks
 

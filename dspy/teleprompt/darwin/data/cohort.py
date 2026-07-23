@@ -1,4 +1,4 @@
-"""Cohort data structure for GEPA optimization."""
+"""Generic cohort data structure for Darwin evolutionary algorithms."""
 import random
 import time
 from typing import Dict, List, Set, Callable, Any
@@ -13,13 +13,13 @@ class Cohort:
     in the candidates themselves as they're always from the same iteration.
     """
 
-    def __init__(self, *candidates: 'Candidate', iteration: int = -1, **stochastic_weights):
+    def __init__(self, *candidates: 'Candidate', iteration: int = -1, **features):
         """Initialize cohort with candidates.
 
         Args:
             *candidates: Variable number of candidate arguments, or a single list of candidates
             iteration: Iteration number for this cohort (defaults to -1)
-            stochastic_weights: kwargs used as weights for sample_stochastic
+            features: named candidate features available to weighted samplers
         """
         # Handle both Cohort(candidate1, candidate2) and Cohort([candidate1, candidate2])
         if len(candidates) == 1 and isinstance(candidates[0], (list, set)):
@@ -30,7 +30,7 @@ class Cohort:
         self.creation_timestamp: float = time.time()
         self._iteration: int = iteration
         self.weights: Dict[str, Dict[Candidate, float]] = {}
-        for name, feature in stochastic_weights.items():
+        for name, feature in features.items():
             self.weights[name] = self._extract_feature_values(feature)
 
     def _extract_feature_values(self, feature_spec: Any) -> Dict[Candidate, float]:
@@ -120,7 +120,7 @@ class Cohort:
         new_weights = self._new_weights(candidates)
         return self.__class__(*candidates, iteration=self._iteration, **new_weights)
 
-    def sample_stochastic(
+    def sample_weighted(
         self,
         n: int = 1,
         exclude: List[Candidate] = [],
@@ -128,19 +128,20 @@ class Cohort:
         replace: bool = True,
         **factors,
     ) -> 'Cohort':
-        """Stochastic sampling based on task winning frequency (Algorithm 2 line 14).
+        """Sample candidates using arbitrary features supplied by the caller.
 
-        Implements GEPA Algorithm 2's stochastic selection and more: "Sample Φk from Ĉ with probability ∝ f[Φk]"
-        where f[Φk] is the number of tasks on which candidate Φk achieves the best score.
+        The cohort only combines numeric features.  The meaning of those
+        features (task wins, confidence, novelty, or anything else) belongs
+        to the strategy that constructs the cohort.
 
         Args:
             n: Number of candidates to sample
             **factors: Keyword arguments where keys match feature names provided during
-                cohort initialization (e.g., `task_wins=2.0`, `average_score=1.0`).
+                cohort initialization (e.g., `task_wins=2.0`, `novelty=1.0`).
                 The values are float multipliers for each feature.
 
         Returns:
-            Parents cohort with stochastically selected candidates
+            A cohort of the same concrete type as the source cohort.
         """
 
         candidates = [c for c in self.candidates if c not in exclude]
@@ -220,38 +221,21 @@ class Cohort:
 
 
 class Survivors(Cohort):
-    """Cohort of candidates that survived Pareto selection.
-
-    These candidates represent the Pareto frontier and are eligible
-    for selection as parents in the next generation.
-    """
+    """Candidates accepted by an evaluation or filtering phase."""
 
     def __init__(self, *candidates: 'Candidate', **kwargs):
         super().__init__(*candidates, **kwargs)
 
 
 class Parents(Cohort):
-    """Cohort of candidates selected for reproduction.
-
-    These candidates have been chosen through stochastic selection
-    and will be used for mutation or merge operations.
-    """
+    """Candidates selected as inputs to a generation phase."""
 
     def __init__(self, *candidates: 'Candidate', **kwargs):
-        """Initialize Parents cohort with optional task win counts.
-
-        Args:
-            *candidates: Candidate objects to include
-            **kwargs: Additional arguments passed to Cohort
-        """
+        """Initialize a cohort of generation inputs."""
         super().__init__(*candidates, **kwargs)
 
 class NewBorns(Cohort):
-    """Cohort of newly generated candidates.
-
-    These candidates have been created through mutation or merge
-    and need to be evaluated before they can become survivors.
-    """
+    """Candidates produced by a generation phase and awaiting evaluation."""
 
     def __init__(self, *candidates: 'Candidate', **kwargs):
         super().__init__(*candidates, **kwargs)
