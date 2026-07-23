@@ -1,18 +1,28 @@
 """Budget contract for Darwin compilation runs."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Mapping, Optional, Protocol, TYPE_CHECKING
-import dspy
+from dataclasses import dataclass, field
+from typing import Any, Mapping, Protocol
 from ..state import Checkpointable
-
-if TYPE_CHECKING:
-    from ..config import DarwinConfig
 
 
 class BudgetStrategy(Protocol):
     """Minimal strategy surface a budget may use during reconciliation."""
 
     def request_stop(self, reason: str) -> None: ...
+
+
+class BudgetExhaustedError(RuntimeError):
+    """Raised when a budget cannot admit a requested operation."""
+
+
+@dataclass(frozen=True)
+class BudgetEvent:
+    """Description of one operation that may consume budget."""
+
+    phase: str
+    units: int = 1
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 class Budget(Checkpointable, ABC):
@@ -24,125 +34,43 @@ class Budget(Checkpointable, ABC):
     its policy can no longer allow useful work.
     """
 
-    def reset(self) -> None:
-        """Reset accounting before a new compilation run."""
-
-    def reconcile(self, strategy: BudgetStrategy) -> None:
-        """Ask the budget to enforce its stopping policy on ``strategy``."""
-        if self.is_exhausted():
-            strategy.request_stop("budget_exhausted")
-
     @abstractmethod
-    def is_exhausted(self) -> bool:
-        """Return whether this budget can no longer allow useful work."""
+    def reconcile(self, strategy: BudgetStrategy) -> None:
+        """Enforce the budget policy and request a strategy stop if needed."""
         ...
 
-    def can_spend(self, phase: str, units: int = 1) -> bool:
-        """Return whether a component may reserve ``units`` of work.
-
-        Budgets without phase-specific accounting use exhaustion as their
-        policy. Concrete budgets with domains should override this method.
-        """
-        if units < 0:
-            raise ValueError("units must be non-negative")
-        return not self.is_exhausted()
-
-    def start_iteration(self, iteration: int, cohort=None) -> None:
-        """Observe the beginning of an algorithm iteration, if relevant."""
-
-    def finish_iteration(self, iteration: int, cohort=None) -> None:
-        """Observe the end of an algorithm iteration, if relevant."""
+    @abstractmethod
+    def spend(self, event: BudgetEvent) -> None:
+        """Admit and account for one operation, or raise if it cannot run."""
+        ...
 
     @abstractmethod
     def serialize_state(self) -> dict[str, Any]:
         """Return JSON-safe accounting state for a checkpoint."""
         ...
 
+    @classmethod
     @abstractmethod
-    def restore_state(self, state: Mapping[str, Any]) -> None:
-        """Restore accounting state into this configured budget."""
+    def restore_state(cls, state: Mapping[str, Any]):
+        """Construct a new budget entirely from serialized accounting state."""
         ...
 
-    def __float__(self) -> float:
-        """Convert budget to float (remaining budget value)."""
-        remaining = self._get_remaining()
-        if isinstance(remaining, dict):
-            # Get the primary budget value (first key)
-            primary_key = next(iter(remaining.keys()))
-            return float(remaining[primary_key])
-        return float(remaining)
 
-    def __int__(self) -> int:
-        """Convert budget to int (remaining budget value)."""
-        remaining = self._get_remaining()
-        if isinstance(remaining, dict):
-            # Get the primary budget value (first key)
-            primary_key = next(iter(remaining.keys()))
-            return int(remaining[primary_key])
-        return int(remaining)
+def configured_limit(
+    explicit: int | None,
+    config: object | None,
+    attribute: str,
+    description: str,
+) -> int:
+    """Resolve a constructor limit while keeping restoration independent.
 
-    def __gt__(self, other) -> bool:
-        """Magic comparison for `budget > value`."""
-        if isinstance(other, (int, float)):
-            return type(other)(self) > other
-        return NotImplemented
-
-    def __lt__(self, other) -> bool:
-        """Magic comparison for `budget < value`."""
-        if isinstance(other, (int, float)):
-            return type(other)(self) < other
-        return NotImplemented
-
-    def __le__(self, other) -> bool:
-        """Magic comparison for `budget <= value`."""
-        if isinstance(other, (int, float)):
-            return type(other)(self) <= other
-        return NotImplemented
-
-    def __ge__(self, other) -> bool:
-        """Magic comparison for `budget >= value`."""
-        if isinstance(other, (int, float)):
-            return type(other)(self) >= other
-        return NotImplemented
-
-    def __eq__(self, other) -> bool:
-        """Magic comparison for `budget == value`."""
-        if isinstance(other, (int, float)):
-            return type(other)(self) == other
-        return NotImplemented
-
-    def __ne__(self, other) -> bool:
-        """Magic comparison for `budget != value`."""
-        return not self.__eq__(other)
-
-    def spend_on_evaluation(self, module: dspy.Module, metadata: Optional[Dict[str, Any]] = None) -> None:
-        """Track cost of evaluating a candidate module (LLM calls).
-
-        Args:
-            module: DSPy module that was evaluated
-            metadata: Optional details like {"phase": "minibatch", "examples": 3}
-        """
-        pass  # Override in child classes if needed
-
-    def spend_on_generation(self, module: Optional[dspy.Module] = None, metadata: Optional[Dict[str, Any]] = None) -> None:
-        """Track cost of generating new candidates (LLM calls for reflection/mutation).
-
-        Args:
-            module: Optional module being mutated/generated from
-            metadata: Optional details like {"type": "reflection", "strategy": "mutation"}
-        """
-        pass  # Override in child classes if needed
-
-    def spend_on_selection(self, candidates_to_promote: int, candidates_selected: int, metadata: Optional[Dict[str, Any]] = None) -> None:
-        """Track cost of candidate selection (usually algorithmic, no LLM calls).
-
-        Args:
-            candidates_to_promote: Total candidates available for selection
-            candidates_selected: Number of candidates actually selected
-            metadata: Optional details like {"strategy": "pareto", "tasks": 150}
-        """
-        pass  # Override in child classes if needed
-
-    def _get_remaining(self) -> dict:
-        """Return internal accounting details for diagnostics and checkpoints."""
-        raise NotImplementedError
+    Direct component construction may provide a limit explicitly; strategy
+    construction normally supplies it through the current configuration.
+    This helper is deliberately limited to construction-time defaults. It is
+    not used by checkpoint restoration, where the serialized state is the
+    complete source of truth.
+    """
+    value = explicit if explicit is not None else getattr(config, attribute, None)
+    if value is None:
+        raise TypeError(description)
+    return int(value)

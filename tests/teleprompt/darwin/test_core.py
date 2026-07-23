@@ -1,9 +1,14 @@
 """Test core Darwin data structures and utilities."""
 
 import dspy
+import pytest
 from dspy.teleprompt.darwin.data.candidate import Candidate
 from dspy.teleprompt.darwin.data.cohort import NewBorns, Survivors, Parents
-from dspy.teleprompt.darwin.budget.lm_calls import LMCallsBudget
+from dspy.teleprompt.darwin.budget import (
+    BudgetEvent,
+    BudgetExhaustedError,
+    LMCallsBudget,
+)
 from dspy.teleprompt.darwin.data.split_strategy import DefaultSplitStrategy
 from dspy.teleprompt.darwin.evaluation.metrics import Metric
 
@@ -95,39 +100,29 @@ class TestBudget:
         """Test budget creation and basic operations."""
         budget = LMCallsBudget(max_calls=10)
 
-        assert budget == 10
-        assert budget > 5
-        assert budget <= 10
+        assert budget.max_calls == 10
+        assert budget.consumed_calls == 0
 
     def test_budget_spending(self):
         """Test budget spending operations."""
         budget = LMCallsBudget(max_calls=10)
-        initial_remaining = int(budget)
-
-        # Simulate spending on evaluation
-        module = dspy.Predict("input -> output")
-        budget.spend_on_evaluation(module, {"phase": "test", "examples": 2})
-
-        assert budget < initial_remaining
+        budget.spend(BudgetEvent("evaluation", 2, {"phase": "test"}))
+        assert budget.consumed_calls == 2
 
     def test_budget_basic_functionality(self):
         """Test budget basic functionality."""
         budget = LMCallsBudget(max_calls=10)
 
         # Test initial state
-        assert budget > 0
         assert budget.max_calls == 10
         assert budget.consumed_calls == 0
 
-        # Test spending budget
-        module = dspy.Predict("input -> output")
-        budget.spend_on_evaluation(module, {"phase": "validation", "cost": 5})
+        budget.spend(BudgetEvent("evaluation", 5, {"phase": "validation"}))
         assert budget.consumed_calls == 5
-        assert budget > 0
 
         # Test exhaustion
-        budget.spend_on_evaluation(module, {"phase": "validation", "cost": 6})
-        assert budget <= 0
+        with pytest.raises(BudgetExhaustedError):
+            budget.spend(BudgetEvent("evaluation", 6, {"phase": "validation"}))
 
 
 class TestSplitStrategy:

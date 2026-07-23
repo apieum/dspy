@@ -174,7 +174,7 @@ def test_strategy_injects_the_same_config_into_components():
     )
     strategy = GEPAStrategy(config)
 
-    assert strategy.budget.config is config
+    assert strategy.budget.max_calls == config.max_lm_calls
     assert strategy.selector.frontier_type == "hybrid"
     assert strategy.generator.config is config
     assert strategy.generator.reflection_lm == "configured-reflection-lm"

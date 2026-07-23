@@ -10,7 +10,7 @@ from .data.candidate import Candidate
 from .data.cohort import Cohort, Survivors, Parents, NewBorns
 
 # Protocol interfaces
-from .budget import Budget, BudgetStrategy
+from .budget import Budget, BudgetStrategy, BudgetEvent, BudgetExhaustedError
 from .selection import Selector
 from .generation import (
     Generator,
@@ -98,6 +98,8 @@ __all__ = [
     # Protocol interfaces
     'Budget',
     'BudgetStrategy',
+    'BudgetEvent',
+    'BudgetExhaustedError',
     'Selector',
     'Generator',
     'SamplingStrategy',

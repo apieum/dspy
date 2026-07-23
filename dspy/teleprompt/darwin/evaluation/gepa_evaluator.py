@@ -11,7 +11,7 @@ import dspy
 from .evaluator import Evaluator
 from .metrics import Assessor
 from ..data.cohort import NewBorns, Survivors
-from ..budget import Budget
+from ..budget import Budget, BudgetEvent, BudgetExhaustedError
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,15 @@ class ParentFastCompare(Evaluator):
                 if len(comparison_parents) == len(child.parents):
                     comparison_parents = comparison_parents[:2]
                 cost = len(minibatch_data) * (len(comparison_parents) + 1)
-            if not budget.can_spend("evaluation", cost):
+            try:
+                budget.spend(
+                    BudgetEvent(
+                        "evaluation",
+                        cost,
+                        {"phase": "validation", "candidate_id": id(child)},
+                    )
+                )
+            except BudgetExhaustedError:
                 self._last_validation_details = {"reason": "budget_exhausted", "cost": cost}
                 return False, 0, float("-inf")
             # Notify observers about validation start with all relevant info
@@ -165,7 +173,6 @@ class ParentFastCompare(Evaluator):
                 (sum(values) / len(values) for values in parent_scores if values),
                 default=0.0,
             )
-            budget.spend_on_evaluation(child.module, {"phase": "validation", "cost": cost})
             self._last_validation_details = {
                 "child_scores": child_values,
                 "parent_scores": parent_scores,
@@ -254,8 +261,19 @@ class FullTaskScores(Evaluator):
             # valid result. Subsequent proposals must fit the evaluation
             # domain budget before they are evaluated.
             if evaluated_candidates or candidate.parents:
-                budget_exhausted = not budget.can_spend("evaluation", len(eval_data))
-                if budget_exhausted:
+                try:
+                    budget.spend(
+                        BudgetEvent(
+                            "evaluation",
+                            len(eval_data),
+                            {
+                                "phase": "full_evaluation",
+                                "candidate_id": id(candidate),
+                                "allow_overrun": not evaluated_candidates,
+                            },
+                        )
+                    )
+                except BudgetExhaustedError:
                     break
             # Comprehensive evaluation on complete validation set - now returns List[Metric] directly
             scores = self._evaluate(candidate, eval_data)
@@ -266,10 +284,6 @@ class FullTaskScores(Evaluator):
 
             # Technical details handled by observers if needed
 
-            budget.spend_on_evaluation(
-                candidate.module,
-                {"phase": "full_evaluation", "examples": len(eval_data)}
-            )
             evaluated_candidates.append(candidate)
 
         self.publish('comprehensive_evaluation_complete',
@@ -292,7 +306,19 @@ class FullTaskScores(Evaluator):
             eval_data = self.validation_policy.get_eval_batch(
                 self.validation_data, iteration=self._iteration, candidate=candidate
             )
-            if jobs and not budget.can_spend("evaluation", len(eval_data)):
+            try:
+                budget.spend(
+                    BudgetEvent(
+                        "evaluation",
+                        len(eval_data),
+                        {
+                            "phase": "full_evaluation",
+                            "candidate_id": id(candidate),
+                            "allow_overrun": not eval_data_by_candidate,
+                        },
+                    )
+                )
+            except BudgetExhaustedError:
                 break
             eval_data_by_candidate[candidate] = eval_data
             cached = [self.evaluation_cache.get(candidate, example) for example in eval_data]
@@ -321,10 +347,6 @@ class FullTaskScores(Evaluator):
             self.publish(
                 'candidate_evaluation_result', candidate,
                 {'average_score': candidate.average_score(), 'scores_count': len(scores)},
-            )
-            budget.spend_on_evaluation(
-                candidate.module,
-                {"phase": "full_evaluation", "examples": len(eval_data)},
             )
             evaluated_candidates.append(candidate)
 

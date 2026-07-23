@@ -1,8 +1,16 @@
 """Budget components for Darwin compilation runs."""
 
-from .budget import Budget, BudgetStrategy
+from .budget import Budget, BudgetStrategy, BudgetEvent, BudgetExhaustedError
 from .lm_calls import LMCallsBudget
 from .iterations import IterationBudget
 from .adaptive import AdaptiveBudget
 
-__all__ = ['Budget', 'BudgetStrategy', 'LMCallsBudget', 'IterationBudget', 'AdaptiveBudget']
+__all__ = [
+    'Budget',
+    'BudgetStrategy',
+    'BudgetEvent',
+    'BudgetExhaustedError',
+    'LMCallsBudget',
+    'IterationBudget',
+    'AdaptiveBudget',
+]

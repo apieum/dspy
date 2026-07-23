@@ -1,77 +1,75 @@
 """Adaptive budget implementation."""
 
-from typing import Dict, Any, Mapping, Optional
-import dspy
-from .budget import Budget
+from typing import Any, Mapping
+from .budget import Budget, BudgetEvent, BudgetExhaustedError, configured_limit
 
 
 class AdaptiveBudget(Budget):
     """Budget that adapts allocation based on progress."""
     
-    def __init__(self, total_budget: Optional[int] = None, adaptation_factor: float = 1.2, config=None):
-        if config is not None:
-            total_budget = config.max_lm_calls
-        if total_budget is None:
-            raise TypeError("AdaptiveBudget requires a configuration or total_budget")
-        self.config = config
-        self.total_budget = total_budget
+    def __init__(self, total_budget: int | None = None, adaptation_factor: float = 1.2, config=None):
+        self.total_budget = configured_limit(
+            total_budget,
+            config,
+            "max_lm_calls",
+            "AdaptiveBudget requires total_budget or a configuration providing max_lm_calls",
+        )
         self.consumed_budget = 0
         self.adaptation_factor = adaptation_factor
         self.recent_improvements = []
 
-    def reset(self) -> None:
-        self.consumed_budget = 0
-        self.recent_improvements.clear()
-        
-        
-    def spend_on_evaluation(self, module: dspy.Module, metadata: Optional[Dict[str, Any]] = None) -> None:
-        """Track cost of evaluating a candidate module - adaptive cost based on recent progress."""
-        base_cost = 1
-        # Adapt cost based on recent improvements
-        if self.recent_improvements and sum(self.recent_improvements) > 0:
-            base_cost = int(base_cost * self.adaptation_factor)
-        self.consumed_budget = min(self.total_budget, self.consumed_budget + base_cost)
-        
-    def spend_on_generation(self, module: Optional[dspy.Module] = None, metadata: Optional[Dict[str, Any]] = None) -> None:
-        """Track cost of generating new candidates - higher cost if improvements are low."""
-        base_cost = 2  # Generation typically more expensive
-        if self.recent_improvements and sum(self.recent_improvements) < 0.1:
-            base_cost = int(base_cost * self.adaptation_factor)
-        self.consumed_budget = min(self.total_budget, self.consumed_budget + base_cost)
-        
-    def _get_remaining(self) -> dict:
+    def reconcile(self, strategy) -> None:
+        if self.consumed_budget >= self.total_budget:
+            strategy.request_stop("budget_exhausted")
+
+    def spend(self, event: BudgetEvent) -> None:
+        if event.units < 0:
+            raise ValueError("event units must be non-negative")
+        if event.metadata.get("billable") is False:
+            return
+        if event.metadata.get("improvement") is not None:
+            self.recent_improvements.append(float(event.metadata["improvement"]))
+            self.recent_improvements = self.recent_improvements[-10:]
+        cost = event.units
+        if event.phase == "evaluation" and self.recent_improvements and sum(self.recent_improvements) > 0:
+            cost = int(cost * self.adaptation_factor)
+        elif event.phase == "generation":
+            cost = max(2, cost)
+            if self.recent_improvements and sum(self.recent_improvements) < 0.1:
+                cost = int(cost * self.adaptation_factor)
+        if event.phase not in {"evaluation", "generation", "iteration"}:
+            raise ValueError(f"unknown budget phase: {event.phase}")
+        if self.consumed_budget + cost > self.total_budget and not event.metadata.get(
+            "allow_overrun", False
+        ):
+            raise BudgetExhaustedError("adaptive budget is exhausted")
+        self.consumed_budget += cost
+
+    def serialize_state(self) -> dict[str, Any]:
         remaining_budget = max(0, self.total_budget - self.consumed_budget)
         return {
             "budget": remaining_budget,
-            "percentage": (remaining_budget / self.total_budget) * 100 if self.total_budget > 0 else 0
-        }
-
-    def is_exhausted(self) -> bool:
-        return self.consumed_budget >= self.total_budget
-
-    def can_spend(self, phase: str, units: int = 1) -> bool:
-        del phase
-        if units < 0:
-            raise ValueError("units must be non-negative")
-        return units <= self.total_budget - self.consumed_budget
-
-    def serialize_state(self) -> dict[str, Any]:
-        return {
-            **self._get_remaining(),
+            "percentage": (remaining_budget / self.total_budget) * 100 if self.total_budget > 0 else 0,
+            "total_budget": self.total_budget,
             "consumed_budget": self.consumed_budget,
+            "adaptation_factor": self.adaptation_factor,
+            "recent_improvements": list(self.recent_improvements),
         }
 
-    def restore_state(self, state: Mapping[str, Any]) -> None:
-        if state:
-            self.consumed_budget = min(
-                self.total_budget,
-                max(0, int(state.get("consumed_budget", 0))),
-            )
-        
-    def record_improvement(self, improvement: float) -> None:
-        """Record performance improvement for adaptive allocation."""
-        self.recent_improvements.append(improvement)
-        # Keep only recent history
-        if len(self.recent_improvements) > 10:
-            self.recent_improvements = self.recent_improvements[-10:]
+    @classmethod
+    def restore_state(cls, state: Mapping[str, Any]):
+        if "total_budget" not in state:
+            raise ValueError("AdaptiveBudget checkpoint is missing total_budget")
+        budget = cls(
+            total_budget=int(state["total_budget"]),
+            adaptation_factor=float(state.get("adaptation_factor", 1.2)),
+        )
+        budget.consumed_budget = min(
+            budget.total_budget,
+            max(0, int(state.get("consumed_budget", 0))),
+        )
+        budget.recent_improvements = [
+            float(value) for value in state.get("recent_improvements", [])
+        ][-10:]
+        return budget
     

@@ -13,6 +13,7 @@ from dspy.teleprompt.teleprompt import Teleprompter
 
 from ..compilation_observer import CompilationObserver, LoggingCompilationObserver
 from ..result import OptimizationFailureError, Result
+from ..budget import BudgetEvent, BudgetExhaustedError
 from ..state import OptimizationCheckpoint
 
 R = TypeVar("R", bound=Result)
@@ -100,7 +101,7 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
         teacher: dspy.Module | None = None,
         **kwargs: Any,
     ) -> None:
-        self.budget.reset()
+        self.budget = self.config.budget(config=self.config)
         self._stop_requested = False
         self._stop_reason = None
         self._signal_stop_requested = False
@@ -129,11 +130,15 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
         return continuing
 
     def start_iteration(self, iteration: int, cohort) -> None:
-        self.budget.start_iteration(iteration, cohort)
         self._notify("start_iteration", iteration, cohort, self.budget)
 
     def finish_iteration(self, iteration: int, cohort) -> None:
-        self.budget.finish_iteration(iteration, cohort)
+        try:
+            self.budget.spend(
+                BudgetEvent("iteration", metadata={"iteration": iteration})
+            )
+        except BudgetExhaustedError:
+            self.request_stop("budget_exhausted")
         self._notify("finish_iteration", iteration, cohort, self.budget)
 
     def finish_compilation(self) -> R:
@@ -199,7 +204,7 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
         checkpoint = OptimizationCheckpoint.from_dict(
             json.loads(checkpoint_path.read_text(encoding="utf-8"))
         )
-        self.budget.restore_state(checkpoint.budget)
+        self.budget = type(self.budget).restore_state(checkpoint.budget)
         return self._restore_checkpoint_state(checkpoint, student)
 
     def _restore_checkpoint_state(

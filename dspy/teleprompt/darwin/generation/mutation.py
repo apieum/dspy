@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from ..config import DarwinConfig
 from ..data.candidate import Candidate
 from ..data.cohort import Parents, NewBorns
+from ..budget import BudgetEvent, BudgetExhaustedError
 
 logger = logging.getLogger(__name__)
 
@@ -107,27 +108,19 @@ class ReflectivePromptMutation(Generator):
     def generate(self, parents: Parents, budget=None) -> NewBorns:
         """Generate a new candidate without validation."""
         if parents.is_empty() or not self.feedback_data:
-            if budget:
-                budget.spend_on_generation(None, {"type": "no_parents_or_data"})
             return NewBorns()
 
         try:
             parent = self._select_parent(parents)
             if parent is None:
-                if budget:
-                    budget.spend_on_generation(None, {"type": "no_selected_parent"})
                 return NewBorns()
 
             predictors = get_predictors(parent.module)
             if not predictors:
-                if budget:
-                    budget.spend_on_generation(None, {"type": "no_predictors"})
                 return NewBorns()
 
             minibatch = self._get_feedback_minibatch()
             if not minibatch:
-                if budget:
-                    budget.spend_on_generation(None, {"type": "no_minibatch"})
                 return NewBorns()
 
             # Feedback execution evaluates the parent once per example and
@@ -140,26 +133,21 @@ class ReflectivePromptMutation(Generator):
                 else 1
             )
             generation_cost = len(minibatch) + mutation_count
-            if (
-                budget is not None
-                and not budget.can_spend("generation", generation_cost)
-            ):
-                return NewBorns()
-
             last_error = None
-            attempts_charged = 0
             for _ in range(self.max_retries):
-                # Every failed attempt may already have consumed the parent
-                # rollout and/or reflection call. Reserve a complete attempt
-                # before retrying so retries cannot cross the hard budget.
-                if (
-                    budget is not None
-                    and not budget.can_spend("generation", generation_cost)
-                ):
-                    break
                 try:
                     module_idx = self._select_target_module(len(predictors), parent=parent)
                     evolvable = self._ensure_evolvable(parent.module)
+                    # A local setup failure is not billable. Reserve the
+                    # attempt only when an LM operation can actually start.
+                    if budget is not None:
+                        budget.spend(
+                            BudgetEvent(
+                                "generation",
+                                generation_cost,
+                                {"type": "reflective_mutation"},
+                            )
+                        )
                     if self.module_selection in {
                         ModuleSelectionStrategy.ALL.value,
                         ModuleSelectionStrategy.FAILED_ONLY.value,
@@ -203,12 +191,6 @@ class ReflectivePromptMutation(Generator):
                         and feedback.scores
                         and all(float(score) >= self.perfect_score for score in feedback.scores)
                     ):
-                        if budget:
-                            budget.spend_on_generation(parent.module, {
-                                "type": "perfect_parent_skip",
-                                "module_idx": module_idx,
-                                "cost": len(minibatch),
-                            })
                         return NewBorns(iteration=parents.iteration)
 
                     # Evolve using a PromptMutator strategy
@@ -234,27 +216,9 @@ class ReflectivePromptMutation(Generator):
                         proposal_minibatch=list(minibatch.values()),
                     )
 
-                    # Spend budget for the generation (reflection + mutations)
-                    if budget:
-                        budget.spend_on_generation(child_module, {
-                            "type": "reflective_mutation",
-                            "module_idx": module_idx,
-                            "module_indices": target_modules,
-                            "cost": generation_cost,
-                        })
-                        attempts_charged += 1
-
                     return NewBorns(child_candidate, iteration=parents.iteration)
                 except Exception as e:
                     last_error = e
-                    if budget:
-                        budget.spend_on_generation(None, {
-                            "type": "failed_mutation_attempt",
-                            "error": str(e),
-                            "cost": generation_cost,
-                            "billable": False,
-                        })
-                        attempts_charged += 1
 
             if last_error is not None:
                 raise last_error
@@ -262,12 +226,6 @@ class ReflectivePromptMutation(Generator):
 
         except Exception as e:
             self.publish('mutation_failure', None, {'reason': f'Reflective prompt mutation failed: {e}'})
-            if budget and 'attempts_charged' not in locals():
-                budget.spend_on_generation(None, {
-                    "type": "failed_mutation",
-                    "error": str(e),
-                    "billable": False,
-                })
             return NewBorns()
 
     def _select_parent(self, parents: Parents) -> Optional[Candidate]:

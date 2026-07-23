@@ -1,7 +1,7 @@
 """Serializable optimization checkpoint state."""
 
 from dataclasses import asdict, dataclass, field, fields
-from typing import Any, Mapping, Protocol, runtime_checkable
+from typing import Any, Mapping, Protocol, Self, runtime_checkable
 
 
 @runtime_checkable
@@ -9,14 +9,16 @@ class Checkpointable(Protocol):
     """Protocol for objects whose runtime state belongs in a checkpoint.
 
     ``serialize_state`` must return JSON-compatible data and must not perform
-    file I/O. ``restore_state`` mutates an already-configured object; it does
-    not reconstruct configuration or external resources. The enclosing
+    file I/O. ``restore_state`` is a factory that returns a new object using
+    only the serialized state. The state must therefore contain every value
+    required to reconstruct the object. The enclosing
     ``OptimizationCheckpoint`` owns schema versioning for the payload.
     """
 
     def serialize_state(self) -> dict[str, Any]: ...
 
-    def restore_state(self, state: Mapping[str, Any]) -> None: ...
+    @classmethod
+    def restore_state(cls, state: Mapping[str, Any]) -> Self: ...
 
 
 @dataclass

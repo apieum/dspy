@@ -256,6 +256,8 @@ class GEPAStrategy(BaseStrategy[Result]):
         """Execute the action registered for the current GEPA phase."""
         if self.should_terminate():
             return False
+        if self.algorithm_state == "terminate":
+            return False
         try:
             action = self._phase_actions[self.algorithm_state]
         except KeyError as exc:
