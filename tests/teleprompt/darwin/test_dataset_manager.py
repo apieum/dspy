@@ -95,10 +95,10 @@ def test_strategy_exposes_full_training_pool_for_reflection_sampling():
     strategy = GEPAStrategy(GEPAConfig(minibatch_size=2, max_lm_calls=1))
     strategy.start_compilation(student, trainset=examples, devset=_examples(2))
 
-    generator = strategy.workflow.generator
+    generator = strategy.generator
     assert len(generator.feedback_data) == 2
-    assert generator.feedback_pool == strategy.workflow.training_data
-    assert len(generator.feedback_pool) == len(strategy.workflow.training_data)
+    assert generator.feedback_pool == strategy.training_data
+    assert len(generator.feedback_pool) == len(strategy.training_data)
 
 
 def test_strategy_accepts_preconfigured_factory_instance():

@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from .budget import Budget
     from .data.cohort import Cohort
     from .dataset_manager import DatasetManager
+    from .result import Result
 
 
 class CompilationObserver(Protocol):
@@ -18,7 +19,7 @@ class CompilationObserver(Protocol):
 
     def start_compilation(self, student: dspy.Module, dataset_manager: "DatasetManager") -> None: ...
 
-    def finish_compilation(self, result: dspy.Module) -> None: ...
+    def finish_compilation(self, result: "Result") -> None: ...
 
     def start_iteration(self, iteration: int, cohort: "Cohort", budget: "Budget") -> None: ...
 

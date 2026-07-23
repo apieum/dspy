@@ -47,7 +47,7 @@ class TestIntegration:
                 self.events.append(("start", dataset_manager.num_eval_tasks, dataset_manager.num_dev_examples))
 
             def finish_compilation(self, result):
-                self.events.append(("finish", result._compiled))
+                self.events.append(("finish", type(result).__name__))
 
         observer = Observer()
         dummy_lm = DummyLM([
@@ -64,8 +64,8 @@ class TestIntegration:
 
         assert compiled._compiled is True
         assert observer.events[0] == ("start", 1, 1)
-        assert observer.events[-1] == ("finish", True)
-        assert optimizer.strategy.workflow.budget.consumed_calls <= 2
+        assert observer.events[-1] == ("finish", "Success")
+        assert optimizer.strategy.budget.consumed_calls <= 2
         assert optimizer.get_last_result().history
         assert optimizer.get_last_result().history[0]["evaluated_candidates"] == 1
 

@@ -14,7 +14,7 @@ class RecordingObserver:
         self.events.append(("start_compilation", dataset_manager.num_eval_tasks))
 
     def finish_compilation(self, result):
-        self.events.append(("finish_compilation", result._compiled))
+        self.events.append(("finish_compilation", type(result).__name__))
 
     def start_iteration(self, iteration, cohort, budget):
         self.events.append(("start_iteration", iteration))

@@ -1,26 +1,26 @@
-"""Base lifecycle contract for Darwin optimization strategies."""
+"""Base lifecycle and execution contract for Darwin strategies."""
 
 from __future__ import annotations
 
+import json
+import os
+import signal
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any, Generic, TypeVar
 
 import dspy
+from dspy.teleprompt.teleprompt import Teleprompter
 
 from ..compilation_observer import CompilationObserver, LoggingCompilationObserver
 from ..result import OptimizationFailureError, Result
-from dspy.teleprompt.teleprompt import Teleprompter
+from ..state import OptimizationCheckpoint
 
 R = TypeVar("R", bound=Result)
 
 
 class BaseStrategy(Teleprompter, ABC, Generic[R]):
-    """Common strategy executor with a stable, observable lifecycle.
-
-    Public lifecycle methods deliberately live here.  Subclasses implement
-    only the protected hooks, so every strategy receives the same observer
-    notifications and execution semantics.
-    """
+    """Generic strategy executor with a stable, observable lifecycle."""
 
     def __init__(self, config) -> None:
         super().__init__()
@@ -30,6 +30,10 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
             *tuple(config.observers),
             LoggingCompilationObserver(verbose=config.verbose),
         )
+        self.initialize()
+
+    def initialize(self) -> None:
+        """Initialize strategy-owned state after the base contract is ready."""
 
     def compile(
         self,
@@ -82,7 +86,6 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
         teacher: dspy.Module | None = None,
         **kwargs: Any,
     ) -> None:
-        """Start a compilation and notify observers after setup completes."""
         self._start_compilation(
             student,
             trainset=trainset,
@@ -97,25 +100,17 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
         )
 
     def next_step(self) -> bool:
-        """Execute one strategy step and always notify observers."""
         continuing = self._next_step()
         self._notify("next_step", self, continuing)
         return continuing
 
     def finish_compilation(self) -> R:
-        """Finalize a compilation and notify observers with the result module."""
         result = self._finish_compilation()
-        self._notify("finish_compilation", self._result_module_for_notification(result))
+        self._notify("finish_compilation", result)
         return result
 
     def _dataset_manager_for_notification(self):
-        """Return the active dataset manager without knowing strategy state."""
         return getattr(self, "dataset_manager", None)
-
-    @abstractmethod
-    def _result_module_for_notification(self, result: R) -> dspy.Module | None:
-        """Provide the module sent with the generic finish notification."""
-        raise NotImplementedError
 
     @abstractmethod
     def _start_compilation(
@@ -127,20 +122,113 @@ class BaseStrategy(Teleprompter, ABC, Generic[R]):
         teacher: dspy.Module | None = None,
         **kwargs: Any,
     ) -> None:
-        """Implement compilation setup for the concrete strategy."""
         raise NotImplementedError
 
     @abstractmethod
     def _next_step(self) -> bool:
-        """Implement one concrete strategy step."""
         raise NotImplementedError
 
     @abstractmethod
     def _finish_compilation(self) -> R:
-        """Implement concrete strategy finalization."""
         raise NotImplementedError
 
     @abstractmethod
     def _compile_result(self, result: R) -> dspy.Module:
-        """Convert an algorithm result into the compiled module it returns."""
         raise NotImplementedError
+
+    # Generic checkpoint envelope and signal handling.  Algorithms provide
+    # only their serializable domain state through the hooks below.
+    def get_checkpoint(self, completed: bool = False) -> OptimizationCheckpoint:
+        remaining = self._checkpoint_budget()
+        return OptimizationCheckpoint(
+            generation=getattr(self, "current_generation", 0),
+            algorithm_state=getattr(self, "algorithm_state", "initialize"),
+            history=list(getattr(self, "history", [])),
+            budget=remaining,
+            candidates=self._checkpoint_candidates(),
+            strategy_state=self._get_checkpoint_strategy_state(),
+            rng_state=self._checkpoint_rng_state(),
+            stop_reason=getattr(self, "_signal_stop_reason", None),
+            completed=completed,
+        )
+
+    def _checkpoint_budget(self) -> dict:
+        budget = getattr(self, "budget", None)
+        if budget is None:
+            return {}
+        remaining = budget.get_remaining()
+        return remaining if isinstance(remaining, dict) else {"remaining": remaining}
+
+    def _checkpoint_candidates(self) -> list[dict]:
+        return []
+
+    def _get_checkpoint_strategy_state(self) -> dict:
+        return {}
+
+    def _checkpoint_rng_state(self):
+        rng = getattr(self, "rng", None)
+        return rng.getstate() if rng is not None else None
+
+    def _restore_checkpoint(self, path: str, student: dspy.Module) -> bool:
+        checkpoint_path = Path(path)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Darwin checkpoint not found: {path}")
+        checkpoint = OptimizationCheckpoint.from_dict(
+            json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        )
+        return self._restore_checkpoint_state(checkpoint, student)
+
+    def _restore_checkpoint_state(
+        self, checkpoint: OptimizationCheckpoint, student: dspy.Module
+    ) -> bool:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support checkpoint restoration"
+        )
+
+    def _write_checkpoint(self, completed: bool = False) -> None:
+        checkpoint_path = self.config.checkpoint_path
+        if not checkpoint_path:
+            return
+        path = Path(checkpoint_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                self.get_checkpoint(completed=completed).to_dict(),
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+    def _install_signal_handlers(self) -> None:
+        if not self.config.handle_signals:
+            return
+        self._previous_signal_handlers = {}
+        try:
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                self._previous_signal_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, self._handle_signal)
+        except (ValueError, OSError):
+            self._previous_signal_handlers.clear()
+
+    def _restore_signal_handlers(self) -> None:
+        for signum, handler in getattr(self, "_previous_signal_handlers", {}).items():
+            try:
+                signal.signal(signum, handler)
+            except (ValueError, OSError):
+                pass
+        self._previous_signal_handlers = {}
+
+    def _handle_signal(self, signum, frame) -> None:
+        self._signal_stop_requested = True
+        self._signal_stop_reason = signal.Signals(signum).name
+        try:
+            self._write_checkpoint(completed=False)
+        except Exception:
+            self._notify(
+                "log",
+                "exception",
+                "Unable to write Darwin checkpoint after %s",
+                self._signal_stop_reason,
+                exc_info=True,
+            )

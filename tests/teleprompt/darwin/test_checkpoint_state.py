@@ -48,8 +48,8 @@ def test_completed_checkpoint_can_be_resumed(tmp_path):
 
     assert compiled._compiled is True
     assert resumed.get_last_result().candidates
-    assert type(resumed.strategy.workflow.current_newborns).__name__ == "NewBorns"
-    assert len(resumed.strategy.workflow.evaluation_cache) > 0
+    assert type(resumed.strategy.current_newborns).__name__ == "NewBorns"
+    assert len(resumed.strategy.evaluation_cache) > 0
 
 
 def test_proposal_trace_is_opt_in_and_compact(tmp_path):
@@ -77,10 +77,10 @@ def test_signal_handler_writes_interrupted_checkpoint(tmp_path):
     strategy = GEPAStrategy(
         GEPAConfig(max_lm_calls=1, checkpoint_path=str(checkpoint_path))
     )
-    strategy.workflow._handle_signal(2, None)
+    strategy._handle_signal(2, None)
 
-    assert strategy.workflow._signal_stop_requested is True
-    assert strategy.workflow._signal_stop_reason == "SIGINT"
+    assert strategy._signal_stop_requested is True
+    assert strategy._signal_stop_reason == "SIGINT"
     assert checkpoint_path.exists()
     payload = json.loads(checkpoint_path.read_text())
     assert payload["completed"] is False

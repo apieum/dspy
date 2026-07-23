@@ -4,15 +4,12 @@ import inspect
 import random
 import json
 import importlib
-import signal
 import os
-from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
 
 import dspy
 from dspy.teleprompt.utils import get_signature, set_signature
 from .base import BaseStrategy
-from ..workflow import Workflow
 from ..data.candidate import Candidate, example_id
 from ..data.cohort import Cohort, NewBorns, Survivors, Parents
 from ..result import Result, Success, Failure, OptimizationFailureError
@@ -30,8 +27,8 @@ def _tuple_tree(value):
     return value
 
 
-class GEPAWorkflow(Workflow[Result]):
-    """GEPA's concrete workflow and its algorithm-specific runtime state.
+class GEPAStrategy(BaseStrategy[Result]):
+    """GEPA strategy and its algorithm-specific runtime state.
 
     Implements a simple evolutionary algorithm with the following steps:
     1. Initialize population with single candidate
@@ -41,11 +38,8 @@ class GEPAWorkflow(Workflow[Result]):
     5. Repeat until termination criteria met
     """
 
-    def __init__(self, config: 'GEPAConfig', *, notify=None):
-        super().__init__(config, notify=notify)
-        # Compilation-scoped runtime fields live in the workflow.  Keeping
-        # them initialized here also makes the component facade usable before
-        # ``start_compilation`` (for inspection and unit-test composition).
+    def initialize(self) -> None:
+        # Compilation-scoped runtime fields are owned by the strategy.
         self.current_generation = 0
         self.best_candidate = None
         self.generations_without_improvement = 0
@@ -72,13 +66,13 @@ class GEPAWorkflow(Workflow[Result]):
         self.history = []
         self.evaluation_cache = EvaluationCache()
         self._budget_exhaustion_notified = False
-        self.rng = random.Random(config.seed)
+        self.rng = random.Random(self.config.seed)
         self.batch_sampler = None
         self._previous_signal_handlers = {}
         self._signal_stop_requested = False
         self._signal_stop_reason = None
         self._phase_actions = {
-            "initialize": self.initialize,
+            "initialize": self._initialize_step,
             "evaluate": self.evaluate,
             "select": self.select,
             "generate": self.generate,
@@ -146,7 +140,7 @@ class GEPAWorkflow(Workflow[Result]):
                 return True
         if self.budget <= 0:
             if not getattr(self, "_budget_exhaustion_notified", False):
-                self.notify("budget_exhausted", self.budget)
+                self._notify("budget_exhausted", self.budget)
                 self._budget_exhaustion_notified = True
             return True
 
@@ -221,7 +215,7 @@ class GEPAWorkflow(Workflow[Result]):
             )
         return generator
 
-    def start_compilation(
+    def _start_compilation(
         self, student: dspy.Module, *, trainset: list[dspy.Example], devset: list[dspy.Example] | None = None, teacher: dspy.Module | None = None, **kwargs
     ) -> None:
         """Initialize the strategy with the compilation parameters."""
@@ -276,7 +270,7 @@ class GEPAWorkflow(Workflow[Result]):
         )
 
         if self.config.verbose:
-            self.notify(
+            self._notify(
                 "log",
                 "info",
                 f"Data split: {len(self.training_data)} train, "
@@ -294,7 +288,7 @@ class GEPAWorkflow(Workflow[Result]):
         # initialization polymorphic for alternate strategies and graphs.
         self.algorithm_state = "initialize"
 
-    def next_step(self) -> bool:
+    def _next_step(self) -> bool:
         """Execute the action registered for the current GEPA phase."""
         if self.should_terminate():
             return False
@@ -305,7 +299,7 @@ class GEPAWorkflow(Workflow[Result]):
         action()
         return True
 
-    def finish_compilation(self) -> Result:
+    def _finish_compilation(self) -> Result:
         """Get the result of the optimization process."""
         final_candidate = self._select_final_candidate()
         self.best_candidate = final_candidate
@@ -355,48 +349,14 @@ class GEPAWorkflow(Workflow[Result]):
         self._restore_signal_handlers()
         return result
 
-    def initialize(self) -> None:
+    def _initialize_step(self) -> None:
         """Create the seed cohort for the current compilation."""
         initial_candidate = Candidate(self.student.deepcopy(), generation_number=0)
         self.current_newborns = NewBorns([initial_candidate], iteration=0)
         self.algorithm_state = "evaluate"
 
-    def _install_signal_handlers(self) -> None:
-        if not self.config.handle_signals:
-            return
-        try:
-            for signum in (signal.SIGINT, signal.SIGTERM):
-                self._previous_signal_handlers[signum] = signal.getsignal(signum)
-                signal.signal(signum, self._handle_signal)
-        except (ValueError, OSError):
-            # Signal handlers can only be installed by the main thread and
-            # are unavailable on some platforms. Optimization still works.
-            self._previous_signal_handlers.clear()
-
-    def _restore_signal_handlers(self) -> None:
-        for signum, handler in self._previous_signal_handlers.items():
-            try:
-                signal.signal(signum, handler)
-            except (ValueError, OSError):
-                pass
-        self._previous_signal_handlers.clear()
-
-    def _handle_signal(self, signum, frame) -> None:
-        self._signal_stop_requested = True
-        self._signal_stop_reason = signal.Signals(signum).name
-        try:
-            self._write_checkpoint(completed=False)
-        except Exception:
-            self.notify(
-                "log",
-                "exception",
-                "Unable to write Darwin checkpoint after %s",
-                self._signal_stop_reason,
-                exc_info=True,
-            )
-
-    def get_checkpoint(self, completed: bool = False) -> OptimizationCheckpoint:
-        """Return a JSON-safe snapshot of the current optimization state."""
+    def _checkpoint_candidates(self) -> list[dict]:
+        """Serialize GEPA's candidate/cohort graph for the base checkpoint."""
         candidates = []
         tracked = set()
         for attribute, cohort in (
@@ -404,8 +364,6 @@ class GEPAWorkflow(Workflow[Result]):
             for name, value in self.__dict__.items()
             if isinstance(value, Cohort)
         ):
-            if cohort is None:
-                continue
             for candidate in cohort:
                 if id(candidate) in tracked:
                     continue
@@ -413,10 +371,7 @@ class GEPAWorkflow(Workflow[Result]):
                 candidates.append({
                     "id": id(candidate),
                     "cohort_attributes": [attribute],
-                    "cohort_type": (
-                        f"{type(cohort).__module__}:{type(cohort).__qualname__}"
-                        if cohort is not None else None
-                    ),
+                    "cohort_type": f"{type(cohort).__module__}:{type(cohort).__qualname__}",
                     "generation": candidate.generation_number,
                     "score": candidate.average_score(),
                     "parents": [id(parent) for parent in candidate.parents],
@@ -441,38 +396,23 @@ class GEPAWorkflow(Workflow[Result]):
                         for example in (candidate.proposal_minibatch or [])
                     ],
                 })
-                # A candidate can exist in multiple active cohorts. Preserve
-                # all roles without duplicating its serialized record.
                 if any(item["id"] == id(candidate) for item in candidates[:-1]):
                     existing = next(item for item in candidates if item["id"] == id(candidate))
                     existing.setdefault("cohort_attributes", []).append(attribute)
                     candidates.pop()
-        remaining = self.budget.get_remaining()
-        return OptimizationCheckpoint(
-            generation=self.current_generation,
-            algorithm_state=self.algorithm_state,
-            history=list(self.history),
-            budget=remaining if isinstance(remaining, dict) else {"remaining": remaining},
-            candidates=candidates,
-            strategy_state=self._get_checkpoint_strategy_state(),
-            rng_state=self.rng.getstate(),
-            stop_reason=self._signal_stop_reason,
-            completed=completed,
-        )
+        return candidates
 
     def _get_checkpoint_strategy_state(self) -> dict:
-        """Return JSON-safe scalar state needed for deterministic resumption."""
         return {
-            "generations_without_improvement": getattr(self, "generations_without_improvement", 0),
-            "merge_due": getattr(self, "_merge_due", False),
-            "merge_attempts": getattr(self, "_merge_attempts", 0),
-            "iteration_started": getattr(self, "_iteration_started", False),
-            "budget_exhaustion_notified": getattr(self, "_budget_exhaustion_notified", False),
+            "generations_without_improvement": self.generations_without_improvement,
+            "merge_due": self._merge_due,
+            "merge_attempts": self._merge_attempts,
+            "iteration_started": self._iteration_started,
+            "budget_exhaustion_notified": self._budget_exhaustion_notified,
         }
 
     @staticmethod
     def _serialize_creation_metadata(metadata):
-        """Keep metadata JSON-safe while preserving candidate references."""
         serialized = {}
         for key, value in metadata.items():
             if isinstance(value, Candidate):
@@ -481,15 +421,10 @@ class GEPAWorkflow(Workflow[Result]):
                 serialized[str(key)] = value
         return serialized
 
-    def _restore_checkpoint(self, path: str, student: dspy.Module) -> bool:
-        """Restore a compilation from a Darwin checkpoint manifest."""
-        checkpoint_path = Path(path)
-        if not checkpoint_path.exists():
-            raise FileNotFoundError(f"Darwin checkpoint not found: {path}")
-        checkpoint = OptimizationCheckpoint.from_dict(
-            json.loads(checkpoint_path.read_text(encoding="utf-8"))
-        )
-
+    def _restore_checkpoint_state(
+        self, checkpoint: OptimizationCheckpoint, student: dspy.Module
+    ) -> bool:
+        """Restore GEPA candidates and selector state from a checkpoint."""
         records = checkpoint.candidates
         restored = {}
         for record in records:
@@ -579,7 +514,7 @@ class GEPAWorkflow(Workflow[Result]):
             for attribute in record.get("cohort_attributes", []):
                 cohorts.setdefault(attribute, []).append(record)
 
-        def restore_cohort(attribute, records_for_cohort):
+        def restore_cohort(records_for_cohort):
             cohort_type = next(
                 (record.get("cohort_type") for record in records_for_cohort
                  if record.get("cohort_type")),
@@ -598,7 +533,7 @@ class GEPAWorkflow(Workflow[Result]):
         # Restore every serialized cohort attribute without knowing which
         # algorithm owns it or what its state-machine vocabulary is.
         for attribute, records_for_cohort in cohorts.items():
-            setattr(self, attribute, restore_cohort(attribute, records_for_cohort))
+            setattr(self, attribute, restore_cohort(records_for_cohort))
 
         # Rebuild the selector's per-task Pareto state from restored scores.
         self._selector = self.config.selection(config=self.config)
@@ -621,16 +556,6 @@ class GEPAWorkflow(Workflow[Result]):
             restored.values(), key=lambda candidate: candidate.total_score(), default=None
         )
         return True
-
-    def _write_checkpoint(self, completed: bool = False) -> None:
-        if not self.config.checkpoint_path:
-            return
-        path = Path(self.config.checkpoint_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(self.get_checkpoint(completed=completed).to_dict(), indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
 
     def _select_final_candidate(self) -> Optional[Candidate]:
         """Select the best aggregate candidate after optimization.
@@ -661,7 +586,7 @@ class GEPAWorkflow(Workflow[Result]):
     def evaluate(self):
         """Evaluate current candidates."""
         if self.config.verbose:
-            self.notify(
+            self._notify(
                 "log", "info",
                 f"Evaluating candidates in generation {self.current_generation}",
             )
@@ -679,7 +604,7 @@ class GEPAWorkflow(Workflow[Result]):
 
         survivors = set(self.current_survivors.candidates)
         for candidate in self.current_newborns:
-            self.notify("candidate_evaluated", candidate, candidate in survivors)
+            self._notify("candidate_evaluated", candidate, candidate in survivors)
 
         generation_best_score = None
 
@@ -722,7 +647,7 @@ class GEPAWorkflow(Workflow[Result]):
     def select(self):
         """Select candidates for next generation."""
         if self.config.verbose:
-            self.notify(
+            self._notify(
                 "log", "info",
                 f"Selecting candidates for generation {self.current_generation + 1}",
             )
@@ -745,7 +670,7 @@ class GEPAWorkflow(Workflow[Result]):
         # Promote survivors to parents for next generation
         self.current_parents = self.selector.promote(self.current_survivors)
         if self._iteration_started:
-            self.notify("finish_iteration", self.current_generation, self.current_parents, self.budget)
+            self._notify("finish_iteration", self.current_generation, self.current_parents, self.budget)
             self._iteration_started = False
         self.algorithm_state = "generate"
         self._write_checkpoint()
@@ -755,7 +680,7 @@ class GEPAWorkflow(Workflow[Result]):
         self.current_generation += 1
 
         if self.config.verbose:
-            self.notify(
+            self._notify(
                 "log", "info",
                 f"Generating candidates for generation {self.current_generation}",
             )
@@ -765,7 +690,7 @@ class GEPAWorkflow(Workflow[Result]):
             self.algorithm_state = "terminate"
             return
 
-        self.notify("start_iteration", self.current_generation, self.current_parents, self.budget)
+        self._notify("start_iteration", self.current_generation, self.current_parents, self.budget)
         self._iteration_started = True
 
         # Official GEPA gives a merge one opportunity after a successful
@@ -791,59 +716,11 @@ class GEPAWorkflow(Workflow[Result]):
             )
 
         if self.current_newborns.is_empty() and self.budget <= 0:
-            self.notify("budget_exhausted", self.budget)
+            self._notify("budget_exhausted", self.budget)
 
         # Cycle back to evaluation
         self.algorithm_state = "evaluate"
         self._write_checkpoint()
-
-
-class GEPAStrategy(BaseStrategy[Result]):
-    """GEPA strategy that assembles and delegates to ``GEPAWorkflow``."""
-
-    def __init__(self, config: "GEPAConfig") -> None:
-        super().__init__(config)
-        object.__setattr__(
-            self,
-            "workflow",
-            GEPAWorkflow(config, notify=self._notify),
-        )
-
-    @property
-    def student(self):
-        """Expose the active student for the base lifecycle notification."""
-        return self.workflow.student
-
-    @property
-    def dataset_manager(self):
-        """Expose the active dataset manager for the base lifecycle notification."""
-        return self.workflow.dataset_manager
-
-    def _start_compilation(
-        self,
-        student: dspy.Module,
-        *,
-        trainset: list[dspy.Example],
-        devset: list[dspy.Example] | None = None,
-        teacher: dspy.Module | None = None,
-        **kwargs,
-    ) -> None:
-        """Delegate compilation setup to the configured workflow."""
-        self.workflow.start_compilation(
-            student,
-            trainset=trainset,
-            devset=devset,
-            teacher=teacher,
-            **kwargs,
-        )
-
-    def _next_step(self) -> bool:
-        """Delegate one execution step to the workflow."""
-        return self.workflow.next_step()
-
-    def _finish_compilation(self) -> Result:
-        """Delegate finalization to the workflow."""
-        return self.workflow.finish_compilation()
 
     def _compile_result(self, result: Result) -> dspy.Module:
         """Materialize GEPA's best candidate as the compiled module."""
@@ -856,8 +733,3 @@ class GEPAStrategy(BaseStrategy[Result]):
         raise OptimizationFailureError(
             "Optimization failed: no compiled module was produced"
         )
-
-    def _result_module_for_notification(self, result: Result) -> dspy.Module | None:
-        """Provide GEPA's resulting module to the generic lifecycle observer."""
-        candidate = getattr(result, "best_candidate", None)
-        return getattr(candidate, "module", None) or self.workflow.student

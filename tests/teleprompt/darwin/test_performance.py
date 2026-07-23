@@ -147,7 +147,7 @@ class TestPerformance:
             compiled_module = optimizer.compile(student, trainset=trainset)
             result = optimizer.get_last_result()
 
-            budget = optimizer.strategy.workflow.budget
+            budget = optimizer.strategy.budget
             # Parent rollout reuse and GEPA's proposal scheduling avoid the
             # duplicate parent evaluation that the original test counted.
             assert budget.consumed_calls <= 8
