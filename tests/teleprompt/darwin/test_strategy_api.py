@@ -7,6 +7,7 @@ from dspy.primitives.example import Example
 from dspy.primitives.module import Module
 from dspy.teleprompt.darwin import (
     Budget,
+    BaseStrategy,
     Candidate,
     Channel,
     Cohort,
@@ -100,6 +101,9 @@ def test_refactored_darwin_exposes_strategy_components():
 def test_strategy_is_a_delegating_workflow_adapter():
     strategy = GEPAStrategy(GEPAConfig(max_lm_calls=2))
     assert isinstance(strategy.workflow, GEPAWorkflow)
+    assert GEPAStrategy.start_compilation is BaseStrategy.start_compilation
+    assert GEPAStrategy.next_step is BaseStrategy.next_step
+    assert GEPAStrategy.finish_compilation is BaseStrategy.finish_compilation
 
     calls = []
     strategy.workflow.next_step = lambda: calls.append("next") or False
@@ -228,7 +232,7 @@ def test_gepa_result_uses_selector_final_candidate():
             return selector_candidate
 
     strategy.workflow._selector = SelectorWithFinalCandidate()
-    result = strategy.terminate_compilation()
+    result = strategy.finish_compilation()
 
     assert isinstance(result, Result)
     assert result.get_best_generalist() is selector_candidate
@@ -251,7 +255,7 @@ def test_gepa_result_retains_pareto_candidates_and_lineage():
             return child
 
     strategy.workflow._selector = SelectorWithPopulation()
-    result = strategy.terminate_compilation()
+    result = strategy.finish_compilation()
 
     assert result.candidates == [child, parent]
     assert result.parents[child] == [parent]

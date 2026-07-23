@@ -55,5 +55,5 @@ class Workflow(ABC, Generic[R]):
         raise NotImplementedError
 
     @abstractmethod
-    def terminate_compilation(self) -> R:
+    def finish_compilation(self) -> R:
         raise NotImplementedError

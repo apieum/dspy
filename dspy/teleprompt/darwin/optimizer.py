@@ -11,7 +11,7 @@ import dspy
 from dspy import Module
 
 from dspy.teleprompt.teleprompt import Teleprompter
-from .result import Failure, OptimizationFailureError, Result
+from .result import Result
 
 if TYPE_CHECKING:
     from .config import DarwinConfig
@@ -61,41 +61,16 @@ class Darwin(Teleprompter):
             trainset: Training examples
             devset: Optional test set for final evaluation
         """
-        try:
-            # ``valset`` is the Teleprompter API name. ``devset`` remains an
-            # accepted alias for existing Darwin callers.
-            if valset is not None and devset is not None:
-                raise ValueError("Pass either valset or devset, not both")
-            validation_set = valset if valset is not None else devset
-            self.strategy.start_compilation(
-                student=student,
-                trainset=trainset,
-                devset=validation_set,
-                teacher=teacher,
-                **kwargs,
-            )
-
-            if self.config.verbose:
-                pass
-
-            while self.strategy.next_step():
-                pass
-
-            result_obj = self.strategy.terminate_compilation()
-            self.latest_result = result_obj
-
-            if isinstance(result_obj, Failure):
-                raise OptimizationFailureError(f"Optimization failed: {result_obj.reason}")
-
-            best_candidate = result_obj.get_best_generalist()
-            if best_candidate and best_candidate.module:
-                best_candidate.module._compiled = True
-                return best_candidate.module
-
-            raise OptimizationFailureError("Optimization failed: no compiled module was produced")
-
-        except Exception as e:
-            raise OptimizationFailureError(str(e))
+        compiled = self.strategy.compile(
+            student,
+            trainset=trainset,
+            teacher=teacher,
+            valset=valset,
+            devset=devset,
+            **kwargs,
+        )
+        self.latest_result = self.strategy.get_last_result()
+        return compiled
 
     def get_last_result(self) -> Result | None:
         """Return the last result from the optimizer."""

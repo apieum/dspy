@@ -283,8 +283,6 @@ class GEPAWorkflow(Workflow[Result]):
                 f"{len(self.validation_data)} validation, {len(self.devset)} test",
             )
 
-        self.notify("start_compilation", self.student, self.dataset_manager)
-
         if self.config.resume_from:
             if self._restore_checkpoint(self.config.resume_from, student):
                 self._write_checkpoint()
@@ -307,7 +305,7 @@ class GEPAWorkflow(Workflow[Result]):
         action()
         return True
 
-    def terminate_compilation(self) -> Result:
+    def finish_compilation(self) -> Result:
         """Get the result of the optimization process."""
         final_candidate = self._select_final_candidate()
         self.best_candidate = final_candidate
@@ -351,10 +349,8 @@ class GEPAWorkflow(Workflow[Result]):
             result = Failure(
                 reason="Compilation failed, no candidate was found."
             )
-        result_module = self.best_candidate.module if self.best_candidate is not None else self.student
         if self.best_candidate is not None:
-            result_module._compiled = True
-        self.notify("finish_compilation", result_module)
+            self.best_candidate.module._compiled = True
         self._write_checkpoint(completed=True)
         self._restore_signal_handlers()
         return result
@@ -803,7 +799,7 @@ class GEPAWorkflow(Workflow[Result]):
 
 
 class GEPAStrategy(BaseStrategy[Result]):
-    """Strategy adapter that assembles and delegates to ``GEPAWorkflow``."""
+    """GEPA strategy that assembles and delegates to ``GEPAWorkflow``."""
 
     def __init__(self, config: "GEPAConfig") -> None:
         super().__init__(config)
@@ -813,7 +809,17 @@ class GEPAStrategy(BaseStrategy[Result]):
             GEPAWorkflow(config, notify=self._notify),
         )
 
-    def start_compilation(
+    @property
+    def student(self):
+        """Expose the active student for the base lifecycle notification."""
+        return self.workflow.student
+
+    @property
+    def dataset_manager(self):
+        """Expose the active dataset manager for the base lifecycle notification."""
+        return self.workflow.dataset_manager
+
+    def _start_compilation(
         self,
         student: dspy.Module,
         *,
@@ -831,10 +837,10 @@ class GEPAStrategy(BaseStrategy[Result]):
             **kwargs,
         )
 
-    def next_step(self) -> bool:
+    def _next_step(self) -> bool:
         """Delegate one execution step to the workflow."""
         return self.workflow.next_step()
 
-    def terminate_compilation(self) -> Result:
+    def _finish_compilation(self) -> Result:
         """Delegate finalization to the workflow."""
-        return self.workflow.terminate_compilation()
+        return self.workflow.finish_compilation()

@@ -26,6 +26,9 @@ class RecordingObserver:
     def budget_exhausted(self, budget):
         self.events.append("budget_exhausted")
 
+    def next_step(self, strategy, continuing):
+        self.events.append(("next_step", continuing))
+
 
 def test_compilation_observer_receives_candidate_lifecycle_events():
     observer = RecordingObserver()
@@ -40,4 +43,5 @@ def test_compilation_observer_receives_candidate_lifecycle_events():
 
     assert observer.events[0] == "start_compilation"
     assert any(event[0] == "candidate_evaluated" for event in observer.events if isinstance(event, tuple))
+    assert any(event[0] == "next_step" for event in observer.events if isinstance(event, tuple))
     assert observer.events[-1] == "finish_compilation"
