@@ -18,15 +18,15 @@ from typing import List, Optional, Dict, TYPE_CHECKING
 from collections import defaultdict
 
 import dspy
-from ...selection.selector import Selector
-from .candidate import GEPACandidate as Candidate
-from ...data.cohort import Survivors, Parents
-from ...budget import Budget
+from ....selection.selector import Selector
+from ..candidate import GEPACandidate as Candidate
+from ....data.cohort import Survivors, Parents
+from ....budget import Budget
 
 if TYPE_CHECKING:
-    from ...config import DarwinConfig
+    from ....config import DarwinConfig
 
-from ...evaluation import Metric
+from ....evaluation import Metric
 from .archive import DiversityArchive
 
 logger = logging.getLogger(__name__)

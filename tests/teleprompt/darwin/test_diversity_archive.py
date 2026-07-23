@@ -1,7 +1,7 @@
 import dspy
 
 from dspy.teleprompt.darwin.algorithms.gepa import GEPACandidate as Candidate
-from dspy.teleprompt.darwin.algorithms.gepa.archive import DiversityArchive
+from dspy.teleprompt.darwin.algorithms.gepa.selection.archive import DiversityArchive
 from dspy.teleprompt.utils import get_signature, set_signature
 
 
